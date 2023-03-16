@@ -1,12 +1,20 @@
-use crate::mongodb::connect_to_database;
-use blob_indexer::{calculate_versioned_hash, get_eip_4844_tx};
+use crate::db::{
+    blob_db_manager::{Blob, DBManager},
+    mongodb::connect,
+};
+use blob_indexer::{calculate_versioned_hash, get_eip_4844_tx, get_tx_versioned_hashes};
 use ethers::prelude::*;
 use futures::future::join_all;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
-use std::{env, error, str::FromStr, thread, time::Duration};
+use std::{
+    env, error,
+    str::FromStr,
+    thread,
+    time::{Duration, Instant},
+};
 
-mod mongodb;
+mod db;
 
 type StdErr = Box<dyn error::Error>;
 
@@ -38,7 +46,7 @@ struct BeaconAPIResponse {
 
 #[derive(Serialize, Deserialize, Debug)]
 struct SidecarData {
-    blobs: Vec<String>,
+    blobs: Vec<Bytes>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -54,10 +62,9 @@ async fn main() -> Result<(), StdErr> {
     let beacon_node_rpc = env::var("BEACON_NODE_RPC")?;
 
     let provider = Provider::<Http>::try_from(execution_node_rpc)?;
-    let db = connect_to_database().await?;
+    let mut db_manager = connect().await?;
 
-    // let mut current_slot = 0;
-    let mut current_slot = 1222;
+    let mut current_slot = 0;
 
     loop {
         let latest_beacon_block =
@@ -68,6 +75,7 @@ async fn main() -> Result<(), StdErr> {
         let head_slot: u32 = latest_beacon_block.data.message.slot.parse()?;
 
         while current_slot < head_slot {
+            let start = Instant::now();
             current_slot = current_slot + 1;
 
             println!("Reading slot {current_slot} (head slot {head_slot})");
@@ -87,7 +95,6 @@ async fn main() -> Result<(), StdErr> {
 
             let beacon_block_response = beacon_block_response.json::<BeaconAPIResponse>().await?;
             let beacon_block = beacon_block_response.data;
-            // println!("{:?}", beacon_block);
             let execution_payload = beacon_block.message.body.execution_payload;
             let blob_kzg_commitments = beacon_block.message.body.blob_kzg_commitments;
 
@@ -110,15 +117,14 @@ async fn main() -> Result<(), StdErr> {
             let execution_block_txs = join_all(
                 execution_block
                     .transactions
-                    .into_iter()
+                    .iter()
                     .map(|tx_hash| get_eip_4844_tx(&provider, tx_hash)),
             )
-            .await;
+            .await
+            .into_iter()
+            .map(|tx| tx.unwrap())
+            .collect::<Vec<Transaction>>();
 
-            let execution_block_txs = execution_block_txs
-                .into_iter()
-                .map(|tx| tx.unwrap())
-                .collect::<Vec<Transaction>>();
             let blob_txs = execution_block_txs
                 .into_iter()
                 .filter(|tx| tx.other.contains_key("blobVersionedHashes"))
@@ -130,30 +136,69 @@ async fn main() -> Result<(), StdErr> {
             }
 
             let beacon_sidecar_response = reqwest::get(format!(
-                "{}/eth/v1/blobs/sidecar/{}",
+                "{}/eth/v1/beacon/blobs_sidecars/{}",
                 beacon_node_rpc, current_slot
             ))
             .await?;
 
-            if beacon_sidecar_response.status() == StatusCode::OK {
+            if beacon_sidecar_response.status() != StatusCode::OK {
                 println!("Skipping slot as an error occurred when fetching its sidecar");
                 continue;
             }
-
-            println!("PROCESSING SIDECAR");
             let beacon_sidecar_response = beacon_sidecar_response
                 .json::<BeaconSidecarResponse>()
                 .await?;
             let sidecar_blobs = beacon_sidecar_response.data.blobs;
-            let mut index: usize = 0;
 
-            let res = sidecar_blobs.into_iter().map(|blob| {
-                let commitment = &blob_kzg_commitments[index];
+            if sidecar_blobs.len() == 0 {
+                println!("Skipping slot as there is no sidecar blobs");
+                continue;
+            }
+
+            db_manager.start_transaction().await?;
+
+            db_manager
+                .insert_block(&execution_block, &blob_txs, current_slot, None)
+                .await?;
+
+            for (i, tx) in blob_txs.iter().enumerate() {
+                db_manager.insert_tx(tx, i as u32, None).await?;
+            }
+
+            for (i, blob) in sidecar_blobs.iter().enumerate() {
+                let commitment = &blob_kzg_commitments[i];
+
                 let versioned_hash = calculate_versioned_hash(commitment);
 
-                index = index + 1;
-            });
-            println!("Execution block {execution_block_hash} read");
+                let blob_tx = blob_txs
+                    .iter()
+                    .find(|tx| {
+                        let versioned_hashes = get_tx_versioned_hashes(tx);
+                        versioned_hashes.contains(&versioned_hash)
+                    })
+                    .unwrap()
+                    .clone();
+
+                // TODO: use flyweight pattern to avoid cloning
+                let blob = &Blob {
+                    commitment: commitment.clone(),
+                    data: blob.clone(),
+                    index: i as u32,
+                    versioned_hash,
+                };
+
+                db_manager.insert_blob(blob, blob_tx.hash, None).await?;
+            }
+
+            db_manager.commit_transaction().await?;
+
+            let duration = start.elapsed();
+
+            println!(
+                "Blobs from slot {} indexed (elapsed time: {:?})",
+                current_slot,
+                duration.as_secs()
+            );
         }
 
         thread::sleep(Duration::from_secs(1));
