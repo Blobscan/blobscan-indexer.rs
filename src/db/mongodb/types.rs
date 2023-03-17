@@ -1,6 +1,8 @@
 use ethers::types::{Address, H256, U256};
 use serde::{Deserialize, Serialize};
 
+use crate::db::types::IndexerMetadata;
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct BlockDocument {
     pub _id: String,
@@ -33,4 +35,18 @@ pub struct BlobDocument {
     pub commitment: String, // TODO: change to H384
     pub index: u32,
     pub data: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct IndexerMetadataDocument {
+    pub _id: String,
+    pub last_slot: u32,
+}
+
+impl From<IndexerMetadataDocument> for IndexerMetadata {
+    fn from(metadata_document: IndexerMetadataDocument) -> Self {
+        Self {
+            last_slot: metadata_document.last_slot,
+        }
+    }
 }

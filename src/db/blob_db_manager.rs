@@ -1,19 +1,18 @@
 use async_trait::async_trait;
-use ethers::types::{Block, Bytes, Transaction, H256};
+use ethers::types::{Block, Transaction, H256};
 use std::error::Error;
 
-pub struct Blob {
-    pub data: Bytes,
-    pub commitment: String,
-    pub versioned_hash: H256,
-    pub index: u32,
-}
+use crate::db::types::Blob;
 
+use super::types::IndexerMetadata;
 #[async_trait]
 pub trait DBManager {
     type Options;
 
-    async fn start_transaction(&mut self) -> Result<(), Box<dyn Error>>;
+    async fn commit_transaction(
+        &mut self,
+        options: Option<Self::Options>,
+    ) -> Result<(), Box<dyn Error>>;
 
     async fn insert_block(
         &mut self,
@@ -37,5 +36,16 @@ pub trait DBManager {
         options: Option<Self::Options>,
     ) -> Result<(), Box<dyn Error>>;
 
-    async fn commit_transaction(&mut self) -> Result<(), Box<dyn Error>>;
+    async fn start_transaction(&mut self) -> Result<(), Box<dyn Error>>;
+
+    async fn update_last_slot(
+        &mut self,
+        slot: u32,
+        options: Option<Self::Options>,
+    ) -> Result<(), Box<dyn Error>>;
+
+    async fn read_metadata(
+        &mut self,
+        options: Option<Self::Options>,
+    ) -> Result<Option<IndexerMetadata>, Box<dyn Error>>;
 }

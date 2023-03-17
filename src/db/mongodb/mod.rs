@@ -2,15 +2,18 @@ use async_trait::async_trait;
 use blob_indexer::get_tx_versioned_hashes;
 use ethers::types::{Block, Transaction, TxHash, H256};
 use mongodb::{
-    error::UNKNOWN_TRANSACTION_COMMIT_RESULT, options::ClientOptions, Client, ClientSession,
-    Database,
+    bson::doc,
+    error::UNKNOWN_TRANSACTION_COMMIT_RESULT,
+    options::{ClientOptions, UpdateOptions},
+    Client, ClientSession, Database,
 };
 use std::error::Error;
 
-use self::types::{BlobDocument, BlockDocument, TransactionDocument};
+use self::types::{BlobDocument, BlockDocument, IndexerMetadataDocument, TransactionDocument};
 
 use super::{
-    blob_db_manager::{Blob, DBManager},
+    blob_db_manager::DBManager,
+    types::{Blob, IndexerMetadata},
     utils::{build_blob_id, build_block_id, build_tx_id},
 };
 
@@ -21,7 +24,11 @@ pub struct MongoDBManager {
     pub db: Database,
 }
 
-pub struct MongoDBManagerOptions {}
+pub struct MongoDBManagerOptions {
+    pub use_session: bool,
+}
+
+const INDEXER_METADATA_ID: &str = "indexer_metadata";
 
 pub async fn connect() -> Result<MongoDBManager, Box<dyn Error>> {
     let connection_url = std::env::var("MONGODB_URI").unwrap();
@@ -42,13 +49,10 @@ pub async fn connect() -> Result<MongoDBManager, Box<dyn Error>> {
 impl DBManager for MongoDBManager {
     type Options = MongoDBManagerOptions;
 
-    async fn start_transaction(&mut self) -> Result<(), Box<dyn Error>> {
-        self.session.start_transaction(None).await?;
-
-        Ok(())
-    }
-
-    async fn commit_transaction(&mut self) -> Result<(), Box<dyn Error>> {
+    async fn commit_transaction(
+        &mut self,
+        _options: Option<Self::Options>,
+    ) -> Result<(), Box<dyn Error>> {
         // An "UnknownTransactionCommitResult" label indicates that it is unknown whether the
         // commit has satisfied the write concern associated with the transaction. If an error
         // with this label is returned, it is safe to retry the commit until the write concern is
@@ -150,5 +154,56 @@ impl DBManager for MongoDBManager {
             .await?;
 
         Ok(())
+    }
+
+    async fn start_transaction(&mut self) -> Result<(), Box<dyn Error>> {
+        self.session.start_transaction(None).await?;
+
+        Ok(())
+    }
+
+    async fn update_last_slot(
+        &mut self,
+        _slot: u32,
+        options: Option<Self::Options>,
+    ) -> Result<(), Box<dyn Error>> {
+        let use_session = match options {
+            Some(options) => options.use_session,
+            None => true,
+        };
+        let indexer_metadata_collection = self
+            .db
+            .collection::<IndexerMetadataDocument>("indexer_metadata");
+        let query = doc! { "_id": INDEXER_METADATA_ID};
+        let update = doc! { "$set": { "last_slot": _slot }};
+        let mut options = UpdateOptions::default();
+        options.upsert = Some(true);
+
+        if use_session {
+            indexer_metadata_collection
+                .update_one_with_session(query, update, options, &mut self.session)
+                .await?;
+        } else {
+            indexer_metadata_collection
+                .update_one(query, update, options)
+                .await?;
+        }
+
+        Ok(())
+    }
+
+    async fn read_metadata(
+        &mut self,
+        _options: Option<Self::Options>,
+    ) -> Result<Option<IndexerMetadata>, Box<dyn Error>> {
+        let query = doc! { "_id": INDEXER_METADATA_ID};
+        let indexer_metadata_collection = self
+            .db
+            .collection::<IndexerMetadataDocument>("indexer_metadata");
+
+        match indexer_metadata_collection.find_one(query, None).await? {
+            Some(indexer_metadata) => Ok(Some(IndexerMetadata::from(indexer_metadata))),
+            None => Ok(None),
+        }
     }
 }
