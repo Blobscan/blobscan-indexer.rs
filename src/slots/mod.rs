@@ -3,46 +3,41 @@ use std::{error::Error, str::FromStr, time::Instant};
 use blob_indexer::{calculate_versioned_hash, get_eip_4844_tx, get_tx_versioned_hashes};
 use ethers::prelude::*;
 use futures::future::join_all;
-use reqwest::StatusCode;
 
-use self::types::{BeaconAPIResponse, BeaconSidecarResponse};
-use crate::db::{
-    blob_db_manager::DBManager,
-    mongodb::{MongoDBManager, MongoDBManagerOptions},
-    types::Blob,
+use crate::{
+    beacon_chain::BeaconChainAPI,
+    db::{
+        blob_db_manager::DBManager,
+        mongodb::{MongoDBManager, MongoDBManagerOptions},
+        types::Blob,
+    },
 };
 
 type StdErr = Box<dyn Error>;
 
-pub mod types;
-
 pub struct Config {
     pub db_manager: MongoDBManager,
-    pub beacon_node_rpc: String,
+    pub beacon_api: BeaconChainAPI,
     pub provider: Provider<Http>,
 }
 
 async fn process_slot(slot: u32, config: &mut Config) -> Result<(), StdErr> {
     let provider = &config.provider;
     let db_manager = &mut config.db_manager;
-    let beacon_node_rpc = &config.beacon_node_rpc;
+    let beacon_api = &config.beacon_api;
 
     let start = Instant::now();
-
     println!("Reading slot {slot}");
-    let beacon_block_response =
-        reqwest::get(format!("{}/eth/v2/beacon/blocks/{}", beacon_node_rpc, slot)).await?;
+    let beacon_block = match beacon_api.get_block(Some(slot)).await {
+        Ok(block) => block,
+        Err(err) => {
+            println!("Skipping slot as there is no beacon block");
 
-    // TODO: handle rest of the response cases. For now, we just skip the slot if there is no block
-    if beacon_block_response.status() != StatusCode::OK {
-        println!("Skipping slot as there is no beacon block");
+            return Ok(());
+        }
+    };
 
-        return Ok(());
-    }
-
-    let beacon_block_response = beacon_block_response.json::<BeaconAPIResponse>().await?;
-    let beacon_block = beacon_block_response.data;
-    let execution_payload = match beacon_block.message.body.execution_payload {
+    let execution_payload = match beacon_block.body.execution_payload {
         Some(payload) => payload,
         None => {
             println!("Skipping slot as there is no execution payload");
@@ -50,7 +45,8 @@ async fn process_slot(slot: u32, config: &mut Config) -> Result<(), StdErr> {
             return Ok(());
         }
     };
-    let blob_kzg_commitments = match beacon_block.message.body.blob_kzg_commitments {
+
+    let blob_kzg_commitments = match beacon_block.body.blob_kzg_commitments {
         Some(commitments) => commitments,
         None => {
             println!("Skipping slot as there is no blob commitment");
@@ -92,24 +88,16 @@ async fn process_slot(slot: u32, config: &mut Config) -> Result<(), StdErr> {
         return Ok(());
     }
 
-    let beacon_sidecar_response = reqwest::get(format!(
-        "{}/eth/v1/beacon/blobs_sidecars/{}",
-        beacon_node_rpc, slot
-    ))
-    .await?;
+    let blobs = match beacon_api.get_blobs_sidecar(slot).await {
+        Ok(blobs_sidecar) => blobs_sidecar.blobs,
+        Err(err) => {
+            println!("Skipping slot as an error occurred when fetching its sidecar");
 
-    if beacon_sidecar_response.status() != StatusCode::OK {
-        println!("Skipping slot as an error occurred when fetching its sidecar");
+            return Ok(());
+        }
+    };
 
-        return Ok(());
-    }
-
-    let beacon_sidecar_response = beacon_sidecar_response
-        .json::<BeaconSidecarResponse>()
-        .await?;
-    let sidecar_blobs = beacon_sidecar_response.data.blobs;
-
-    if sidecar_blobs.len() == 0 {
+    if blobs.len() == 0 {
         println!("Skipping slot as there is no sidecar blobs");
 
         return Ok(());
@@ -125,7 +113,7 @@ async fn process_slot(slot: u32, config: &mut Config) -> Result<(), StdErr> {
         db_manager.insert_tx(tx, i as u32, None).await?;
     }
 
-    for (i, blob) in sidecar_blobs.iter().enumerate() {
+    for (i, blob) in blobs.iter().enumerate() {
         let commitment = &blob_kzg_commitments[i];
 
         let versioned_hash = calculate_versioned_hash(commitment);

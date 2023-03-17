@@ -5,11 +5,13 @@ use std::{
     time::Duration,
 };
 
+use beacon_chain::BeaconChainAPI;
 use ethers::prelude::*;
-use slots::{process_slots, types::BeaconAPIResponse, Config as SlotConfig};
+use slots::{process_slots, Config as SlotConfig};
 
 use crate::db::{blob_db_manager::DBManager, mongodb::connect};
 
+mod beacon_chain;
 mod db;
 mod slots;
 
@@ -22,13 +24,14 @@ async fn main() -> Result<(), StdErr> {
     let execution_node_rpc = env::var("EXECUTION_NODE_RPC")?;
     let beacon_node_rpc = env::var("BEACON_NODE_RPC")?;
 
-    let provider = Provider::<Http>::try_from(execution_node_rpc)?;
+    let beacon_api = BeaconChainAPI::new(beacon_node_rpc);
     let db_manager = connect().await?;
+    let provider = Provider::<Http>::try_from(execution_node_rpc)?;
 
     let mut config = SlotConfig {
-        provider,
+        beacon_api,
         db_manager,
-        beacon_node_rpc,
+        provider,
     };
 
     let mut current_slot = match config.db_manager.read_metadata(None).await? {
@@ -37,19 +40,14 @@ async fn main() -> Result<(), StdErr> {
     };
 
     loop {
-        let latest_beacon_block = reqwest::get(format!(
-            "{}/eth/v2/beacon/blocks/head",
-            config.beacon_node_rpc
-        ))
-        .await?
-        .json::<BeaconAPIResponse>()
-        .await?;
-        let head_slot: u32 = latest_beacon_block.data.message.slot.parse()?;
+        let latest_beacon_block = config.beacon_api.get_block(None).await?;
 
-        if current_slot < head_slot {
-            process_slots(current_slot, head_slot, &mut config).await?;
+        let latest_slot: u32 = latest_beacon_block.slot.parse()?;
 
-            current_slot = head_slot;
+        if current_slot < latest_slot {
+            process_slots(current_slot, latest_slot, &mut config).await?;
+
+            current_slot = latest_slot;
         }
 
         thread::sleep(Duration::from_secs(1));
