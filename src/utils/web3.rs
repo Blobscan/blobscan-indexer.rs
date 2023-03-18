@@ -51,12 +51,3 @@ pub fn get_tx_versioned_hashes(tx: &Transaction) -> Vec<H256> {
         .map(|x| H256::from_str(x.as_str().unwrap()).unwrap())
         .collect::<Vec<H256>>()
 }
-
-pub fn get_blob_tx<'a>(txs: &'a Vec<Transaction>, versioned_hash: &H256) -> &'a Transaction {
-    txs.iter()
-        .find(|tx| {
-            let versioned_hashes = get_tx_versioned_hashes(tx);
-            versioned_hashes.contains(versioned_hash)
-        })
-        .unwrap()
-}

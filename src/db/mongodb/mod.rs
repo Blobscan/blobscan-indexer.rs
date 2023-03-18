@@ -1,5 +1,4 @@
 use async_trait::async_trait;
-use blob_indexer::get_tx_versioned_hashes;
 use ethers::types::{Block, Transaction, TxHash, H256};
 use mongodb::{
     bson::doc,
@@ -8,6 +7,8 @@ use mongodb::{
     Client, ClientSession, Database,
 };
 use std::error::Error;
+
+use crate::utils::web3::get_tx_versioned_hashes;
 
 use self::types::{BlobDocument, BlockDocument, IndexerMetadataDocument, TransactionDocument};
 

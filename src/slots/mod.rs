@@ -1,6 +1,5 @@
 use std::{error, panic, str::FromStr, time::Instant};
 
-use blob_indexer::{calculate_versioned_hash, get_eip_4844_tx, get_tx_versioned_hashes};
 use ethers::prelude::*;
 use futures::future::join_all;
 use log::{error, info};
@@ -12,7 +11,10 @@ use crate::{
         mongodb::{MongoDBManager, MongoDBManagerOptions},
         types::Blob,
     },
-    utils::logs::INDEXER_LOGGER,
+    utils::{
+        logs::INDEXER_LOGGER,
+        web3::{calculate_versioned_hash, get_eip_4844_tx, get_tx_versioned_hashes},
+    },
 };
 
 type StdErr = Box<dyn error::Error>;
