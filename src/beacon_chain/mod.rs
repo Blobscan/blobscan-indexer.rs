@@ -15,7 +15,10 @@ impl BeaconChainAPI {
         Self { rpc_url }
     }
 
-    pub async fn get_block(&self, slot: Option<u32>) -> Result<Block, Box<dyn error::Error>> {
+    pub async fn get_block(
+        &self,
+        slot: Option<u32>,
+    ) -> Result<Option<Block>, Box<dyn error::Error>> {
         let slot = match slot {
             Some(slot) => slot.to_string(),
             None => String::from("head"),
@@ -23,33 +26,39 @@ impl BeaconChainAPI {
         let block_response =
             reqwest::get(format!("{}/eth/v2/beacon/blocks/{}", self.rpc_url, slot)).await?;
 
-        // TODO: handle rest of the response cases. For now, we just skip the slot if there is no block
         if block_response.status() != StatusCode::OK {
-            return Err(format!("No block found on slot {}", slot).into());
+            if block_response.status() == StatusCode::NOT_FOUND {
+                return Ok(None);
+            }
+
+            return Err("Couldn't fetch beacon block".into());
         }
 
         let block_response = block_response.json::<BlockResponse>().await?;
 
-        Ok(block_response.data.message)
+        Ok(Some(block_response.data.message))
     }
 
     pub async fn get_blobs_sidecar(
         &self,
         slot: u32,
-    ) -> Result<BlobsSidecar, Box<dyn error::Error>> {
+    ) -> Result<Option<BlobsSidecar>, Box<dyn error::Error>> {
         let sidecar_response = reqwest::get(format!(
             "{}/eth/v1/beacon/blobs_sidecars/{}",
             self.rpc_url, slot
         ))
         .await?;
 
-        // TODO: handle rest of the response cases. For now, we just skip the slot if there is no sidecar
         if sidecar_response.status() != StatusCode::OK {
-            return Err(format!("No sidecar found on slot {}", slot).into());
+            if sidecar_response.status() == StatusCode::NOT_FOUND {
+                return Ok(None);
+            }
+
+            return Err("Couldn't fetch blobs sidecar".into());
         }
 
         let sidecar_response = sidecar_response.json::<BlobsSidecarResponse>().await?;
 
-        Ok(sidecar_response.data)
+        Ok(Some(sidecar_response.data))
     }
 }

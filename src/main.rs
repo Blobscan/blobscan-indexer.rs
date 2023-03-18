@@ -14,6 +14,7 @@ use crate::db::{blob_db_manager::DBManager, mongodb::connect};
 mod beacon_chain;
 mod db;
 mod slots;
+mod utils;
 
 type StdErr = Box<dyn error::Error>;
 
@@ -23,6 +24,8 @@ async fn main() -> Result<(), StdErr> {
 
     let execution_node_rpc = env::var("EXECUTION_NODE_RPC")?;
     let beacon_node_rpc = env::var("BEACON_NODE_RPC")?;
+
+    log4rs::init_file("log4rs.yml", Default::default()).unwrap();
 
     let beacon_api = BeaconChainAPI::new(beacon_node_rpc);
     let db_manager = connect().await?;
@@ -40,15 +43,18 @@ async fn main() -> Result<(), StdErr> {
     };
 
     loop {
-        let latest_beacon_block = config.beacon_api.get_block(None).await?;
+        match config.beacon_api.get_block(None).await? {
+            Some(latest_beacon_block) => {
+                let latest_slot: u32 = latest_beacon_block.slot.parse()?;
 
-        let latest_slot: u32 = latest_beacon_block.slot.parse()?;
+                if current_slot < latest_slot {
+                    process_slots(current_slot, latest_slot, &mut config).await;
 
-        if current_slot < latest_slot {
-            process_slots(current_slot, latest_slot, &mut config).await?;
-
-            current_slot = latest_slot;
-        }
+                    current_slot = latest_slot;
+                }
+            }
+            _ => (),
+        };
 
         thread::sleep(Duration::from_secs(1));
     }

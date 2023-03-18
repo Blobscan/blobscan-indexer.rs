@@ -11,6 +11,8 @@ dotenv = "0.15.0"
 ethers = "1.0.2"
 futures = "0.3.25"
 hex = "0.4.3"
+log = "0.4.17"
+log4rs = { version = "1.2.0", features = ["gzip"] }
 mongodb = "2.3.1"
 reqwest = { version = "0.11.13", features = ["json"] }
 serde = "1.0.150"
