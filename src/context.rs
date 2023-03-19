@@ -7,18 +7,6 @@ use crate::{
     db::{blob_db_manager::DBManager, mongodb::MongoDBManager},
 };
 
-fn default_execution_node_rpc() -> String {
-    "http://localhost:8545".to_string()
-}
-
-fn default_beacon_node_rpc() -> String {
-    "http://localhost:3500".to_string()
-}
-
-fn default_logger() -> String {
-    "default".to_string()
-}
-
 #[derive(Deserialize, Debug)]
 struct Environment {
     db_connection_uri: String,
@@ -36,6 +24,18 @@ pub struct Context {
     pub db_manager: MongoDBManager,
     pub provider: Provider<Http>,
     pub logger: String,
+}
+
+fn default_execution_node_rpc() -> String {
+    "http://localhost:8545".to_string()
+}
+
+fn default_beacon_node_rpc() -> String {
+    "http://localhost:3500".to_string()
+}
+
+fn default_logger() -> String {
+    "default".to_string()
 }
 
 pub async fn create_context() -> Result<Context, Box<dyn error::Error>> {
