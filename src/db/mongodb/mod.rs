@@ -31,24 +31,24 @@ pub struct MongoDBManagerOptions {
 
 const INDEXER_METADATA_ID: &str = "indexer_metadata";
 
-pub async fn connect() -> Result<MongoDBManager, Box<dyn Error>> {
-    let connection_url = std::env::var("MONGODB_URI").unwrap();
-    let database_name = std::env::var("MONGODB_DB").unwrap();
-
-    let mut client_options = ClientOptions::parse(connection_url).await?;
-
-    client_options.app_name = Some("Blobscan".to_string());
-
-    let client = Client::with_options(client_options)?;
-    let session = client.start_session(None).await?;
-    let db = client.database(&database_name);
-
-    Ok(MongoDBManager { session, db })
-}
-
 #[async_trait]
 impl DBManager for MongoDBManager {
     type Options = MongoDBManagerOptions;
+
+    async fn new(connection_uri: &String, db_name: &String) -> Result<Self, Box<dyn Error>>
+    where
+        Self: Sized,
+    {
+        let mut client_options = ClientOptions::parse(connection_uri).await?;
+
+        client_options.app_name = Some("Blobscan".to_string());
+
+        let client = Client::with_options(client_options)?;
+        let session = client.start_session(None).await?;
+        let db = client.database(db_name);
+
+        Ok(MongoDBManager { session, db })
+    }
 
     async fn commit_transaction(
         &mut self,
@@ -62,7 +62,6 @@ impl DBManager for MongoDBManager {
             let result = self.session.commit_transaction().await;
 
             if let Err(ref error) = result {
-                println!("Commit result: {:?}", error);
                 if error.contains_label(UNKNOWN_TRANSACTION_COMMIT_RESULT) {
                     continue;
                 }

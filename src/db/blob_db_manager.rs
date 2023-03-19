@@ -9,6 +9,10 @@ use super::types::IndexerMetadata;
 pub trait DBManager {
     type Options;
 
+    async fn new(connection_uri: &String, db_name: &String) -> Result<Self, Box<dyn Error>>
+    where
+        Self: Sized;
+
     async fn commit_transaction(
         &mut self,
         options: Option<Self::Options>,

@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 async-trait = "0.1.66"
 dotenv = "0.15.0"
+envy = "0.4.2"
 ethers = "1.0.2"
 futures = "0.3.25"
 hex = "0.4.3"
