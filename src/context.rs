@@ -16,12 +16,12 @@ fn default_beacon_node_rpc() -> String {
 }
 
 fn default_logger() -> String {
-    "indexer".to_string()
+    "default".to_string()
 }
 
 #[derive(Deserialize, Debug)]
 struct Environment {
-    connection_uri: String,
+    db_connection_uri: String,
     db_name: String,
     #[serde(default = "default_execution_node_rpc")]
     execution_node_rpc: String,
@@ -41,15 +41,20 @@ pub struct Context {
 pub async fn create_context() -> Result<Context, Box<dyn error::Error>> {
     let Environment {
         beacon_node_rpc,
-        connection_uri,
+        db_connection_uri,
         db_name,
         execution_node_rpc,
         logger,
-    } = envy::from_env::<Environment>()?;
+    } = match envy::from_env::<Environment>() {
+        Ok(env) => env,
+        Err(e) => {
+            return Err(format!("Couldn't read environment variables: {}", e).into());
+        }
+    };
 
     Ok(Context {
         beacon_api: BeaconChainAPI::new(beacon_node_rpc),
-        db_manager: MongoDBManager::new(&connection_uri, &db_name).await?,
+        db_manager: MongoDBManager::new(&db_connection_uri, &db_name).await?,
         provider: Provider::<Http>::try_from(execution_node_rpc)?,
         logger,
     })
