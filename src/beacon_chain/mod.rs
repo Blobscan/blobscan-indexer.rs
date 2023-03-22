@@ -1,4 +1,4 @@
-use reqwest::StatusCode;
+use reqwest::{Client, StatusCode};
 
 use crate::types::StdError;
 
@@ -6,14 +6,25 @@ use self::types::{BlobsSidecar, BlobsSidecarResponse, BlockMessage as Block, Blo
 
 mod types;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BeaconChainAPI {
-    rpc_url: String,
+    base_url: String,
+    client: reqwest::Client,
 }
 
 impl BeaconChainAPI {
-    pub fn new(rpc_url: String) -> Self {
-        Self { rpc_url }
+    pub fn new(base_url: String) -> Self {
+        Self {
+            base_url,
+            client: Client::new(),
+        }
+    }
+
+    pub fn try_from(base_url: String) -> Result<Self, StdError> {
+        Ok(Self {
+            base_url,
+            client: Client::builder().build()?,
+        })
     }
 
     pub async fn get_block(&self, slot: Option<u32>) -> Result<Option<Block>, StdError> {
@@ -21,39 +32,34 @@ impl BeaconChainAPI {
             Some(slot) => slot.to_string(),
             None => String::from("head"),
         };
-        let block_response =
-            reqwest::get(format!("{}/eth/v2/beacon/blocks/{}", self.rpc_url, slot)).await?;
+        let url = self.build_url(&format!("/eth/v1/beacon/blocks/{}", slot));
 
-        if block_response.status() != StatusCode::OK {
-            if block_response.status() == StatusCode::NOT_FOUND {
-                return Ok(None);
-            }
+        let block_response = self.client.get(url).send().await?;
 
-            return Err("Couldn't fetch beacon block".into());
+        match block_response.status() {
+            StatusCode::OK => Ok(Some(
+                block_response.json::<BlockResponse>().await?.data.message,
+            )),
+            StatusCode::NOT_FOUND => Ok(None),
+            _ => Err("Couldn't fetch beacon block".into()),
         }
-
-        let block_response = block_response.json::<BlockResponse>().await?;
-
-        Ok(Some(block_response.data.message))
     }
 
     pub async fn get_blobs_sidecar(&self, slot: u32) -> Result<Option<BlobsSidecar>, StdError> {
-        let sidecar_response = reqwest::get(format!(
-            "{}/eth/v1/beacon/blobs_sidecars/{}",
-            self.rpc_url, slot
-        ))
-        .await?;
+        let url = self.build_url(&format!("/eth/v1/beacon/blobs_sidecars/{}", slot));
 
-        if sidecar_response.status() != StatusCode::OK {
-            if sidecar_response.status() == StatusCode::NOT_FOUND {
-                return Ok(None);
-            }
+        let sidecar_response = self.client.get(url).send().await?;
 
-            return Err("Couldn't fetch blobs sidecar".into());
+        match sidecar_response.status() {
+            StatusCode::OK => Ok(Some(
+                sidecar_response.json::<BlobsSidecarResponse>().await?.data,
+            )),
+            StatusCode::NOT_FOUND => Ok(None),
+            _ => Err("Couldn't fetch blobs sidecar".into()),
         }
+    }
 
-        let sidecar_response = sidecar_response.json::<BlobsSidecarResponse>().await?;
-
-        Ok(Some(sidecar_response.data))
+    fn build_url(&self, path: &String) -> String {
+        format!("{}/{}", self.base_url, path)
     }
 }

@@ -1,4 +1,4 @@
-use std::{panic, str::FromStr, time::Instant};
+use std::{panic, time::Instant};
 
 use ethers::prelude::*;
 use futures::future::join_all;
@@ -75,7 +75,6 @@ async fn process_slot(slot: u32, context: &mut Context) -> Result<(), StdError> 
         }
     };
     let execution_block_hash = execution_payload.block_hash;
-    let execution_block_hash = H256::from_str(execution_block_hash.as_str())?;
 
     let execution_block = match provider.get_block(execution_block_hash).await? {
         Some(block) => block,

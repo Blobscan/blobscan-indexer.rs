@@ -25,7 +25,7 @@ pub async fn create_context() -> Result<Context, StdError> {
     } = get_env_vars();
 
     Ok(Context {
-        beacon_api: BeaconChainAPI::new(beacon_node_rpc),
+        beacon_api: BeaconChainAPI::try_from(beacon_node_rpc)?,
         db_manager: MongoDBManager::new(&db_connection_uri, &db_name).await?,
         provider: Provider::<Http>::try_from(execution_node_rpc)?,
     })

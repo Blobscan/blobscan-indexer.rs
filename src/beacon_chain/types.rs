@@ -1,9 +1,9 @@
-use ethers::types::Bytes;
+use ethers::types::{Bytes, H256};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ExecutionPayload {
-    pub block_hash: String,
+    pub block_hash: H256,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
