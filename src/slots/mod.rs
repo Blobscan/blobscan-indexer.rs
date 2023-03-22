@@ -1,16 +1,17 @@
-use std::{error, panic, str::FromStr, time::Instant};
+use std::{panic, str::FromStr, time::Instant};
 
 use ethers::prelude::*;
 use futures::future::join_all;
 use log::{error, info};
 
 use crate::{
-    context::Context,
     db::{blob_db_manager::DBManager, mongodb::MongoDBManagerOptions, types::Blob},
-    utils::web3::{calculate_versioned_hash, get_eip_4844_tx, get_tx_versioned_hashes},
+    types::StdError,
+    utils::{
+        context::Context,
+        web3::{calculate_versioned_hash, get_eip_4844_tx, get_tx_versioned_hashes},
+    },
 };
-
-type StdErr = Box<dyn error::Error>;
 
 pub async fn process_slots(start_slot: u32, end_slot: u32, context: &mut Context) {
     let mut current_slot = start_slot;
@@ -22,10 +23,7 @@ pub async fn process_slots(start_slot: u32, end_slot: u32, context: &mut Context
         if let Err(e) = result {
             save_slot(current_slot - 1, context).await;
 
-            error!(
-                target: context.logger.as_str(),
-                "[Slot {}] Couldn't process slot: {}", current_slot, e
-            );
+            error!("[Slot {}] Couldn't process slot: {}", current_slot, e);
 
             panic!();
         };
@@ -36,22 +34,18 @@ pub async fn process_slots(start_slot: u32, end_slot: u32, context: &mut Context
     save_slot(current_slot, context).await
 }
 
-async fn process_slot(slot: u32, context: &mut Context) -> Result<(), StdErr> {
+async fn process_slot(slot: u32, context: &mut Context) -> Result<(), StdError> {
     let Context {
         beacon_api,
         db_manager,
         provider,
-        logger,
     } = context;
 
     let start = Instant::now();
     let beacon_block = match beacon_api.get_block(Some(slot)).await? {
         Some(block) => block,
         None => {
-            info!(
-                target: logger,
-                "[Slot {}] Skipping as there is no beacon block", slot
-            );
+            info!("[Slot {}] Skipping as there is no beacon block", slot);
 
             return Ok(());
         }
@@ -61,8 +55,8 @@ async fn process_slot(slot: u32, context: &mut Context) -> Result<(), StdErr> {
         Some(payload) => payload,
         None => {
             info!(
-                target: logger,
-                "[Slot {}] Skipping as beacon block doesn't contain execution payload", slot
+                "[Slot {}] Skipping as beacon block doesn't contain execution payload",
+                slot
             );
 
             return Ok(());
@@ -73,8 +67,8 @@ async fn process_slot(slot: u32, context: &mut Context) -> Result<(), StdErr> {
         Some(commitments) => commitments,
         None => {
             info!(
-                target: logger,
-                "[Slot {}] Skipping as beacon block doesn't contain blob kzg commitments", slot
+                "[Slot {}] Skipping as beacon block doesn't contain blob kzg commitments",
+                slot
             );
 
             return Ok(());
@@ -110,8 +104,8 @@ async fn process_slot(slot: u32, context: &mut Context) -> Result<(), StdErr> {
 
     if blob_txs.len() == 0 {
         info!(
-            target: logger,
-            "[Slot {}] Skipping as execution block doesn't contain blob txs", slot
+            "[Slot {}] Skipping as execution block doesn't contain blob txs",
+            slot
         );
 
         return Ok(());
@@ -120,10 +114,7 @@ async fn process_slot(slot: u32, context: &mut Context) -> Result<(), StdErr> {
     let blobs = match beacon_api.get_blobs_sidecar(slot).await? {
         Some(blobs_sidecar) => {
             if blobs_sidecar.blobs.len() == 0 {
-                info!(
-                    target: logger,
-                    "[Slot {}] Skipping as blobs sidecar is empty", slot
-                );
+                info!("[Slot {}] Skipping as blobs sidecar is empty", slot);
 
                 return Ok(());
             } else {
@@ -131,10 +122,7 @@ async fn process_slot(slot: u32, context: &mut Context) -> Result<(), StdErr> {
             }
         }
         None => {
-            info!(
-                target: logger,
-                "[Slot {}] Skipping as there is no blobs sidecar", slot
-            );
+            info!("[Slot {}] Skipping as there is no blobs sidecar", slot);
 
             return Ok(());
         }
@@ -180,7 +168,6 @@ async fn process_slot(slot: u32, context: &mut Context) -> Result<(), StdErr> {
     let duration = start.elapsed();
 
     info!(
-        target: logger,
         "[Slot {}] Blobs indexed correctly (elapsed time: {:?}s)",
         slot,
         duration.as_secs()
@@ -190,16 +177,14 @@ async fn process_slot(slot: u32, context: &mut Context) -> Result<(), StdErr> {
 }
 
 async fn save_slot(slot: u32, context: &mut Context) {
-    let Context {
-        db_manager, logger, ..
-    } = context;
+    let Context { db_manager, .. } = context;
 
     let result = db_manager
         .update_last_slot(slot, Some(MongoDBManagerOptions { use_session: false }))
         .await;
 
     if let Err(e) = result {
-        error!(target: logger, "Couldn't update last slot: {}", e);
+        error!("Couldn't update last slot: {}", e);
         panic!();
     }
 }

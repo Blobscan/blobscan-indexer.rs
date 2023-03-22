@@ -6,9 +6,8 @@ use mongodb::{
     options::{ClientOptions, UpdateOptions},
     Client, ClientSession, Database,
 };
-use std::error::Error;
 
-use crate::utils::web3::get_tx_versioned_hashes;
+use crate::{types::StdError, utils::web3::get_tx_versioned_hashes};
 
 use self::types::{BlobDocument, BlockDocument, IndexerMetadataDocument, TransactionDocument};
 
@@ -20,6 +19,7 @@ use super::{
 
 mod types;
 
+#[derive(Debug)]
 pub struct MongoDBManager {
     pub session: ClientSession,
     pub db: Database,
@@ -35,7 +35,7 @@ const INDEXER_METADATA_ID: &str = "indexer_metadata";
 impl DBManager for MongoDBManager {
     type Options = MongoDBManagerOptions;
 
-    async fn new(connection_uri: &String, db_name: &String) -> Result<Self, Box<dyn Error>>
+    async fn new(connection_uri: &String, db_name: &String) -> Result<Self, StdError>
     where
         Self: Sized,
     {
@@ -53,7 +53,7 @@ impl DBManager for MongoDBManager {
     async fn commit_transaction(
         &mut self,
         _options: Option<Self::Options>,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> Result<(), StdError> {
         // An "UnknownTransactionCommitResult" label indicates that it is unknown whether the
         // commit has satisfied the write concern associated with the transaction. If an error
         // with this label is returned, it is safe to retry the commit until the write concern is
@@ -79,7 +79,7 @@ impl DBManager for MongoDBManager {
         block_blob_txs: &Vec<Transaction>,
         slot: u32,
         _options: Option<Self::Options>,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> Result<(), StdError> {
         let tx_hashes = block_blob_txs
             .iter()
             .map(|tx| tx.hash.clone())
@@ -108,7 +108,7 @@ impl DBManager for MongoDBManager {
         blob: &Blob,
         tx_hash: H256,
         _options: Option<Self::Options>,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> Result<(), StdError> {
         let blob_document = &BlobDocument {
             _id: build_blob_id(&tx_hash, blob.index),
             data: blob.data.to_string(),
@@ -132,7 +132,7 @@ impl DBManager for MongoDBManager {
         tx: &Transaction,
         index: u32,
         _options: Option<Self::Options>,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> Result<(), StdError> {
         let blob_versioned_hashes = get_tx_versioned_hashes(&tx);
 
         let tx_document = TransactionDocument {
@@ -156,7 +156,7 @@ impl DBManager for MongoDBManager {
         Ok(())
     }
 
-    async fn start_transaction(&mut self) -> Result<(), Box<dyn Error>> {
+    async fn start_transaction(&mut self) -> Result<(), StdError> {
         self.session.start_transaction(None).await?;
 
         Ok(())
@@ -166,7 +166,7 @@ impl DBManager for MongoDBManager {
         &mut self,
         _slot: u32,
         options: Option<Self::Options>,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> Result<(), StdError> {
         let use_session = match options {
             Some(options) => options.use_session,
             None => true,
@@ -195,7 +195,7 @@ impl DBManager for MongoDBManager {
     async fn read_metadata(
         &mut self,
         _options: Option<Self::Options>,
-    ) -> Result<Option<IndexerMetadata>, Box<dyn Error>> {
+    ) -> Result<Option<IndexerMetadata>, StdError> {
         let query = doc! { "_id": INDEXER_METADATA_ID};
         let indexer_metadata_collection = self
             .db

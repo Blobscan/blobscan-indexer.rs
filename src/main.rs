@@ -1,24 +1,18 @@
-use std::{
-    error::{self},
-    thread,
-    time::Duration,
-};
+use std::{thread, time::Duration};
 
-use context::create_context;
 use slots::process_slots;
+use types::StdError;
 
-use crate::db::blob_db_manager::DBManager;
+use crate::{db::blob_db_manager::DBManager, utils::context::create_context};
 
 mod beacon_chain;
-mod context;
 mod db;
 mod slots;
+mod types;
 mod utils;
 
-type StdErr = Box<dyn error::Error>;
-
 #[tokio::main]
-async fn main() -> Result<(), StdErr> {
+async fn main() -> Result<(), StdError> {
     dotenv::dotenv().expect("Failed to read .env file");
 
     log4rs::init_file("log4rs.yml", Default::default()).unwrap();

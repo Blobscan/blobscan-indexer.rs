@@ -1,11 +1,12 @@
-use std::error;
-
 use reqwest::StatusCode;
+
+use crate::types::StdError;
 
 use self::types::{BlobsSidecar, BlobsSidecarResponse, BlockMessage as Block, BlockResponse};
 
 mod types;
 
+#[derive(Debug)]
 pub struct BeaconChainAPI {
     rpc_url: String,
 }
@@ -15,10 +16,7 @@ impl BeaconChainAPI {
         Self { rpc_url }
     }
 
-    pub async fn get_block(
-        &self,
-        slot: Option<u32>,
-    ) -> Result<Option<Block>, Box<dyn error::Error>> {
+    pub async fn get_block(&self, slot: Option<u32>) -> Result<Option<Block>, StdError> {
         let slot = match slot {
             Some(slot) => slot.to_string(),
             None => String::from("head"),
@@ -39,10 +37,7 @@ impl BeaconChainAPI {
         Ok(Some(block_response.data.message))
     }
 
-    pub async fn get_blobs_sidecar(
-        &self,
-        slot: u32,
-    ) -> Result<Option<BlobsSidecar>, Box<dyn error::Error>> {
+    pub async fn get_blobs_sidecar(&self, slot: u32) -> Result<Option<BlobsSidecar>, StdError> {
         let sidecar_response = reqwest::get(format!(
             "{}/eth/v1/beacon/blobs_sidecars/{}",
             self.rpc_url, slot
