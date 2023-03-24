@@ -1,0 +1,31 @@
+appenders:
+  stdout:
+    kind: console
+    encoder:
+      pattern: "{d(%Y-%m-%d %H:%M:%S)} | {({l}):5.5} | {f}:{L} — {m}{n}"
+
+  indexer_ap:
+    kind: rolling_file
+    path: logs/indexer.log
+    encoder:
+      pattern: "{d(%Y-%m-%d %H:%M:%S)} | {({l}):5.5} | {f}:{L} — {m}{n}"
+    policy:
+      trigger:
+        kind: size
+        limit: 30 mb
+      roller:
+        kind: fixed_window
+        pattern: logs/indexer_{}.gz
+        count: 5
+        base: 1
+
+root:
+  level: info
+  appenders:
+    - stdout
+
+loggers:
+  default:
+    level: info
+    appenders:
+      - indexer_ap

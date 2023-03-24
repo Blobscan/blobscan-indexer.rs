@@ -2,3 +2,5 @@ debug/
 target/
 
 .env
+
+logs/

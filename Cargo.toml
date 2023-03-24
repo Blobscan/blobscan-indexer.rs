@@ -6,25 +6,18 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+async-trait = "0.1.66"
 dotenv = "0.15.0"
+envy = "0.4.2"
 ethers = "1.0.2"
 futures = "0.3.25"
+hex = "0.4.3"
+log = "0.4.17"
+log4rs = { version = "1.2.0", features = ["gzip"] }
 mongodb = "2.3.1"
 reqwest = { version = "0.11.13", features = ["json"] }
 serde = "1.0.150"
 tokio = { version = "1.23.0", features = ["full"] }
-types = { git = "https://github.com/sigp/lighthouse", branch = "eip4844" }
-
-[patch]
-[patch.crates-io]
-eth2_hashing = { git = "https://github.com/sigp/lighthouse", branch = "eip4844" }
-eth2_serde_utils = { git = "https://github.com/sigp/lighthouse", branch = "eip4844" }
-eth2_ssz = { git = "https://github.com/sigp/lighthouse", branch = "eip4844" }
-eth2_ssz_types = { git = "https://github.com/sigp/lighthouse", branch = "eip4844" }
-tree_hash = { git = "https://github.com/sigp/lighthouse", branch = "eip4844" }
-tree_hash_derive = { git = "https://github.com/sigp/lighthouse", branch = "eip4844" }
-eth2_ssz_derive = { git = "https://github.com/sigp/lighthouse", branch = "eip4844" }
-
 
 
 
