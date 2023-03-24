@@ -1,4 +1,5 @@
 use reqwest::{Client, StatusCode};
+use std::time::Duration;
 
 use crate::types::StdError;
 
@@ -12,18 +13,23 @@ pub struct BeaconChainAPI {
     client: reqwest::Client,
 }
 
-impl BeaconChainAPI {
-    pub fn new(base_url: String) -> Self {
-        Self {
-            base_url,
-            client: Client::new(),
-        }
-    }
+pub struct Options {
+    pub timeout: Option<u64>,
+}
 
-    pub fn try_from(base_url: String) -> Result<Self, StdError> {
+impl BeaconChainAPI {
+    pub fn try_from(base_url: String, options: Option<Options>) -> Result<Self, StdError> {
+        let mut client_builder = Client::builder();
+
+        if let Some(options) = options {
+            if let Some(timeout) = options.timeout {
+                client_builder = client_builder.timeout(Duration::from_secs(timeout));
+            }
+        }
+
         Ok(Self {
             base_url,
-            client: Client::builder().build()?,
+            client: client_builder.build()?,
         })
     }
 
