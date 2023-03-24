@@ -32,7 +32,7 @@ impl BeaconChainAPI {
             Some(slot) => slot.to_string(),
             None => String::from("head"),
         };
-        let url = self.build_url(&format!("/eth/v1/beacon/blocks/{}", slot));
+        let url = self.build_url(&format!("/eth/v2/beacon/blocks/{}", slot));
 
         let block_response = self.client.get(url).send().await?;
 
@@ -41,7 +41,12 @@ impl BeaconChainAPI {
                 block_response.json::<BlockResponse>().await?.data.message,
             )),
             StatusCode::NOT_FOUND => Ok(None),
-            _ => Err("Couldn't fetch beacon block".into()),
+            _ => Err(format!(
+                "Couldn't fetch beacon block at slot {}: {}",
+                slot,
+                block_response.text().await?
+            )
+            .into()),
         }
     }
 
@@ -55,7 +60,12 @@ impl BeaconChainAPI {
                 sidecar_response.json::<BlobsSidecarResponse>().await?.data,
             )),
             StatusCode::NOT_FOUND => Ok(None),
-            _ => Err("Couldn't fetch blobs sidecar".into()),
+            _ => Err(format!(
+                "Couldn't fetch blobs sidecar at slot {}: {}",
+                slot,
+                sidecar_response.text().await?
+            )
+            .into()),
         }
     }
 
