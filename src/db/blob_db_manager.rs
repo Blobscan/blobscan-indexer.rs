@@ -10,36 +10,37 @@ pub trait DBManager {
     where
         Self: Sized;
 
-    async fn commit_transaction(&mut self, options: Option<Self::Options>) -> Result<(), StdError>;
+    async fn commit_transaction(&self, options: Option<&mut Self::Options>)
+        -> Result<(), StdError>;
 
     async fn insert_block(
-        &mut self,
+        &self,
         block: &BlockData,
-        options: Option<Self::Options>,
+        options: Option<&mut Self::Options>,
     ) -> Result<(), StdError>;
 
     async fn insert_blob(
-        &mut self,
+        &self,
         blob: &Blob,
-        options: Option<Self::Options>,
+        options: Option<&mut Self::Options>,
     ) -> Result<(), StdError>;
 
     async fn insert_tx(
-        &mut self,
+        &self,
         tx: &TransactionData,
-        options: Option<Self::Options>,
+        options: Option<&mut Self::Options>,
     ) -> Result<(), StdError>;
 
-    async fn start_transaction(&mut self) -> Result<(), StdError>;
+    async fn start_transaction(&self, options: Option<&mut Self::Options>) -> Result<(), StdError>;
 
     async fn update_last_slot(
-        &mut self,
+        &self,
         slot: u32,
-        options: Option<Self::Options>,
+        options: Option<&mut Self::Options>,
     ) -> Result<(), StdError>;
 
     async fn read_metadata(
-        &mut self,
-        options: Option<Self::Options>,
+        &self,
+        options: Option<&mut Self::Options>,
     ) -> Result<Option<IndexerMetadata>, StdError>;
 }

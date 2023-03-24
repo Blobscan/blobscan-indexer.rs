@@ -1,15 +1,15 @@
 use std::{thread, time::Duration};
 
-use slots::process_slots;
-use types::StdError;
-
-use crate::{db::blob_db_manager::DBManager, utils::context::create_context};
-
 mod beacon_chain;
 mod db;
-mod slots;
+mod slot_processor;
 mod types;
 mod utils;
+
+use crate::{
+    db::blob_db_manager::DBManager, slot_processor::SlotProcessor, types::StdError,
+    utils::context::create_context,
+};
 
 #[tokio::main]
 async fn main() -> Result<(), StdError> {
@@ -17,7 +17,8 @@ async fn main() -> Result<(), StdError> {
 
     log4rs::init_file("log4rs.yml", Default::default()).unwrap();
 
-    let mut context = create_context().await?;
+    let context = create_context().await?;
+    let mut slot_processor = SlotProcessor::try_init(&context).await?;
 
     let mut current_slot = match context.db_manager.read_metadata(None).await? {
         Some(metadata) => metadata.last_slot + 1,
@@ -30,7 +31,9 @@ async fn main() -> Result<(), StdError> {
                 let latest_slot: u32 = latest_beacon_block.slot.parse()?;
 
                 if current_slot < latest_slot {
-                    process_slots(current_slot, latest_slot, &mut context).await;
+                    slot_processor
+                        .process_slots(current_slot, latest_slot)
+                        .await;
 
                     current_slot = latest_slot;
                 }
