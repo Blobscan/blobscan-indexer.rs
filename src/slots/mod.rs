@@ -1,16 +1,12 @@
 use std::{panic, time::Instant};
 
 use ethers::prelude::*;
-use futures::future::join_all;
 use log::{error, info};
 
 use crate::{
-    db::{blob_db_manager::DBManager, mongodb::MongoDBManagerOptions, types::Blob},
-    types::StdError,
-    utils::{
-        context::Context,
-        web3::{calculate_versioned_hash, get_eip_4844_tx, get_tx_versioned_hashes},
-    },
+    db::{blob_db_manager::DBManager, mongodb::MongoDBManagerOptions},
+    types::{Blob, BlockData, StdError, TransactionData},
+    utils::{context::Context, web3::calculate_versioned_hash},
 };
 
 pub async fn process_slots(start_slot: u32, end_slot: u32, context: &mut Context) {
@@ -76,7 +72,7 @@ async fn process_slot(slot: u32, context: &mut Context) -> Result<(), StdError> 
     };
     let execution_block_hash = execution_payload.block_hash;
 
-    let execution_block = match provider.get_block(execution_block_hash).await? {
+    let execution_block = match provider.get_block_with_txs(execution_block_hash).await? {
         Some(block) => block,
         None => {
             let error_msg = format!("Execution block {} not found", execution_block_hash);
@@ -84,24 +80,9 @@ async fn process_slot(slot: u32, context: &mut Context) -> Result<(), StdError> 
             return Err(Box::new(ProviderError::CustomError(error_msg)));
         }
     };
+    let block_data = BlockData::try_from((&execution_block, slot))?;
 
-    let execution_block_txs = join_all(
-        execution_block
-            .transactions
-            .iter()
-            .map(|tx_hash| get_eip_4844_tx(&provider, tx_hash)),
-    )
-    .await
-    .into_iter()
-    .map(|tx| tx.unwrap())
-    .collect::<Vec<Transaction>>();
-
-    let blob_txs = execution_block_txs
-        .into_iter()
-        .filter(|tx| tx.other.contains_key("blobVersionedHashes"))
-        .collect::<Vec<Transaction>>();
-
-    if blob_txs.len() == 0 {
+    if block_data.tx_to_versioned_hashes.is_empty() {
         info!(
             "[Slot {}] Skipping as execution block doesn't contain blob txs",
             slot
@@ -129,37 +110,63 @@ async fn process_slot(slot: u32, context: &mut Context) -> Result<(), StdError> 
 
     db_manager.start_transaction().await?;
 
-    db_manager
-        .insert_block(&execution_block, &blob_txs, slot, None)
-        .await?;
+    db_manager.insert_block(&block_data, None).await?;
 
-    for (i, tx) in blob_txs.iter().enumerate() {
-        db_manager.insert_tx(tx, i as u32, None).await?;
+    for tx in block_data.block.transactions.iter() {
+        let blob_versioned_hashes = match block_data.tx_to_versioned_hashes.get(&tx.hash) {
+            Some(versioned_hashes) => versioned_hashes,
+            None => {
+                return Err(format!("Couldn't find versioned hashes for tx {}", tx.hash).into());
+            }
+        };
+
+        db_manager
+            .insert_tx(
+                &TransactionData {
+                    tx,
+                    blob_versioned_hashes,
+                },
+                None,
+            )
+            .await?;
     }
 
     for (i, blob) in blobs.iter().enumerate() {
-        let commitment = &blob_kzg_commitments[i];
+        let commitment = blob_kzg_commitments[i].clone();
 
-        let versioned_hash = calculate_versioned_hash(commitment);
+        let versioned_hash = calculate_versioned_hash(&commitment)?;
 
-        let blob_tx = blob_txs
+        match block_data
+            .tx_to_versioned_hashes
             .iter()
-            .find(|tx| {
-                let versioned_hashes = get_tx_versioned_hashes(tx);
-                versioned_hashes.contains(&versioned_hash)
-            })
-            .unwrap()
-            .clone();
+            .find_map(|(tx_hash, versioned_hashes)| {
+                match versioned_hashes.contains(&versioned_hash) {
+                    true => Some(tx_hash),
+                    false => None,
+                }
+            }) {
+            Some(tx_hash) => {
+                db_manager
+                    .insert_blob(
+                        &Blob {
+                            commitment,
+                            data: blob,
+                            versioned_hash,
+                            tx_hash: tx_hash.clone(),
+                        },
+                        None,
+                    )
+                    .await?
+            }
+            None => {
+                let error_msg = format!(
+                    "Couldn't find blob tx for commitment {} and versioned hash {}",
+                    commitment, versioned_hash
+                );
 
-        // TODO: use flyweight pattern to avoid cloning structs
-        let blob = &Blob {
-            commitment: commitment.clone(),
-            data: blob.clone(),
-            index: i as u32,
-            versioned_hash,
+                return Err(Box::new(ProviderError::CustomError(error_msg)));
+            }
         };
-
-        db_manager.insert_blob(blob, blob_tx.hash, None).await?;
     }
 
     db_manager.commit_transaction(None).await?;

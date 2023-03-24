@@ -1,5 +1,4 @@
 use async_trait::async_trait;
-use ethers::types::{Block, Transaction, TxHash, H256};
 use mongodb::{
     bson::doc,
     error::UNKNOWN_TRANSACTION_COMMIT_RESULT,
@@ -7,15 +6,11 @@ use mongodb::{
     Client, ClientSession, Database,
 };
 
-use crate::{types::StdError, utils::web3::get_tx_versioned_hashes};
+use crate::types::{Blob, BlockData, IndexerMetadata, StdError, TransactionData};
 
 use self::types::{BlobDocument, BlockDocument, IndexerMetadataDocument, TransactionDocument};
 
-use super::{
-    blob_db_manager::DBManager,
-    types::{Blob, IndexerMetadata},
-    utils::{build_blob_id, build_block_id, build_tx_id},
-};
+use super::blob_db_manager::DBManager;
 
 mod types;
 
@@ -75,24 +70,10 @@ impl DBManager for MongoDBManager {
 
     async fn insert_block(
         &mut self,
-        execution_block: &Block<TxHash>,
-        block_blob_txs: &Vec<Transaction>,
-        slot: u32,
+        block_data: &BlockData,
         _options: Option<Self::Options>,
     ) -> Result<(), StdError> {
-        let tx_hashes = block_blob_txs
-            .iter()
-            .map(|tx| tx.hash.clone())
-            .collect::<Vec<H256>>();
-        let block_document = BlockDocument {
-            _id: build_block_id(&execution_block.hash.unwrap()),
-            hash: execution_block.hash.unwrap(),
-            parent_hash: execution_block.parent_hash,
-            number: execution_block.number.unwrap().as_u64(),
-            slot: slot,
-            timestamp: execution_block.timestamp,
-            transactions: tx_hashes,
-        };
+        let block_document = BlockDocument::try_from(block_data)?;
 
         let blocks_collection = self.db.collection::<BlockDocument>("blocks");
 
@@ -106,17 +87,9 @@ impl DBManager for MongoDBManager {
     async fn insert_blob(
         &mut self,
         blob: &Blob,
-        tx_hash: H256,
         _options: Option<Self::Options>,
     ) -> Result<(), StdError> {
-        let blob_document = &BlobDocument {
-            _id: build_blob_id(&tx_hash, blob.index),
-            data: blob.data.to_string(),
-            commitment: blob.commitment.clone(),
-            index: blob.index,
-            hash: blob.versioned_hash,
-            tx_hash: tx_hash,
-        };
+        let blob_document = BlobDocument::try_from(blob)?;
 
         let blobs_collection = self.db.collection::<BlobDocument>("blobs");
 
@@ -129,23 +102,10 @@ impl DBManager for MongoDBManager {
 
     async fn insert_tx(
         &mut self,
-        tx: &Transaction,
-        index: u32,
+        tx: &TransactionData,
         _options: Option<Self::Options>,
     ) -> Result<(), StdError> {
-        let blob_versioned_hashes = get_tx_versioned_hashes(&tx);
-
-        let tx_document = TransactionDocument {
-            _id: build_tx_id(&tx.hash),
-            hash: tx.hash,
-            from: tx.from,
-            to: tx.to.unwrap(),
-            value: tx.value,
-            block_hash: tx.block_hash.unwrap(),
-            block_number: tx.block_number.unwrap().as_u64(),
-            block_versioned_hashes: blob_versioned_hashes,
-            index: index,
-        };
+        let tx_document = TransactionDocument::try_from(tx)?;
 
         let txs_collection = self.db.collection::<TransactionDocument>("txs");
 
@@ -202,7 +162,7 @@ impl DBManager for MongoDBManager {
             .collection::<IndexerMetadataDocument>("indexer_metadata");
 
         match indexer_metadata_collection.find_one(query, None).await? {
-            Some(indexer_metadata) => Ok(Some(IndexerMetadata::from(indexer_metadata))),
+            Some(indexer_metadata) => Ok(Some(IndexerMetadata::try_from(indexer_metadata)?)),
             None => Ok(None),
         }
     }
