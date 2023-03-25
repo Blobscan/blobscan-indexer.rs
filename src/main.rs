@@ -26,8 +26,7 @@ async fn main() -> Result<(), StdError> {
     };
 
     loop {
-        match context.beacon_api.get_block(None).await? {
-            Some(latest_beacon_block) => {
+        if let Some(latest_beacon_block) = context.beacon_api.get_block(None).await? {
                 let latest_slot: u32 = latest_beacon_block.slot.parse()?;
 
                 if current_slot < latest_slot {
@@ -38,7 +37,6 @@ async fn main() -> Result<(), StdError> {
                     current_slot = latest_slot;
                 }
             }
-            _ => (),
         };
 
         thread::sleep(Duration::from_secs(1));
