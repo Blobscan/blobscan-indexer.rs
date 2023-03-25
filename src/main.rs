@@ -27,18 +27,16 @@ async fn main() -> Result<(), StdError> {
 
     loop {
         if let Some(latest_beacon_block) = context.beacon_api.get_block(None).await? {
-                let latest_slot: u32 = latest_beacon_block.slot.parse()?;
+            let latest_slot: u32 = latest_beacon_block.slot.parse()?;
 
-                if current_slot < latest_slot {
-                    slot_processor
-                        .process_slots(current_slot, latest_slot)
-                        .await;
+            if current_slot < latest_slot {
+                slot_processor
+                    .process_slots(current_slot, latest_slot)
+                    .await;
 
-                    current_slot = latest_slot;
-                }
+                current_slot = latest_slot;
             }
-        };
-
+        }
         thread::sleep(Duration::from_secs(1));
     }
 }

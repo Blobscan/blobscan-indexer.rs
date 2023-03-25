@@ -25,7 +25,7 @@ pub fn sha256(value: &str) -> Result<H256, StdError> {
 }
 
 pub fn calculate_versioned_hash(commitment: &String) -> Result<H256, StdError> {
-    let hashed_commitment = sha256(&commitment)?;
+    let hashed_commitment = sha256(commitment)?;
 
     // Replace first byte with the blob commitment version byte
     let hashed_commitment = &mut hashed_commitment.as_bytes()[1..].to_vec();
