@@ -39,7 +39,7 @@ impl<'a> SlotProcessor<'a> {
                 panic!();
             };
 
-            current_slot = current_slot + 1;
+            current_slot += 1;
         }
 
         self.save_slot(current_slot).await
@@ -108,7 +108,7 @@ impl<'a> SlotProcessor<'a> {
 
         let blobs = match beacon_api.get_blobs_sidecar(slot).await? {
             Some(blobs_sidecar) => {
-                if blobs_sidecar.blobs.len() == 0 {
+                if blobs_sidecar.blobs.is_empty() {
                     info!("[Slot {}] Skipping as blobs sidecar is empty", slot);
 
                     return Ok(());
@@ -168,7 +168,7 @@ impl<'a> SlotProcessor<'a> {
                                 commitment,
                                 data: blob,
                                 versioned_hash,
-                                tx_hash: tx_hash.clone(),
+                                tx_hash: *tx_hash,
                             },
                             Some(&mut self.db_options),
                         )

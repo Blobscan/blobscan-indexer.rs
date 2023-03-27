@@ -4,3 +4,5 @@ target/
 .env
 
 logs/
+
+.DS_Store

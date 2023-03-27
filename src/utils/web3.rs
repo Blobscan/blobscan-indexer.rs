@@ -8,8 +8,8 @@ use crate::types::StdError;
 const BLOB_COMMITMENT_VERSION_KZG: u8 = 0x01;
 
 pub fn sha256(value: &str) -> Result<H256, StdError> {
-    let value_without_prefix = if value.starts_with("0x") {
-        &value[2..]
+    let value_without_prefix = if let Some(value_without_prefix) = value.strip_prefix("0x") {
+        value_without_prefix
     } else {
         value
     };
@@ -24,8 +24,8 @@ pub fn sha256(value: &str) -> Result<H256, StdError> {
     Ok(H256::from_slice(&result))
 }
 
-pub fn calculate_versioned_hash(commitment: &String) -> Result<H256, StdError> {
-    let hashed_commitment = sha256(&commitment)?;
+pub fn calculate_versioned_hash(commitment: &str) -> Result<H256, StdError> {
+    let hashed_commitment = sha256(commitment)?;
 
     // Replace first byte with the blob commitment version byte
     let hashed_commitment = &mut hashed_commitment.as_bytes()[1..].to_vec();
