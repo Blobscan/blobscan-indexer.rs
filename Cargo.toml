@@ -12,13 +12,14 @@ envy = "0.4.2"
 ethers = "1.0.2"
 futures = "0.3.25"
 hex = "0.4.3"
-log = "0.4.17"
-log4rs = { version = "1.2.0", features = ["gzip"] }
 mongodb = "2.3.1"
 reqwest = { version = "0.11.13", features = ["json"] }
 serde = "1.0.150"
 tokio = { version = "1.23.0", features = ["full"] }
 
-
-
-
+# logging
+log = "0.4.17"
+tracing = "0.1.19"
+tracing-subscriber = { version = "0.3", features = ["registry", "env-filter"] }
+tracing-bunyan-formatter = "0.3"
+tracing-log = "0.1.1"
