@@ -1,9 +1,10 @@
 use reqwest::{Client, StatusCode};
 use std::time::Duration;
 
-use crate::types::StdError;
-
-use self::types::{BlobsSidecar, BlobsSidecarResponse, BlockMessage as Block, BlockResponse};
+use self::types::{
+    BeaconAPIError, BeaconAPIResult, BlobsSidecar, BlobsSidecarResponse, BlockMessage as Block,
+    BlockResponse,
+};
 
 mod types;
 
@@ -18,7 +19,7 @@ pub struct Options {
 }
 
 impl BeaconChainAPI {
-    pub fn try_from(base_url: String, options: Option<Options>) -> Result<Self, StdError> {
+    pub fn try_from(base_url: String, options: Option<Options>) -> BeaconAPIResult<Self> {
         let mut client_builder = Client::builder();
 
         if let Some(options) = options {
@@ -33,12 +34,12 @@ impl BeaconChainAPI {
         })
     }
 
-    pub async fn get_block(&self, slot: Option<u32>) -> Result<Option<Block>, StdError> {
+    pub async fn get_block(&self, slot: Option<u32>) -> BeaconAPIResult<Option<Block>> {
         let slot = match slot {
             Some(slot) => slot.to_string(),
             None => String::from("head"),
         };
-        let url = self.build_url(&format!("/eth/v2/beacon/blocks/{}", slot));
+        let url = self.build_url(&format!("eth/v2/beacon/blocks/{slot}"));
 
         let block_response = self.client.get(url).send().await?;
 
@@ -47,17 +48,14 @@ impl BeaconChainAPI {
                 block_response.json::<BlockResponse>().await?.data.message,
             )),
             StatusCode::NOT_FOUND => Ok(None),
-            _ => Err(format!(
-                "Couldn't fetch beacon block at slot {}: {}",
-                slot,
-                block_response.text().await?
-            )
-            .into()),
+            _ => Err(BeaconAPIError::JsonRpcClientError(
+                block_response.text().await?,
+            )),
         }
     }
 
-    pub async fn get_blobs_sidecar(&self, slot: u32) -> Result<Option<BlobsSidecar>, StdError> {
-        let url = self.build_url(&format!("/eth/v1/beacon/blobs_sidecars/{}", slot));
+    pub async fn get_blobs_sidecar(&self, slot: u32) -> BeaconAPIResult<Option<BlobsSidecar>> {
+        let url = self.build_url(&format!("eth/v1/beacon/blobs_sidecars/{slot}"));
 
         let sidecar_response = self.client.get(url).send().await?;
 
@@ -66,12 +64,9 @@ impl BeaconChainAPI {
                 sidecar_response.json::<BlobsSidecarResponse>().await?.data,
             )),
             StatusCode::NOT_FOUND => Ok(None),
-            _ => Err(format!(
-                "Couldn't fetch blobs sidecar at slot {}: {}",
-                slot,
-                sidecar_response.text().await?
-            )
-            .into()),
+            _ => Err(BeaconAPIError::JsonRpcClientError(
+                sidecar_response.text().await?,
+            )),
         }
     }
 
