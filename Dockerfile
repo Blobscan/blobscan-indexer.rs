@@ -13,7 +13,7 @@ RUN cargo build --release --bin blob-indexer
 
 FROM debian:bullseye-slim
 RUN apt-get update && apt-get -y install libssl1.1
-WORKDIR app
+WORKDIR /app
 ENV DB_CONNECTION_URI=mongodb://blobscan:secret@127.0.0.1:27017
 ENV DB_NAME=blobscan_dev
 RUN echo "DB_CONNECTION_URI=$DB_CONNECTION_URI" > .env
