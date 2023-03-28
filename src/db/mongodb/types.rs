@@ -1,9 +1,10 @@
+use anyhow::{Context, Error, Result};
 use ethers::types::{Address, Bytes, H256, U256};
 use serde::{Deserialize, Serialize};
 
 use crate::{
     db::utils::{build_blob_id, build_block_id, build_tx_id},
-    types::{Blob, BlockData, IndexerMetadata, StdError, TransactionData},
+    types::{Blob, BlockData, IndexerMetadata, TransactionData},
 };
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -37,19 +38,13 @@ pub struct BlobDocument {
 }
 
 impl TryFrom<&BlockData<'_>> for BlockDocument {
-    type Error = StdError;
+    type Error = Error;
 
     fn try_from(block_data: &BlockData) -> Result<Self, Self::Error> {
         let block = block_data.block;
 
-        let hash = match block.hash {
-            Some(hash) => hash,
-            None => return Err("Block hash not found".into()),
-        };
-        let number = match block.number {
-            Some(number) => number.as_u64(),
-            None => return Err("Block number not found".into()),
-        };
+        let hash = block.hash.context("Block hash not found")?;
+        let number = block.number.context("Block number not found")?.as_u64();
 
         Ok(Self {
             _id: build_block_id(&hash),
@@ -63,22 +58,16 @@ impl TryFrom<&BlockData<'_>> for BlockDocument {
 }
 
 impl TryFrom<&TransactionData<'_>> for TransactionDocument {
-    type Error = StdError;
+    type Error = Error;
 
     fn try_from(tx_data: &TransactionData) -> Result<Self, Self::Error> {
         let tx = tx_data.tx;
-        let to = match tx.to {
-            Some(to) => to,
-            None => return Err("Transaction recipient not found".into()),
-        };
-        let block_hash = match tx.block_hash {
-            Some(block_hash) => block_hash,
-            None => return Err("Transaction block hash not found".into()),
-        };
-        let block_number = match tx.block_number {
-            Some(block_number) => block_number.as_u64(),
-            None => return Err("Transaction block number not found".into()),
-        };
+        let to = tx.to.context("Transaction recipient not found")?;
+        let block_hash = tx.block_hash.context("Transaction block hash not found")?;
+        let block_number = tx
+            .block_number
+            .context("Transaction block number not found")?
+            .as_u64();
 
         Ok(Self {
             _id: build_tx_id(&tx.hash),
@@ -94,7 +83,7 @@ impl TryFrom<&TransactionData<'_>> for TransactionDocument {
 }
 
 impl TryFrom<&Blob<'_>> for BlobDocument {
-    type Error = StdError;
+    type Error = Error;
 
     fn try_from(blob: &Blob) -> Result<Self, Self::Error> {
         Ok(Self {
@@ -116,7 +105,7 @@ pub struct IndexerMetadataDocument {
 }
 
 impl TryFrom<IndexerMetadataDocument> for IndexerMetadata {
-    type Error = StdError;
+    type Error = Error;
 
     fn try_from(doc: IndexerMetadataDocument) -> Result<Self, Self::Error> {
         Ok(Self {

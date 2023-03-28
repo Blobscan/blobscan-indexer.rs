@@ -1,10 +1,9 @@
-use std::{collections::HashMap, error};
+use std::collections::HashMap;
 
+use anyhow::{Error, Result};
 use ethers::types::{Block as EthersBlock, Bytes, Transaction, H256};
 
 use crate::utils::web3::get_tx_versioned_hashes;
-
-pub type StdError = Box<dyn error::Error + Send + Sync>;
 
 #[derive(Debug)]
 pub struct BlockData<'a> {
@@ -33,7 +32,7 @@ pub struct IndexerMetadata {
 }
 
 impl<'a> TryFrom<(&'a EthersBlock<Transaction>, u32)> for BlockData<'a> {
-    type Error = StdError;
+    type Error = Error;
 
     fn try_from((block, slot): (&'a EthersBlock<Transaction>, u32)) -> Result<Self, Self::Error> {
         let mut tx_to_versioned_hashes = HashMap::new();

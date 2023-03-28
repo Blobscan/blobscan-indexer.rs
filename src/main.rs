@@ -1,9 +1,9 @@
+use anyhow::Result;
 use tracing::Instrument;
 
 use crate::{
     db::blob_db_manager::DBManager,
     slot_processor::SlotProcessor,
-    types::StdError,
     utils::{
         context::create_context,
         telemetry::{get_subscriber, init_subscriber},
@@ -18,7 +18,7 @@ mod types;
 mod utils;
 
 #[tokio::main]
-async fn main() -> Result<(), StdError> {
+async fn main() -> Result<()> {
     dotenv::dotenv().expect("Failed to read .env file");
 
     let subscriber = get_subscriber("blobscan_indexer".into(), "info".into(), std::io::stdout);
@@ -42,7 +42,7 @@ async fn main() -> Result<(), StdError> {
                 slot_processor
                     .process_slots(current_slot, latest_slot)
                     .instrument(slot_span)
-                    .await;
+                    .await?;
 
                 current_slot = latest_slot;
             }
