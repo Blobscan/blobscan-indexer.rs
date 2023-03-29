@@ -57,11 +57,7 @@ impl TryFrom<&BlockData<'_>> for BlockDocument {
             number,
             slot: block_data.slot,
             timestamp: block.timestamp.as_u64(),
-            transactions: block_data
-                .tx_to_versioned_hashes
-                .keys()
-                .map(|hash| hash.clone())
-                .collect(),
+            transactions: block_data.tx_to_versioned_hashes.keys().copied().collect(),
         })
     }
 }
@@ -90,8 +86,8 @@ impl TryFrom<&TransactionData<'_>> for TransactionDocument {
             from: tx.from,
             to,
             value: tx.value,
-            block_hash: block_hash,
-            block_number: block_number,
+            block_hash,
+            block_number,
             blob_versioned_hashes: tx_data.blob_versioned_hashes.clone(),
         })
     }

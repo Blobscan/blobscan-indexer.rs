@@ -9,6 +9,7 @@ pub struct Environment {
     #[serde(default = "default_beacon_node_rpc")]
     pub beacon_node_rpc: String,
     #[serde(default = "default_logger")]
+    #[allow(dead_code)] // Temporal until we move to tracing
     logger: String,
     #[serde(default = "default_mode")]
     pub mode: String,

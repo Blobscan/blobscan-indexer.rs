@@ -30,7 +30,7 @@ const INDEXER_METADATA_ID: &str = "indexer_metadata";
 impl DBManager for MongoDBManager {
     type Options = MongoDBManagerOptions;
 
-    async fn new(connection_uri: &String, db_name: &String) -> Result<Self, StdError>
+    async fn new(connection_uri: &str, db_name: &str) -> Result<Self, StdError>
     where
         Self: Sized,
     {

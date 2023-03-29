@@ -1,7 +1,7 @@
 use std::{panic, time::Instant};
 
 use ethers::prelude::*;
-use log::{error, info};
+use tracing::{error, info};
 
 use crate::{
     db::{blob_db_manager::DBManager, mongodb::MongoDBManagerOptions},
@@ -34,12 +34,12 @@ impl<'a> SlotProcessor<'a> {
             if let Err(e) = result {
                 self.save_slot(current_slot - 1).await;
 
-                error!("[Slot {}] Couldn't process slot: {}", current_slot, e);
+                error!("[Slot {current_slot}] Couldn't process slot: {e}");
 
                 panic!();
             };
 
-            current_slot = current_slot + 1;
+            current_slot += 1;
         }
 
         self.save_slot(current_slot).await
@@ -56,7 +56,7 @@ impl<'a> SlotProcessor<'a> {
         let beacon_block = match beacon_api.get_block(Some(slot)).await? {
             Some(block) => block,
             None => {
-                info!("[Slot {}] Skipping as there is no beacon block", slot);
+                info!("[Slot {slot}] Skipping as there is no beacon block");
 
                 return Ok(());
             }
@@ -65,10 +65,7 @@ impl<'a> SlotProcessor<'a> {
         let execution_payload = match beacon_block.body.execution_payload {
             Some(payload) => payload,
             None => {
-                info!(
-                    "[Slot {}] Skipping as beacon block doesn't contain execution payload",
-                    slot
-                );
+                info!("[Slot {slot}] Skipping as beacon block doesn't contain execution payload");
 
                 return Ok(());
             }
@@ -78,8 +75,7 @@ impl<'a> SlotProcessor<'a> {
             Some(commitments) => commitments,
             None => {
                 info!(
-                    "[Slot {}] Skipping as beacon block doesn't contain blob kzg commitments",
-                    slot
+                    "[Slot {slot}] Skipping as beacon block doesn't contain blob kzg commitments"
                 );
 
                 return Ok(());
@@ -98,18 +94,15 @@ impl<'a> SlotProcessor<'a> {
         let block_data = BlockData::try_from((&execution_block, slot))?;
 
         if block_data.tx_to_versioned_hashes.is_empty() {
-            info!(
-                "[Slot {}] Skipping as execution block doesn't contain blob txs",
-                slot
-            );
+            info!("[Slot {slot}] Skipping as execution block doesn't contain blob txs");
 
             return Ok(());
         }
 
         let blobs = match beacon_api.get_blobs_sidecar(slot).await? {
             Some(blobs_sidecar) => {
-                if blobs_sidecar.blobs.len() == 0 {
-                    info!("[Slot {}] Skipping as blobs sidecar is empty", slot);
+                if blobs_sidecar.blobs.is_empty() {
+                    info!("[Slot {slot}] Skipping as blobs sidecar is empty");
 
                     return Ok(());
                 } else {
@@ -117,7 +110,7 @@ impl<'a> SlotProcessor<'a> {
                 }
             }
             None => {
-                info!("[Slot {}] Skipping as there is no blobs sidecar", slot);
+                info!("[Slot {slot}] Skipping as there is no blobs sidecar");
 
                 return Ok(());
             }
@@ -168,7 +161,7 @@ impl<'a> SlotProcessor<'a> {
                                 commitment,
                                 data: blob,
                                 versioned_hash,
-                                tx_hash: tx_hash.clone(),
+                                tx_hash: *tx_hash,
                             },
                             Some(&mut self.db_options),
                         )
@@ -192,8 +185,7 @@ impl<'a> SlotProcessor<'a> {
         let duration = start.elapsed();
 
         info!(
-            "[Slot {}] Blobs indexed correctly (elapsed time: {:?}s)",
-            slot,
+            "[Slot {slot}] Blobs indexed correctly (elapsed time: {:?}s)",
             duration.as_secs()
         );
 
@@ -208,7 +200,7 @@ impl<'a> SlotProcessor<'a> {
             .await;
 
         if let Err(e) = result {
-            error!("Couldn't update last slot: {}", e);
+            error!("Couldn't update last slot: {e}");
             panic!();
         }
     }
