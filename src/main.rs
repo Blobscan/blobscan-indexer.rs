@@ -19,7 +19,7 @@ mod utils;
 
 #[tokio::main]
 async fn main() -> Result<(), StdError> {
-    dotenv::dotenv().expect("Failed to read .env file");
+    dotenv::dotenv().ok();
 
     let subscriber = get_subscriber("blobscan_indexer".into(), "info".into(), std::io::stdout);
     init_subscriber(subscriber);
