@@ -43,7 +43,7 @@ pub enum BeaconAPIError {
     #[error(transparent)]
     Reqwest(#[from] reqwest::Error),
 
-    #[error("JSON-RPC client error: {0}")]
+    #[error("JSON-RPC beacon client error: {0}")]
     JsonRpcClientError(String),
 }
 

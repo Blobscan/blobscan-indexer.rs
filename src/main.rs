@@ -25,7 +25,7 @@ async fn main() -> Result<()> {
     init_subscriber(subscriber);
 
     let context = create_context().await?;
-    let mut slot_processor = SlotProcessor::try_init(&context).await?;
+    let mut slot_processor = SlotProcessor::try_init(&context, None).await?;
 
     let mut current_slot = match context.db_manager.read_metadata(None).await? {
         Some(metadata) => metadata.last_slot + 1,
