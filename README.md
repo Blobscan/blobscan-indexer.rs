@@ -28,6 +28,14 @@ cd blobscan-indexer.rs
 cargo run
 ```
 
+5. (Optional) Run the indexer using docker.
+
+If you prefer to use docker we have created an image for the indexer which is available at [blossomlabs/blobscan-indexer](https://hub.docker.com/repository/docker/blossomlabs/blobscan-indexer/general).
+
+```bash
+docker run --rm -e DB_CONNECTION_URI=mongodb://blobscan:secret@127.0.0.1:27017 -e DB_NAME=blobscan blossomlabs/blobscan-indexer:master
+```
+
 ## Environment variables
 
 Create a `.env` file with environment variables. You can use the `.env.example` file as a reference.

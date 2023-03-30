@@ -77,10 +77,10 @@ impl<'a> SlotProcessor<'a> {
         let backoff_config = self.options.backoff_config.clone();
 
         /*
-         * This is necessary because the `retry` function requires
-         * the closure to be `FnMut` and the `SlotProcessor` instance is not `Clone`able. The `Arc<Mutex<>>` allows us to
-         * share the `SlotProcessor` instance across multiple tasks and safely mutate it within the context of the retry loop.
-         */
+          This is necessary because the `retry` function requires
+          the closure to be `FnMut` and the `SlotProcessor` instance is not `Clone`able. The `Arc<Mutex<>>` allows us to
+          share the `SlotProcessor` instance across multiple tasks and safely mutate it within the context of the retry loop.
+        */
         let shared_slot_processor = Arc::new(Mutex::new(self));
 
         retry_notify(
@@ -89,9 +89,9 @@ impl<'a> SlotProcessor<'a> {
                 let slot_processor = Arc::clone(&shared_slot_processor);
 
                 /*
-                 * Using unwrap() here. If Mutex is poisoned due to a panic, it returns an error. 
-                 * In this case, we allow the indexer to crash as the state might be invalid. 
-                 */
+                 Using unwrap() here. If Mutex is poisoned due to a panic, it returns an error. 
+                 In this case, we allow the indexer to crash as the state might be invalid. 
+                */
                 async move {
                     let mut slot_processor = slot_processor.lock().unwrap();
 
@@ -100,10 +100,10 @@ impl<'a> SlotProcessor<'a> {
                         Err(process_slot_err) => {
                             match slot_processor.db_options.session.abort_transaction().await {
                                 Ok(_) => Err(process_slot_err),
-                                Err(err) => return Err(BackoffError::Permanent(err.into())),
+                                Err(err) => Err(BackoffError::Permanent(err.into())),
                             }
                         }
-                    } 
+                    }
                 }
             },
             |e, duration: Duration| {
