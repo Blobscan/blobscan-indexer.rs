@@ -1,13 +1,12 @@
 use std::str::FromStr;
 
+use anyhow::{Context, Result};
 use ethers::core::k256::sha2::{Digest, Sha256};
 use ethers::{prelude::*, types::H256};
 
-use crate::types::StdError;
-
 const BLOB_COMMITMENT_VERSION_KZG: u8 = 0x01;
 
-pub fn sha256(value: &str) -> Result<H256, StdError> {
+pub fn sha256(value: &str) -> Result<H256> {
     let value_without_prefix = if let Some(value_without_prefix) = value.strip_prefix("0x") {
         value_without_prefix
     } else {
@@ -24,8 +23,8 @@ pub fn sha256(value: &str) -> Result<H256, StdError> {
     Ok(H256::from_slice(&result))
 }
 
-pub fn calculate_versioned_hash(commitment: &str) -> Result<H256, StdError> {
-    let hashed_commitment = sha256(commitment)?;
+pub fn calculate_versioned_hash(commitment: &str) -> Result<H256> {
+    let hashed_commitment = sha256(commitment).context("Failed to encode commitment")?;
 
     // Replace first byte with the blob commitment version byte
     let hashed_commitment = &mut hashed_commitment.as_bytes()[1..].to_vec();
@@ -34,15 +33,12 @@ pub fn calculate_versioned_hash(commitment: &str) -> Result<H256, StdError> {
     Ok(H256::from_slice(hashed_commitment))
 }
 
-pub fn get_tx_versioned_hashes(tx: &Transaction) -> Result<Option<Vec<H256>>, StdError> {
+pub fn get_tx_versioned_hashes(tx: &Transaction) -> Result<Option<Vec<H256>>> {
     match tx.other.get("blobVersionedHashes") {
         Some(blob_versioned_hashes) => {
-            let blob_versioned_hashes = match blob_versioned_hashes.as_array() {
-                Some(blob_versioned_hashes) => blob_versioned_hashes,
-                None => {
-                    return Err("blobVersionedHashes field is not an array".into());
-                }
-            };
+            let blob_versioned_hashes = blob_versioned_hashes
+                .as_array()
+                .context("blobVersionedHashes field is not an array")?;
 
             if blob_versioned_hashes.is_empty() {
                 return Ok(None);
@@ -50,11 +46,17 @@ pub fn get_tx_versioned_hashes(tx: &Transaction) -> Result<Option<Vec<H256>>, St
 
             let blob_versioned_hashes = blob_versioned_hashes
                 .iter()
-                .map(|versioned_hash| match versioned_hash.as_str() {
-                    Some(versioned_hash) => Ok(H256::from_str(versioned_hash)?),
-                    None => Err("blobVersionedHashes field is not an array of strings".into()),
+                .enumerate()
+                .map(|(i, versioned_hash)| {
+                    versioned_hash
+                        .as_str()
+                        .with_context(|| format!("blobVersionedHashes[{}]: expected a string", i))
+                        .and_then(|versioned_hash| {
+                            H256::from_str(versioned_hash)
+                                .context(format!("blobVersionedHashes[{}]: invalid H256", i))
+                        })
                 })
-                .collect::<Result<Vec<H256>, StdError>>()?;
+                .collect::<Result<Vec<H256>>>()?;
 
             Ok(Some(blob_versioned_hashes))
         }

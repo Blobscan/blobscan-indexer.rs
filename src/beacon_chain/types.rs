@@ -1,3 +1,4 @@
+use anyhow::Result;
 use ethers::types::{Bytes, H256};
 use serde::{Deserialize, Serialize};
 
@@ -36,3 +37,14 @@ pub struct BlobsSidecar {
 pub struct BlobsSidecarResponse {
     pub data: BlobsSidecar,
 }
+
+#[derive(Debug, thiserror::Error)]
+pub enum BeaconAPIError {
+    #[error(transparent)]
+    Reqwest(#[from] reqwest::Error),
+
+    #[error("JSON-RPC beacon client error: {0}")]
+    JsonRpcClientError(String),
+}
+
+pub type BeaconAPIResult<T> = Result<T, BeaconAPIError>;

@@ -1,9 +1,9 @@
+use anyhow::Result;
 use ethers::prelude::*;
 
 use crate::{
     beacon_chain::{BeaconChainAPI, Options as BeaconChainAPIOptions},
     db::{blob_db_manager::DBManager, mongodb::MongoDBManager},
-    types::StdError,
 };
 
 use super::env::{get_env_vars, Environment};
@@ -15,7 +15,7 @@ pub struct Context {
     pub provider: Provider<Http>,
 }
 
-pub async fn create_context<'a>() -> Result<Context, StdError> {
+pub async fn create_context<'a>() -> Result<Context> {
     let Environment {
         beacon_node_rpc,
         db_connection_uri,

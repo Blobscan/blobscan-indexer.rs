@@ -1,3 +1,4 @@
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use mongodb::{
     bson::doc,
@@ -6,7 +7,7 @@ use mongodb::{
     Client, ClientSession, Database,
 };
 
-use crate::types::{Blob, BlockData, IndexerMetadata, StdError, TransactionData};
+use crate::types::{Blob, BlockData, IndexerMetadata, TransactionData};
 
 use self::types::{BlobDocument, BlockDocument, IndexerMetadataDocument, TransactionDocument};
 
@@ -30,7 +31,7 @@ const INDEXER_METADATA_ID: &str = "indexer_metadata";
 impl DBManager for MongoDBManager {
     type Options = MongoDBManagerOptions;
 
-    async fn new(connection_uri: &str, db_name: &str) -> Result<Self, StdError>
+    async fn new(connection_uri: &str, db_name: &str) -> Result<Self>
     where
         Self: Sized,
     {
@@ -44,14 +45,8 @@ impl DBManager for MongoDBManager {
         Ok(MongoDBManager { client, db })
     }
 
-    async fn commit_transaction(
-        &self,
-        options: Option<&mut Self::Options>,
-    ) -> Result<(), StdError> {
-        let session = match options {
-            Some(options) => &mut options.session,
-            None => return Err("No session provided".into()),
-        };
+    async fn commit_transaction(&self, options: Option<&mut Self::Options>) -> Result<()> {
+        let session = &mut options.context("No session provided")?.session;
 
         // An "UnknownTransactionCommitResult" label indicates that it is unknown whether the
         // commit has satisfied the write concern associated with the transaction. If an error
@@ -76,7 +71,7 @@ impl DBManager for MongoDBManager {
         &self,
         block_data: &BlockData,
         options: Option<&mut Self::Options>,
-    ) -> Result<(), StdError> {
+    ) -> Result<()> {
         let block_document = BlockDocument::try_from(block_data)?;
         let blocks_collection = self.db.collection::<BlockDocument>("blocks");
 
@@ -94,11 +89,7 @@ impl DBManager for MongoDBManager {
         Ok(())
     }
 
-    async fn insert_blob(
-        &self,
-        blob: &Blob,
-        options: Option<&mut Self::Options>,
-    ) -> Result<(), StdError> {
+    async fn insert_blob(&self, blob: &Blob, options: Option<&mut Self::Options>) -> Result<()> {
         let blob_document = BlobDocument::try_from(blob)?;
         let blobs_collection = self.db.collection::<BlobDocument>("blobs");
 
@@ -120,7 +111,7 @@ impl DBManager for MongoDBManager {
         &self,
         tx: &TransactionData,
         options: Option<&mut Self::Options>,
-    ) -> Result<(), StdError> {
+    ) -> Result<()> {
         let tx_document = TransactionDocument::try_from(tx)?;
         let txs_collection = self.db.collection::<TransactionDocument>("txs");
 
@@ -138,11 +129,8 @@ impl DBManager for MongoDBManager {
         Ok(())
     }
 
-    async fn start_transaction(&self, options: Option<&mut Self::Options>) -> Result<(), StdError> {
-        let session = match options {
-            Some(options) => &mut options.session,
-            None => return Err("No session provided".into()),
-        };
+    async fn start_transaction(&self, options: Option<&mut Self::Options>) -> Result<()> {
+        let session = &mut options.context("No session provided")?.session;
 
         session.start_transaction(None).await?;
 
@@ -153,7 +141,7 @@ impl DBManager for MongoDBManager {
         &self,
         _slot: u32,
         options: Option<&mut Self::Options>,
-    ) -> Result<(), StdError> {
+    ) -> Result<()> {
         let indexer_metadata_collection = self
             .db
             .collection::<IndexerMetadataDocument>("indexer_metadata");
@@ -182,7 +170,7 @@ impl DBManager for MongoDBManager {
     async fn read_metadata(
         &self,
         _options: Option<&mut Self::Options>,
-    ) -> Result<Option<IndexerMetadata>, StdError> {
+    ) -> Result<Option<IndexerMetadata>> {
         let query = doc! { "_id": INDEXER_METADATA_ID};
         let indexer_metadata_collection = self
             .db
