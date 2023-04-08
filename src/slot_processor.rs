@@ -32,15 +32,12 @@ impl<'a> SlotProcessor<'a> {
         context: &'a Context,
         options: Option<SlotProcessorOptions>,
     ) -> Result<SlotProcessor> {
-        let options = match options {
-            Some(options) => options,
-            None => SlotProcessorOptions {
-                backoff_config: ExponentialBackoffBuilder::default()
-                    .with_initial_interval(Duration::from_secs(2))
-                    .with_max_elapsed_time(Some(Duration::from_secs(60)))
-                    .build(),
-            },
-        };
+        let options = options.unwrap_or(SlotProcessorOptions {
+            backoff_config: ExponentialBackoffBuilder::default()
+                .with_initial_interval(Duration::from_secs(2))
+                .with_max_elapsed_time(Some(Duration::from_secs(60)))
+                .build(),
+        });
 
         Ok(Self {
             options,
@@ -253,6 +250,7 @@ impl<'a> SlotProcessor<'a> {
 
         Ok(())
     }
+
     async fn save_slot(&mut self, slot: u32) -> Result<()> {
         self.context
             .db_manager
