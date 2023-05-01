@@ -2,7 +2,6 @@ use anyhow::Result;
 use tracing::Instrument;
 
 use crate::{
-    db::blob_db_manager::DBManager,
     slot_processor::SlotProcessor,
     utils::{
         context::create_context,
@@ -12,7 +11,7 @@ use crate::{
 use std::{thread, time::Duration};
 
 mod beacon_chain;
-mod db;
+mod blobscan;
 mod slot_processor;
 mod types;
 mod utils;
@@ -27,8 +26,8 @@ async fn main() -> Result<()> {
     let context = create_context().await?;
     let mut slot_processor = SlotProcessor::try_init(&context, None).await?;
 
-    let mut current_slot = match context.db_manager.read_metadata(None).await? {
-        Some(metadata) => metadata.last_slot + 1,
+    let mut current_slot = match context.blobscan_api.get_slot().await? {
+        Some(last_slot) => last_slot + 1,
         None => 0,
     };
 

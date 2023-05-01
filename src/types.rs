@@ -1,40 +1,62 @@
 use std::collections::HashMap;
-
+use serde::{Deserialize, Serialize};
 use anyhow::{Error, Result};
-use ethers::types::{Block as EthersBlock, Bytes, Transaction, H256};
+use ethers::types::{Block as EthersBlock, Bytes, Transaction as EthersTransaction, H256, Address, U256, U64};
 
 use crate::utils::web3::get_tx_versioned_hashes;
 
+#[derive(Serialize, Deserialize, Debug)]
+pub struct BlockEntity {
+    pub number: U64,
+    pub hash: H256,
+    pub timestamp: U256,
+    pub slot: u32,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct TransactionEntity {
+    pub hash: H256,
+    pub from: Address,
+    pub to: Address,
+    pub blockNumber: U64,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct BlobEntity {
+    pub versionedHash: H256,
+    pub commitment: String,
+    pub data: Bytes,
+    pub txHash: H256,
+    pub index: u32,
+}
+
+
 #[derive(Debug)]
 pub struct BlockData<'a> {
-    pub block: &'a EthersBlock<Transaction>,
+    pub block: &'a EthersBlock<EthersTransaction>,
     pub slot: u32,
     pub tx_to_versioned_hashes: HashMap<H256, Vec<H256>>,
 }
 
 #[derive(Debug)]
 pub struct TransactionData<'a> {
-    pub tx: &'a Transaction,
+    pub tx: &'a EthersTransaction,
     pub blob_versioned_hashes: &'a Vec<H256>,
 }
 
 #[derive(Debug)]
-pub struct Blob<'a> {
+pub struct BlobData<'a> {
     pub data: &'a Bytes,
     pub commitment: String,
     pub versioned_hash: H256,
     pub tx_hash: H256,
 }
 
-#[derive(Debug)]
-pub struct IndexerMetadata {
-    pub last_slot: u32,
-}
 
-impl<'a> TryFrom<(&'a EthersBlock<Transaction>, u32)> for BlockData<'a> {
+impl<'a> TryFrom<(&'a EthersBlock<EthersTransaction>, u32)> for BlockData<'a> {
     type Error = Error;
 
-    fn try_from((block, slot): (&'a EthersBlock<Transaction>, u32)) -> Result<Self, Self::Error> {
+    fn try_from((block, slot): (&'a EthersBlock<EthersTransaction>, u32)) -> Result<Self, Self::Error> {
         let mut tx_to_versioned_hashes = HashMap::new();
 
         for tx in &block.transactions {

@@ -12,8 +12,7 @@ use ethers::prelude::*;
 use tracing::{error, info, warn};
 
 use crate::{
-    db::{blob_db_manager::DBManager, mongodb::MongoDBManagerOptions},
-    types::{Blob, BlockData, TransactionData},
+    types::{BlockData, BlockEntity, BlobEntity, TransactionEntity},
     utils::{context::Context, web3::calculate_versioned_hash},
 };
 
@@ -24,7 +23,6 @@ pub struct SlotProcessorOptions {
 pub struct SlotProcessor<'a> {
     options: SlotProcessorOptions,
     context: &'a Context,
-    db_options: MongoDBManagerOptions,
 }
 
 impl<'a> SlotProcessor<'a> {
@@ -41,10 +39,7 @@ impl<'a> SlotProcessor<'a> {
 
         Ok(Self {
             options,
-            context,
-            db_options: MongoDBManagerOptions {
-                session: context.db_manager.client.start_session(None).await?,
-            },
+            context
         })
     }
 
@@ -94,12 +89,7 @@ impl<'a> SlotProcessor<'a> {
 
                     match slot_processor.process_slot(slot).await {
                         Ok(_) => Ok(()),
-                        Err(process_slot_err) => {
-                            match slot_processor.db_options.session.abort_transaction().await {
-                                Ok(_) => Err(process_slot_err),
-                                Err(err) => Err(BackoffError::Permanent(err.into())),
-                            }
-                        }
+                        Err(e) => Err(e),
                     }
                 }
             },
@@ -114,10 +104,9 @@ impl<'a> SlotProcessor<'a> {
     pub async fn process_slot(&mut self, slot: u32) -> Result<(), backoff::Error<anyhow::Error>> {
         let Context {
             beacon_api,
-            db_manager,
+            blobscan_api,
             provider,
         } = self.context;
-        let db_options = &mut self.db_options;
 
         let start = Instant::now();
 
@@ -192,54 +181,56 @@ impl<'a> SlotProcessor<'a> {
             }
         };
 
-        db_manager.start_transaction(Some(db_options)).await?;
+        let execution_block_number = execution_block.number.unwrap();
 
-        db_manager
-            .insert_block(&block_data, Some(db_options))
-            .await?;
+        let block_entity = BlockEntity {
+            hash: execution_block_hash,
+            slot,
+            number: execution_block_number,
+            timestamp: execution_block.timestamp,
+        };
 
-        for tx in block_data.block.transactions.iter() {
-            let blob_versioned_hashes = block_data
-                .tx_to_versioned_hashes
-                .get(&tx.hash)
-                .with_context(|| format!("Couldn't find versioned hashes for tx {}", tx.hash))
-                .map_err(BackoffError::Permanent)?;
+        let transactions_entities = block_data.block.transactions
+            .iter()
+            .filter(|tx| block_data.tx_to_versioned_hashes.contains_key(&tx.hash))
+            .map(|tx| {
+                Ok(TransactionEntity {
+                    blockNumber: execution_block_number,
+                    from: tx.from,
+                    to: tx.to.unwrap(),
+                    hash: tx.hash
+                })
+            })
+            .collect::<Result<Vec<TransactionEntity>>>()?;
 
-            db_manager
-                .insert_tx(
-                    &TransactionData {
-                        tx,
-                        blob_versioned_hashes,
+        let blobs_entities = blobs
+            .iter().enumerate()
+            .map(|(i, blob)| {
+                let commitment = blob_kzg_commitments[i].clone();
+                let versioned_hash = calculate_versioned_hash(&commitment)?;
+                let tx_hash = block_data.tx_to_versioned_hashes.iter().find_map(
+                    |(tx_hash, versioned_hashes)| match versioned_hashes.contains(&versioned_hash) {
+                        true => Some(tx_hash),
+                        false => None,
                     },
-                    Some(db_options),
-                )
-                .await?;
-        }
+                ).with_context(|| format!("No blob transaction found for commitment {commitment} and versioned hash {versioned_hash}"))?;
+    
 
-        for (i, blob) in blobs.iter().enumerate() {
-            let commitment = blob_kzg_commitments[i].clone();
-            let versioned_hash = calculate_versioned_hash(&commitment)?;
-            let tx_hash = block_data.tx_to_versioned_hashes.iter().find_map(
-                |(tx_hash, versioned_hashes)| match versioned_hashes.contains(&versioned_hash) {
-                    true => Some(tx_hash),
-                    false => None,
-                },
-            ).with_context(|| format!("No blob transaction found for commitment {commitment} and versioned hash {versioned_hash}"))?;
+                Ok(BlobEntity {
+                    versionedHash: versioned_hash,
+                    commitment,
+                    data: blob.clone(),
+                    index: i as u32,
+                    txHash: *tx_hash,
+                })
+            })
+            .collect::<Result<Vec<BlobEntity>>>()?;
 
-            db_manager
-                .insert_blob(
-                    &Blob {
-                        commitment,
-                        data: blob,
-                        versioned_hash,
-                        tx_hash: *tx_hash,
-                    },
-                    Some(db_options),
-                )
-                .await?;
-        }
-
-        db_manager.commit_transaction(Some(db_options)).await?;
+        
+        blobscan_api
+            .index(block_entity, transactions_entities, blobs_entities)
+            .await
+            .map_err(|err| BackoffError::transient(anyhow::Error::new(err)))?;
 
         let duration = start.elapsed();
 
@@ -252,10 +243,7 @@ impl<'a> SlotProcessor<'a> {
     }
 
     async fn save_slot(&mut self, slot: u32) -> Result<()> {
-        self.context
-            .db_manager
-            .update_last_slot(slot, Some(&mut self.db_options))
-            .await?;
+        self.context.blobscan_api.update_slot(slot).await?;
 
         Ok(())
     }

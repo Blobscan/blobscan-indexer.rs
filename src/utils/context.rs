@@ -3,7 +3,7 @@ use ethers::prelude::*;
 
 use crate::{
     beacon_chain::{BeaconChainAPI, Options as BeaconChainAPIOptions},
-    db::{blob_db_manager::DBManager, mongodb::MongoDBManager},
+    blobscan::{BlobscanAPI, Options as BlobscanAPIOptions},
 };
 
 use super::env::{get_env_vars, Environment};
@@ -11,15 +11,14 @@ use super::env::{get_env_vars, Environment};
 #[derive(Debug)]
 pub struct Context {
     pub beacon_api: BeaconChainAPI,
-    pub db_manager: MongoDBManager,
+    pub blobscan_api: BlobscanAPI,
     pub provider: Provider<Http>,
 }
 
 pub async fn create_context<'a>() -> Result<Context> {
     let Environment {
         beacon_node_rpc,
-        db_connection_uri,
-        db_name,
+        blobscan_api_endpoint,
         execution_node_rpc,
         ..
     } = get_env_vars();
@@ -29,7 +28,7 @@ pub async fn create_context<'a>() -> Result<Context> {
             beacon_node_rpc,
             Some(BeaconChainAPIOptions { timeout: Some(8) }),
         )?,
-        db_manager: MongoDBManager::new(&db_connection_uri, &db_name).await?,
+        blobscan_api: BlobscanAPI::try_from(blobscan_api_endpoint,  Some(BlobscanAPIOptions { timeout: Some(8) }),)?,
         provider: Provider::<Http>::try_from(execution_node_rpc)?,
     })
 }

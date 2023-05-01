@@ -1,9 +1,8 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Environment {
-    pub db_connection_uri: String,
-    pub db_name: String,
+    pub blobscan_api_endpoint: String,
     #[serde(default = "default_execution_node_rpc")]
     pub execution_node_rpc: String,
     #[serde(default = "default_beacon_node_rpc")]
