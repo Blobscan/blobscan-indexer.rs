@@ -17,18 +17,21 @@ pub struct Context {
 
 pub async fn create_context<'a>() -> Result<Context> {
     let Environment {
-        beacon_node_rpc,
         blobscan_api_endpoint,
+        beacon_node_rpc,
         execution_node_rpc,
         ..
     } = get_env_vars();
 
     Ok(Context {
+        blobscan_api: BlobscanAPI::try_from(
+            blobscan_api_endpoint,
+            Some(BlobscanAPIOptions { timeout: Some(8) }),
+        )?,
         beacon_api: BeaconChainAPI::try_from(
             beacon_node_rpc,
             Some(BeaconChainAPIOptions { timeout: Some(8) }),
         )?,
-        blobscan_api: BlobscanAPI::try_from(blobscan_api_endpoint,  Some(BlobscanAPIOptions { timeout: Some(8) }),)?,
         provider: Provider::<Http>::try_from(execution_node_rpc)?,
     })
 }

@@ -182,7 +182,7 @@ impl<'a> SlotProcessor<'a> {
             }
         };
 
-        let execution_block_number = execution_block.number.unwrap();
+        let execution_block_number = execution_block.number.with_context(|| format!("Missing block number field in execution block {execution_block_hash}"))?;
 
         let block_entity = BlockEntity {
             hash: execution_block_hash,
@@ -195,11 +195,14 @@ impl<'a> SlotProcessor<'a> {
             .iter()
             .filter(|tx| block_data.tx_to_versioned_hashes.contains_key(&tx.hash))
             .map(|tx| {
+                let hash = tx.hash;
+                let to = tx.to.with_context(|| format!("Missing to field in transaction {hash}"))?;
+
                 Ok(TransactionEntity {
                     blockNumber: execution_block_number,
                     from: tx.from,
-                    to: tx.to.unwrap(),
-                    hash: tx.hash
+                    to,
+                    hash                
                 })
             })
             .collect::<Result<Vec<TransactionEntity>>>()?;
@@ -207,6 +210,8 @@ impl<'a> SlotProcessor<'a> {
         let blobs_entities = blobs
             .iter()
             .map(|blob| {
+                // Need to clone it as it's not possible to have a struct containing a reference field
+                // as serde can't serialize it.
                 let data = blob.blob.clone();
                 let commitment = blob.kzg_commitment.clone();
                 let versioned_hash = calculate_versioned_hash(&commitment)?;

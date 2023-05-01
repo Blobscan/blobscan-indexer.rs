@@ -1,7 +1,9 @@
-use std::collections::HashMap;
-use serde::{Deserialize, Serialize};
 use anyhow::{Error, Result};
-use ethers::types::{Block as EthersBlock, Bytes, Transaction as EthersTransaction, H256, Address, U256, U64};
+use ethers::types::{
+    Address, Block as EthersBlock, Bytes, Transaction as EthersTransaction, H256, U256, U64,
+};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 use crate::utils::web3::get_tx_versioned_hashes;
 
@@ -30,7 +32,6 @@ pub struct BlobEntity {
     pub index: u32,
 }
 
-
 #[derive(Debug)]
 pub struct BlockData<'a> {
     pub block: &'a EthersBlock<EthersTransaction>,
@@ -52,11 +53,12 @@ pub struct BlobData<'a> {
     pub tx_hash: H256,
 }
 
-
 impl<'a> TryFrom<(&'a EthersBlock<EthersTransaction>, u32)> for BlockData<'a> {
     type Error = Error;
 
-    fn try_from((block, slot): (&'a EthersBlock<EthersTransaction>, u32)) -> Result<Self, Self::Error> {
+    fn try_from(
+        (block, slot): (&'a EthersBlock<EthersTransaction>, u32),
+    ) -> Result<Self, Self::Error> {
         let mut tx_to_versioned_hashes = HashMap::new();
 
         for tx in &block.transactions {

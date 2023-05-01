@@ -48,12 +48,12 @@ impl BlobscanAPI {
             blobs,
         };
 
-        let block_response = self.client.post(url).json(&index_request).send().await?;
+        let index_response = self.client.post(url).json(&index_request).send().await?;
 
-        match block_response.status() {
-            StatusCode::CREATED => Ok(()),
-            _ => Err(BlobscanAPIError::JsonRpcClientError(
-                block_response.text().await?,
+        match index_response.status() {
+            StatusCode::OK => Ok(()),
+            _ => Err(BlobscanAPIError::BlobscanClientError(
+                index_response.text().await?,
             )),
         }
     }
@@ -70,8 +70,8 @@ impl BlobscanAPI {
             .await?;
 
         match slot_response.status() {
-            StatusCode::CREATED => Ok(()),
-            _ => Err(BlobscanAPIError::JsonRpcClientError(
+            StatusCode::OK => Ok(()),
+            _ => Err(BlobscanAPIError::BlobscanClientError(
                 slot_response.text().await?,
             )),
         }
@@ -86,7 +86,7 @@ impl BlobscanAPI {
         match slot_response.status() {
             StatusCode::OK => Ok(Some(slot_response.json::<SlotResponse>().await?.slot)),
             StatusCode::NOT_FOUND => Ok(None),
-            _ => Err(BlobscanAPIError::JsonRpcClientError(
+            _ => Err(BlobscanAPIError::BlobscanClientError(
                 slot_response.text().await?,
             )),
         }

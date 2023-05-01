@@ -25,8 +25,8 @@ pub enum BlobscanAPIError {
     #[error(transparent)]
     Reqwest(#[from] reqwest::Error),
 
-    #[error("JSON-RPC beacon client error: {0}")]
-    JsonRpcClientError(String),
+    #[error("Blobscan client error: {0}")]
+    BlobscanClientError(String),
 }
 
 pub type BlobscanAPIResult<T> = Result<T, BlobscanAPIError>;
