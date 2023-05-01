@@ -2,8 +2,7 @@ use reqwest::{Client, StatusCode};
 use std::time::Duration;
 
 use self::types::{
-    BeaconAPIError, BeaconAPIResult, BlobsSidecar, BlobsSidecarResponse, BlockMessage as Block,
-    BlockResponse,
+    BeaconAPIError, BeaconAPIResult, BlobData, BlobsResponse, BlockMessage as Block, BlockResponse,
 };
 
 mod types;
@@ -55,18 +54,16 @@ impl BeaconChainAPI {
         }
     }
 
-    pub async fn get_blobs_sidecar(&self, slot: u32) -> BeaconAPIResult<Option<BlobsSidecar>> {
-        let url = self.build_url(&format!("eth/v1/beacon/blobs_sidecars/{slot}"));
+    pub async fn get_blobs(&self, slot: u32) -> BeaconAPIResult<Option<Vec<BlobData>>> {
+        let url = self.build_url(&format!("eth/v1/beacon/blobs/{slot}"));
 
-        let sidecar_response = self.client.get(url).send().await?;
+        let blobs_response = self.client.get(url).send().await?;
 
-        match sidecar_response.status() {
-            StatusCode::OK => Ok(Some(
-                sidecar_response.json::<BlobsSidecarResponse>().await?.data,
-            )),
+        match blobs_response.status() {
+            StatusCode::OK => Ok(Some(blobs_response.json::<BlobsResponse>().await?.data)),
             StatusCode::NOT_FOUND => Ok(None),
             _ => Err(BeaconAPIError::JsonRpcClientError(
-                sidecar_response.text().await?,
+                blobs_response.text().await?,
             )),
         }
     }
