@@ -30,7 +30,7 @@ pub struct BlockResponse {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct BlobData {
-    pub index: u32,
+    pub index: String,
     pub kzg_commitment: String,
     pub blob: Bytes,
 }

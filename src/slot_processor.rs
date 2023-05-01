@@ -202,7 +202,7 @@ impl<'a> SlotProcessor<'a> {
                     .with_context(|| format!("Missing to field in transaction {hash}"))?;
 
                 Ok(TransactionEntity {
-                    blockNumber: execution_block_number,
+                    block_number: execution_block_number,
                     from: tx.from,
                     to,
                     hash,
@@ -226,11 +226,11 @@ impl<'a> SlotProcessor<'a> {
                 ).with_context(|| format!("No blob transaction found for commitment {commitment} and versioned hash {versioned_hash}"))?;
 
                 Ok(BlobEntity {
-                    versionedHash: versioned_hash,
+                    versioned_hash,
                     commitment,
                     data,
-                    index: blob.index,
-                    txHash: *tx_hash,
+                    index: blob.index.parse()?,
+                    tx_hash: *tx_hash,
                 })
             })
             .collect::<Result<Vec<BlobEntity>>>()?;
