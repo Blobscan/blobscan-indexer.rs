@@ -12,9 +12,8 @@ envy = "0.4.2"
 ethers = "1.0.2"
 futures = "0.3.25"
 hex = "0.4.3"
-mongodb = "2.3.1"
 reqwest = { version = "0.11.13", features = ["json"] }
-serde = "1.0.150"
+serde = { version = "1.0.150", features = ["derive"] }
 tokio = { version = "1.23.0", features = ["full"] }
 
 # logging
