@@ -43,7 +43,7 @@ impl BlobscanAPI {
         let url = self.build_url(&path);
 
         let index_request = IndexRequest {
-            block: block,
+            block,
             transactions,
             blobs,
         };

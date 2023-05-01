@@ -12,7 +12,7 @@ use ethers::prelude::*;
 use tracing::{error, info, warn};
 
 use crate::{
-    types::{BlockData, BlockEntity, BlobEntity, TransactionEntity},
+    types::{BlobEntity, BlockData, BlockEntity, TransactionEntity},
     utils::{context::Context, web3::calculate_versioned_hash},
 };
 
@@ -37,10 +37,7 @@ impl<'a> SlotProcessor<'a> {
                 .build(),
         });
 
-        Ok(Self {
-            options,
-            context
-        })
+        Ok(Self { options, context })
     }
 
     pub async fn process_slots(&mut self, start_slot: u32, end_slot: u32) -> Result<()> {
@@ -182,7 +179,9 @@ impl<'a> SlotProcessor<'a> {
             }
         };
 
-        let execution_block_number = execution_block.number.with_context(|| format!("Missing block number field in execution block {execution_block_hash}"))?;
+        let execution_block_number = execution_block.number.with_context(|| {
+            format!("Missing block number field in execution block {execution_block_hash}")
+        })?;
 
         let block_entity = BlockEntity {
             hash: execution_block_hash,
@@ -191,18 +190,22 @@ impl<'a> SlotProcessor<'a> {
             timestamp: execution_block.timestamp,
         };
 
-        let transactions_entities = block_data.block.transactions
+        let transactions_entities = block_data
+            .block
+            .transactions
             .iter()
             .filter(|tx| block_data.tx_to_versioned_hashes.contains_key(&tx.hash))
             .map(|tx| {
                 let hash = tx.hash;
-                let to = tx.to.with_context(|| format!("Missing to field in transaction {hash}"))?;
+                let to = tx
+                    .to
+                    .with_context(|| format!("Missing to field in transaction {hash}"))?;
 
                 Ok(TransactionEntity {
                     blockNumber: execution_block_number,
                     from: tx.from,
                     to,
-                    hash                
+                    hash,
                 })
             })
             .collect::<Result<Vec<TransactionEntity>>>()?;
@@ -221,7 +224,6 @@ impl<'a> SlotProcessor<'a> {
                         false => None,
                     },
                 ).with_context(|| format!("No blob transaction found for commitment {commitment} and versioned hash {versioned_hash}"))?;
-    
 
                 Ok(BlobEntity {
                     versionedHash: versioned_hash,
@@ -233,7 +235,6 @@ impl<'a> SlotProcessor<'a> {
             })
             .collect::<Result<Vec<BlobEntity>>>()?;
 
-        
         blobscan_api
             .index(block_entity, transactions_entities, blobs_entities)
             .await
