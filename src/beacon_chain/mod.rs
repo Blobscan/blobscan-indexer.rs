@@ -56,7 +56,7 @@ impl BeaconChainAPI {
     }
 
     pub async fn get_blobs_sidecar(&self, slot: u32) -> BeaconAPIResult<Option<BlobsSidecar>> {
-        let url = self.build_url(&format!("eth/v1/beacon/blobs_sidecars/{slot}"));
+        let url = self.build_url(&format!("eth/v1/beacon/blobs/{slot}"));
 
         let sidecar_response = self.client.get(url).send().await?;
 
