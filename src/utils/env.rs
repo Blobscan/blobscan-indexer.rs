@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Environment {
+    #[serde(default = "default_blobscan_api_endpoint")]
     pub blobscan_api_endpoint: String,
     #[serde(default = "default_execution_node_rpc")]
     pub execution_node_rpc: String,
@@ -15,6 +16,10 @@ pub struct Environment {
 }
 
 pub const DEV_MODE: &str = "development";
+
+fn default_blobscan_api_endpoint() -> String {
+    "http://localhost:3000".to_string()
+}
 
 fn default_execution_node_rpc() -> String {
     "http://localhost:8545".to_string()
