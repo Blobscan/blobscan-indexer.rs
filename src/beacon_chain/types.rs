@@ -29,13 +29,15 @@ pub struct BlockResponse {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct BlobsSidecar {
-    pub blobs: Vec<Bytes>,
+pub struct BlobData {
+    pub index: u32,
+    pub kzg_commitment: String,
+    pub blob: Bytes,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct BlobsSidecarResponse {
-    pub data: BlobsSidecar,
+pub struct BlobsResponse {
+    pub data: Vec<BlobData>,
 }
 
 #[derive(Debug, thiserror::Error)]

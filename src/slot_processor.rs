@@ -132,7 +132,7 @@ impl<'a> SlotProcessor<'a> {
             }
         };
 
-        let blob_kzg_commitments = match beacon_block.body.blob_kzg_commitments {
+        match beacon_block.body.blob_kzg_commitments {
             Some(commitments) => commitments,
             None => {
                 info!(
@@ -142,6 +142,7 @@ impl<'a> SlotProcessor<'a> {
                 return Ok(());
             }
         };
+
         let execution_block_hash = execution_payload.block_hash;
 
         let execution_block = provider
@@ -161,17 +162,17 @@ impl<'a> SlotProcessor<'a> {
         }
 
         let blobs = match beacon_api
-            .get_blobs_sidecar(slot)
+            .get_blobs(slot)
             .await
             .map_err(|err| BackoffError::transient(anyhow::Error::new(err)))?
         {
-            Some(blobs_sidecar) => {
-                if blobs_sidecar.blobs.is_empty() {
+            Some(blobs) => {
+                if blobs.is_empty() {
                     info!("[Slot {slot}] Skipping as blobs sidecar is empty");
 
                     return Ok(());
                 } else {
-                    blobs_sidecar.blobs
+                    blobs
                 }
             }
             None => {
@@ -204,9 +205,10 @@ impl<'a> SlotProcessor<'a> {
             .collect::<Result<Vec<TransactionEntity>>>()?;
 
         let blobs_entities = blobs
-            .iter().enumerate()
-            .map(|(i, blob)| {
-                let commitment = blob_kzg_commitments[i].clone();
+            .iter()
+            .map(|blob| {
+                let data = blob.blob.clone();
+                let commitment = blob.kzg_commitment.clone();
                 let versioned_hash = calculate_versioned_hash(&commitment)?;
                 let tx_hash = block_data.tx_to_versioned_hashes.iter().find_map(
                     |(tx_hash, versioned_hashes)| match versioned_hashes.contains(&versioned_hash) {
@@ -219,8 +221,8 @@ impl<'a> SlotProcessor<'a> {
                 Ok(BlobEntity {
                     versionedHash: versioned_hash,
                     commitment,
-                    data: blob.clone(),
-                    index: i as u32,
+                    data,
+                    index: blob.index,
                     txHash: *tx_hash,
                 })
             })
