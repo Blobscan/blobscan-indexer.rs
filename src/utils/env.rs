@@ -18,7 +18,7 @@ pub struct Environment {
 pub const DEV_MODE: &str = "development";
 
 fn default_blobscan_api_endpoint() -> String {
-    "http://localhost:3000".to_string()
+    "http://localhost:3001".to_string()
 }
 
 fn default_beacon_node_rpc() -> String {
