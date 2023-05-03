@@ -10,6 +10,7 @@ pub struct Environment {
     pub execution_node_rpc: String,
     #[serde(default = "default_mode")]
     pub mode: String,
+    pub secret_key: String,
     #[serde(default = "default_logger")]
     #[allow(dead_code)] // Temporal until we move to tracing
     logger: String,

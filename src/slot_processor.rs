@@ -62,7 +62,7 @@ impl<'a> SlotProcessor<'a> {
         Ok(())
     }
 
-    async fn process_slot_with_retry(&mut self, slot: u32) -> Result<()> {
+    async fn process_slot_with_retry(&self, slot: u32) -> Result<()> {
         let backoff_config = self.options.backoff_config.clone();
 
         /*
@@ -82,7 +82,7 @@ impl<'a> SlotProcessor<'a> {
                  In this case, we allow the indexer to crash as the state might be invalid. 
                 */
                 async move {
-                    let mut slot_processor = slot_processor.lock().unwrap();
+                    let slot_processor = slot_processor.lock().unwrap();
 
                     match slot_processor.process_slot(slot).await {
                         Ok(_) => Ok(()),
@@ -98,7 +98,7 @@ impl<'a> SlotProcessor<'a> {
         .await
     }
 
-    pub async fn process_slot(&mut self, slot: u32) -> Result<(), backoff::Error<anyhow::Error>> {
+    pub async fn process_slot(&self, slot: u32) -> Result<(), backoff::Error<anyhow::Error>> {
         let Context {
             beacon_api,
             blobscan_api,

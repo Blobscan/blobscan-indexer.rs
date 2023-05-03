@@ -15,6 +15,8 @@ hex = "0.4.3"
 reqwest = { version = "0.11.13", features = ["json"] }
 serde = { version = "1.0.150", features = ["derive"] }
 tokio = { version = "1.23.0", features = ["full"] }
+jsonwebtoken = "8.3.0"
+
 
 # logging
 log = "0.4.17"
@@ -27,3 +29,4 @@ tracing-log = "0.1.1"
 anyhow = { version = "1.0.70", features = ["backtrace"] }
 thiserror = "1.0.40"
 backoff = { version = "0.4.0", features = ["tokio"] }
+chrono = "0.4.24"

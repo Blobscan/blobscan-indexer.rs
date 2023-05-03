@@ -27,6 +27,9 @@ pub enum BlobscanAPIError {
 
     #[error("Blobscan client error: {0}")]
     BlobscanClientError(String),
+
+    #[error(transparent)]
+    JWTError(#[from] anyhow::Error),
 }
 
 pub type BlobscanAPIResult<T> = Result<T, BlobscanAPIError>;

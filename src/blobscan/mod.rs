@@ -1,35 +1,46 @@
-use reqwest::{Client, StatusCode};
 use std::time::Duration;
+
+use reqwest::{Client, StatusCode};
 
 use crate::types::{BlobEntity, BlockEntity, TransactionEntity};
 
-use self::types::{BlobscanAPIError, BlobscanAPIResult, IndexRequest, SlotRequest, SlotResponse};
+use self::{
+    jwt_manager::{Config as JWTManagerConfig, JWTManager},
+    types::{BlobscanAPIError, BlobscanAPIResult, IndexRequest, SlotRequest, SlotResponse},
+};
 
+mod jwt_manager;
 mod types;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct BlobscanAPI {
     base_url: String,
     client: reqwest::Client,
+    jwt_manager: JWTManager,
 }
 
-pub struct Options {
+pub struct Config {
+    pub base_url: String,
+    pub secret_key: String,
     pub timeout: Option<u64>,
 }
 
 impl BlobscanAPI {
-    pub fn try_from(base_url: String, options: Option<Options>) -> BlobscanAPIResult<Self> {
+    pub fn try_from(config: Config) -> BlobscanAPIResult<Self> {
         let mut client_builder = Client::builder();
 
-        if let Some(options) = options {
-            if let Some(timeout) = options.timeout {
-                client_builder = client_builder.timeout(Duration::from_secs(timeout));
-            }
+        if let Some(timeout) = config.timeout {
+            client_builder = client_builder.timeout(Duration::from_secs(timeout));
         }
 
         Ok(Self {
-            base_url,
+            base_url: config.base_url,
             client: client_builder.build()?,
+            jwt_manager: JWTManager::new(JWTManagerConfig {
+                secret_key: config.secret_key,
+                refresh_interval: chrono::Duration::minutes(30),
+                safety_magin: None,
+            }),
         })
     }
 
@@ -41,14 +52,20 @@ impl BlobscanAPI {
     ) -> BlobscanAPIResult<()> {
         let path = String::from("index");
         let url = self.build_url(&path);
-
+        let token = self.jwt_manager.get_token()?;
         let index_request = IndexRequest {
             block,
             transactions,
             blobs,
         };
 
-        let index_response = self.client.post(url).json(&index_request).send().await?;
+        let index_response = self
+            .client
+            .post(url)
+            .bearer_auth(token)
+            .json(&index_request)
+            .send()
+            .await?;
 
         match index_response.status() {
             StatusCode::OK => Ok(()),
@@ -61,10 +78,12 @@ impl BlobscanAPI {
     pub async fn update_slot(&self, slot: u32) -> BlobscanAPIResult<()> {
         let path = String::from("slot");
         let url = self.build_url(&path);
+        let token = self.jwt_manager.get_token()?;
 
         let slot_response = self
             .client
             .post(url)
+            .bearer_auth(token)
             .json(&SlotRequest { slot })
             .send()
             .await?;
@@ -80,8 +99,8 @@ impl BlobscanAPI {
     pub async fn get_slot(&self) -> BlobscanAPIResult<Option<u32>> {
         let path = String::from("slot");
         let url = self.build_url(&path);
-
-        let slot_response = self.client.get(url).send().await?;
+        let token = self.jwt_manager.get_token()?;
+        let slot_response = self.client.get(url).bearer_auth(token).send().await?;
 
         match slot_response.status() {
             StatusCode::OK => Ok(Some(slot_response.json::<SlotResponse>().await?.slot)),

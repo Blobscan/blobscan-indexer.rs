@@ -23,9 +23,8 @@ async fn main() -> Result<()> {
     let subscriber = get_subscriber("blobscan_indexer".into(), "info".into(), std::io::stdout);
     init_subscriber(subscriber);
 
-    let context = create_context().await?;
+    let context = create_context()?;
     let mut slot_processor = SlotProcessor::try_init(&context, None).await?;
-
     let mut current_slot = match context.blobscan_api.get_slot().await? {
         Some(last_slot) => last_slot + 1,
         None => 0,
