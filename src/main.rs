@@ -45,6 +45,6 @@ async fn main() -> Result<()> {
                 current_slot = latest_slot;
             }
         }
-        thread::sleep(Duration::from_secs(1));
+        thread::sleep(Duration::from_secs(10));
     }
 }
