@@ -1,0 +1,45 @@
+{
+  // Use IntelliSense to learn about possible attributes.
+  // Hover to view descriptions of existing attributes.
+  // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug executable 'blob-indexer'",
+      "cargo": {
+        "args": [
+          "build",
+          "--bin=blob-indexer",
+          "--package=blob-indexer"
+        ],
+        "filter": {
+          "name": "blob-indexer",
+          "kind": "bin"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug unit tests in executable 'blob-indexer'",
+      "cargo": {
+        "args": [
+          "test",
+          "--no-run",
+          "--bin=blob-indexer",
+          "--package=blob-indexer"
+        ],
+        "filter": {
+          "name": "blob-indexer",
+          "kind": "bin"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    }
+  ]
+}
