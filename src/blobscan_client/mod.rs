@@ -2,15 +2,17 @@ use std::time::Duration;
 
 use reqwest::{Client, StatusCode};
 
-use crate::types::{BlobEntity, BlockEntity, TransactionEntity};
-
 use self::{
     jwt_manager::{Config as JWTManagerConfig, JWTManager},
-    types::{BlobscanClientError, BlobscanClientResult, IndexRequest, SlotRequest, SlotResponse},
+    types::{
+        BlobEntity, BlobscanClientError, BlobscanClientResult, BlockEntity, IndexRequest,
+        SlotRequest, SlotResponse, TransactionEntity,
+    },
 };
 
 mod jwt_manager;
-mod types;
+
+pub mod types;
 
 #[derive(Debug)]
 pub struct BlobscanClient {

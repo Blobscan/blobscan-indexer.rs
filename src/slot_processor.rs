@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -8,13 +9,47 @@ use backoff::{
     future::retry_notify, Error as BackoffError, ExponentialBackoff, ExponentialBackoffBuilder,
 };
 use ethers::prelude::*;
+use ethers::types::{Block as EthersBlock, Transaction as EthersTransaction, H256};
 
 use tracing::{error, info, warn};
 
 use crate::{
-    types::{BlobEntity, BlockData, BlockEntity, TransactionEntity},
-    utils::{context::Context, web3::calculate_versioned_hash},
+    beacon_client::types::BlobData,
+    blobscan_client::types::{BlobEntity, BlockEntity, TransactionEntity},
+    context::Context,
+    utils::web3::{calculate_versioned_hash, get_tx_versioned_hashes},
 };
+
+fn create_tx_hash_versioned_hashes_mapping(
+    block: &EthersBlock<EthersTransaction>,
+) -> Result<HashMap<H256, Vec<H256>>, anyhow::Error> {
+    let mut tx_to_versioned_hashes = HashMap::new();
+
+    for tx in &block.transactions {
+        match get_tx_versioned_hashes(tx)? {
+            Some(versioned_hashes) => {
+                tx_to_versioned_hashes.insert(tx.hash, versioned_hashes);
+            }
+            None => continue,
+        };
+    }
+    Ok(tx_to_versioned_hashes)
+}
+
+fn create_versioned_hash_blob_mapping(
+    blobs: &Vec<BlobData>,
+) -> Result<HashMap<H256, &BlobData>, anyhow::Error> {
+    let mut version_hash_to_blob = HashMap::new();
+
+    for blob in blobs {
+        let versioned_hash = calculate_versioned_hash(&blob.kzg_commitment)?;
+        if !version_hash_to_blob.contains_key(&versioned_hash) {
+            version_hash_to_blob.insert(versioned_hash, blob);
+        }
+    }
+
+    Ok(version_hash_to_blob)
+}
 
 pub struct SlotProcessorOptions {
     pub backoff_config: ExponentialBackoff,
@@ -73,29 +108,29 @@ impl<'a> SlotProcessor<'a> {
         let shared_slot_processor = Arc::new(Mutex::new(self));
 
         retry_notify(
-            backoff_config,
-            || {
-                let slot_processor = Arc::clone(&shared_slot_processor);
+          backoff_config,
+          || {
+              let slot_processor = Arc::clone(&shared_slot_processor);
 
-                /*
-                 Using unwrap() here. If Mutex is poisoned due to a panic, it returns an error. 
-                 In this case, we allow the indexer to crash as the state might be invalid. 
-                */
-                async move {
-                    let slot_processor = slot_processor.lock().unwrap();
+              /*
+               Using unwrap() here. If Mutex is poisoned due to a panic, it returns an error. 
+               In this case, we allow the indexer to crash as the state might be invalid. 
+              */
+              async move {
+                  let slot_processor = slot_processor.lock().unwrap();
 
-                    match slot_processor.process_slot(slot).await {
-                        Ok(_) => Ok(()),
-                        Err(e) => Err(e),
-                    }
-                }
-            },
-            |e, duration: Duration| {
-                let duration = duration.as_secs();
-                warn!("[Slot {slot}] Slot processing failed. Retrying in {duration} seconds… (Reason: {e})");
-            },
-        )
-        .await
+                  match slot_processor.process_slot(slot).await {
+                      Ok(_) => Ok(()),
+                      Err(e) => Err(e),
+                  }
+              }
+          },
+          |e, duration: Duration| {
+              let duration = duration.as_secs();
+              warn!("[Slot {slot}] Slot processing failed. Retrying in {duration} seconds… (Reason: {e})");
+          },
+      )
+      .await
     }
 
     pub async fn process_slot(&self, slot: u32) -> Result<(), backoff::Error<anyhow::Error>> {
@@ -106,6 +141,8 @@ impl<'a> SlotProcessor<'a> {
         } = self.context;
 
         let start = Instant::now();
+
+        // Fetch execution block data from a given slot and perform some checks
 
         let beacon_block = match beacon_client
             .get_block(Some(slot))
@@ -142,6 +179,8 @@ impl<'a> SlotProcessor<'a> {
 
         let execution_block_hash = execution_payload.block_hash;
 
+        // Fetch execution block and perform some checks
+
         let execution_block = provider
             .get_block_with_txs(execution_block_hash)
             .await
@@ -149,14 +188,16 @@ impl<'a> SlotProcessor<'a> {
             .with_context(|| format!("Execution block {execution_block_hash} not found"))
             .map_err(BackoffError::Permanent)?;
 
-        let block_data =
-            BlockData::try_from((&execution_block, slot)).map_err(BackoffError::Permanent)?;
+        let tx_hash_to_versioned_hashes = create_tx_hash_versioned_hashes_mapping(&execution_block)
+            .map_err(BackoffError::Permanent)?;
 
-        if block_data.tx_to_versioned_hashes.is_empty() {
+        if tx_hash_to_versioned_hashes.is_empty() {
             info!("[Slot {slot}] Skipping as execution block doesn't contain blob txs");
 
             return Ok(());
         }
+
+        // Fetch blobs and perform some checks
 
         let blobs = match beacon_client
             .get_blobs(slot)
@@ -179,64 +220,31 @@ impl<'a> SlotProcessor<'a> {
             }
         };
 
-        let execution_block_number = execution_block.number.with_context(|| {
-            format!("Missing block number field in execution block {execution_block_hash}")
-        })?;
+        // Create entities to be indexed
 
-        let block_entity = BlockEntity {
-            hash: execution_block_hash,
-            slot,
-            number: execution_block_number,
-            timestamp: execution_block.timestamp,
-        };
+        let block_entity = BlockEntity::try_from((&execution_block, slot))?;
 
-        let transactions_entities = block_data
-            .block
+        let transactions_entities = execution_block
             .transactions
             .iter()
-            .filter(|tx| block_data.tx_to_versioned_hashes.contains_key(&tx.hash))
-            .map(|tx| {
-                let hash = tx.hash;
-                let to = tx
-                    .to
-                    .with_context(|| format!("Missing to field in transaction {hash}"))?;
-
-                Ok(TransactionEntity {
-                    block_number: execution_block_number,
-                    from: tx.from,
-                    to,
-                    hash,
-                })
-            })
+            .filter(|tx| tx_hash_to_versioned_hashes.contains_key(&tx.hash))
+            .map(|tx| Ok(TransactionEntity::try_from((tx, &execution_block))?))
             .collect::<Result<Vec<TransactionEntity>>>()?;
 
-        let blobs_entities = blobs
-            .iter()
-            .map(|blob| {
-                // Need to clone it as it's not possible to have a struct containing a reference field
-                // as serde can't serialize it.
-                let data = blob.blob.clone();
-                let commitment = blob.kzg_commitment.clone();
-                let versioned_hash = calculate_versioned_hash(&commitment)?;
-                let tx_hash = block_data.tx_to_versioned_hashes.iter().find_map(
-                    |(tx_hash, versioned_hashes)| match versioned_hashes.contains(&versioned_hash) {
-                        true => Some(tx_hash),
-                        false => None,
-                    },
-                ).with_context(|| format!("No blob transaction found for commitment {commitment} and versioned hash {versioned_hash}"))?;
+        let versioned_hash_to_blob =
+            create_versioned_hash_blob_mapping(&blobs).map_err(BackoffError::Permanent)?;
+        let mut blob_entities: Vec<BlobEntity> = vec![];
 
-                Ok(BlobEntity {
-                    versioned_hash,
-                    commitment,
-                    data,
-                    index: blob.index.parse()?,
-                    tx_hash: *tx_hash,
-                })
-            })
-            .collect::<Result<Vec<BlobEntity>>>()?;
+        for (tx_hash, versioned_hashes) in tx_hash_to_versioned_hashes.iter() {
+            for (i, versioned_hash) in versioned_hashes.iter().enumerate() {
+                let blob = *versioned_hash_to_blob.get(versioned_hash).with_context(|| format!("Sidecar not found for blob {i} with versioned hash {versioned_hash} from tx {tx_hash}"))?;
+
+                blob_entities.push(BlobEntity::from((blob, versioned_hash, i, tx_hash)));
+            }
+        }
 
         blobscan_client
-            .index(block_entity, transactions_entities, blobs_entities)
+            .index(block_entity, transactions_entities, blob_entities)
             .await
             .map_err(|err| BackoffError::transient(anyhow::Error::new(err)))?;
 

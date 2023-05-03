@@ -6,7 +6,7 @@ use self::types::{
     BlockResponse,
 };
 
-mod types;
+pub mod types;
 
 #[derive(Debug, Clone)]
 pub struct BeaconClient {

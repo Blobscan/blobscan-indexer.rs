@@ -2,18 +2,17 @@ use anyhow::Result;
 use tracing::Instrument;
 
 use crate::{
+    context::create_context,
     slot_processor::SlotProcessor,
-    utils::{
-        context::create_context,
-        telemetry::{get_subscriber, init_subscriber},
-    },
+    utils::telemetry::{get_subscriber, init_subscriber},
 };
 use std::{thread, time::Duration};
 
 mod beacon_client;
 mod blobscan_client;
+mod context;
+mod env;
 mod slot_processor;
-mod types;
 mod utils;
 
 #[tokio::main]
