@@ -20,14 +20,17 @@ pub struct TransactionEntity {
     pub hash: H256,
     pub from: Address,
     pub to: Address,
+    #[serde(rename = "blockNumber")]
     pub block_number: U64,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct BlobEntity {
+    #[serde(rename = "versionedHash")]
     pub versioned_hash: H256,
     pub commitment: String,
     pub data: Bytes,
+    #[serde(rename = "txHash")]
     pub tx_hash: H256,
     pub index: u32,
 }
