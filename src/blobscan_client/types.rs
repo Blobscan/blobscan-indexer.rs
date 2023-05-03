@@ -21,7 +21,7 @@ pub struct IndexRequest {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum BlobscanAPIError {
+pub enum BlobscanClientError {
     #[error(transparent)]
     Reqwest(#[from] reqwest::Error),
 
@@ -32,4 +32,4 @@ pub enum BlobscanAPIError {
     JWTError(#[from] anyhow::Error),
 }
 
-pub type BlobscanAPIResult<T> = Result<T, BlobscanAPIError>;
+pub type BlobscanClientResult<T> = Result<T, BlobscanClientError>;

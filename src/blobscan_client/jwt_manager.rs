@@ -11,7 +11,7 @@ pub struct Claims {
 
 #[derive(Debug, Clone)]
 pub struct JWTManager {
-    // Use mutex as an approach to interior mutability
+    // Use the Arc<Mutex<>> pattern for interior mutability
     token: Arc<Mutex<Option<String>>>,
     expiration_date: Arc<Mutex<Option<chrono::DateTime<Utc>>>>,
 

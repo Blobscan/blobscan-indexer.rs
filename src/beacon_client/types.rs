@@ -41,7 +41,7 @@ pub struct BlobsResponse {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum BeaconAPIError {
+pub enum BeaconClientError {
     #[error(transparent)]
     Reqwest(#[from] reqwest::Error),
 
@@ -49,4 +49,4 @@ pub enum BeaconAPIError {
     JsonRpcClientError(String),
 }
 
-pub type BeaconAPIResult<T> = Result<T, BeaconAPIError>;
+pub type BeaconClientResult<T> = Result<T, BeaconClientError>;

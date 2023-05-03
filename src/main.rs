@@ -10,8 +10,8 @@ use crate::{
 };
 use std::{thread, time::Duration};
 
-mod beacon_chain;
-mod blobscan;
+mod beacon_client;
+mod blobscan_client;
 mod slot_processor;
 mod types;
 mod utils;
@@ -25,13 +25,13 @@ async fn main() -> Result<()> {
 
     let context = create_context()?;
     let mut slot_processor = SlotProcessor::try_init(&context, None).await?;
-    let mut current_slot = match context.blobscan_api.get_slot().await? {
+    let mut current_slot = match context.blobscan_client.get_slot().await? {
         Some(last_slot) => last_slot + 1,
         None => 0,
     };
 
     loop {
-        if let Some(latest_beacon_block) = context.beacon_api.get_block(None).await? {
+        if let Some(latest_beacon_block) = context.beacon_client.get_block(None).await? {
             let latest_slot: u32 = latest_beacon_block.slot.parse()?;
 
             let slot_span = tracing::trace_span!("slot_processor", slot = latest_slot);

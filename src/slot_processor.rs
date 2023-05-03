@@ -100,14 +100,14 @@ impl<'a> SlotProcessor<'a> {
 
     pub async fn process_slot(&self, slot: u32) -> Result<(), backoff::Error<anyhow::Error>> {
         let Context {
-            beacon_api,
-            blobscan_api,
+            beacon_client,
+            blobscan_client,
             provider,
         } = self.context;
 
         let start = Instant::now();
 
-        let beacon_block = match beacon_api
+        let beacon_block = match beacon_client
             .get_block(Some(slot))
             .await
             .map_err(|err| BackoffError::transient(anyhow::Error::new(err)))?
@@ -158,7 +158,7 @@ impl<'a> SlotProcessor<'a> {
             return Ok(());
         }
 
-        let blobs = match beacon_api
+        let blobs = match beacon_client
             .get_blobs(slot)
             .await
             .map_err(|err| BackoffError::transient(anyhow::Error::new(err)))?
@@ -235,7 +235,7 @@ impl<'a> SlotProcessor<'a> {
             })
             .collect::<Result<Vec<BlobEntity>>>()?;
 
-        blobscan_api
+        blobscan_client
             .index(block_entity, transactions_entities, blobs_entities)
             .await
             .map_err(|err| BackoffError::transient(anyhow::Error::new(err)))?;
@@ -251,7 +251,7 @@ impl<'a> SlotProcessor<'a> {
     }
 
     async fn save_slot(&mut self, slot: u32) -> Result<()> {
-        self.context.blobscan_api.update_slot(slot).await?;
+        self.context.blobscan_client.update_slot(slot).await?;
 
         Ok(())
     }
