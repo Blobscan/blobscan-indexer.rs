@@ -72,7 +72,7 @@ impl JWTManager {
         }
     }
 
-    pub fn create_token(&self) -> Result<(String, chrono::DateTime<Utc>), anyhow::Error> {
+    fn create_token(&self) -> Result<(String, chrono::DateTime<Utc>), anyhow::Error> {
         let encoding_key = EncodingKey::from_secret(self.secret_key.as_ref());
         let expiration_date = chrono::Utc::now() + self.refresh_interval;
         let claims = Claims {

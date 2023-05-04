@@ -43,9 +43,8 @@ fn create_versioned_hash_blob_mapping(
 
     for blob in blobs {
         let versioned_hash = calculate_versioned_hash(&blob.kzg_commitment)?;
-        if !version_hash_to_blob.contains_key(&versioned_hash) {
-            version_hash_to_blob.insert(versioned_hash, blob);
-        }
+
+        version_hash_to_blob.entry(versioned_hash).or_insert(blob);
     }
 
     Ok(version_hash_to_blob)
@@ -228,7 +227,7 @@ impl<'a> SlotProcessor<'a> {
             .transactions
             .iter()
             .filter(|tx| tx_hash_to_versioned_hashes.contains_key(&tx.hash))
-            .map(|tx| Ok(TransactionEntity::try_from((tx, &execution_block))?))
+            .map(|tx| TransactionEntity::try_from((tx, &execution_block)))
             .collect::<Result<Vec<TransactionEntity>>>()?;
 
         let versioned_hash_to_blob =

@@ -73,7 +73,7 @@ impl<'a> TryFrom<(&'a EthersBlock<EthersTransaction>, u32)> for BlockEntity {
     ) -> Result<Self, Self::Error> {
         let number = ethers_block
             .number
-            .with_context(|| format!("Missing block number field in execution block"))?;
+            .with_context(|| "Missing block number field in execution block".to_string())?;
 
         Ok(Self {
             number,
@@ -99,7 +99,7 @@ impl<'a> TryFrom<(&'a EthersTransaction, &'a EthersBlock<EthersTransaction>)>
         Ok(Self {
             block_number: ethers_block
                 .number
-                .with_context(|| format!("Missing block number field in execution block"))?,
+                .with_context(|| "Missing block number field in execution block".to_string())?,
             hash,
             from: ethers_tx.from,
             to: ethers_tx
@@ -130,11 +130,11 @@ impl<'a> From<(&'a BlobData, &'a H256, usize, &'a H256)> for BlobEntity {
         (blob_data, versioned_hash, index, tx_hash): (&'a BlobData, &'a H256, usize, &'a H256),
     ) -> Self {
         Self {
-            tx_hash: tx_hash.clone(),
+            tx_hash: *tx_hash,
             index: index as u32,
             commitment: blob_data.kzg_commitment.clone(),
             data: blob_data.blob.clone(),
-            versioned_hash: versioned_hash.clone(),
+            versioned_hash: *versioned_hash,
         }
     }
 }
