@@ -8,27 +8,35 @@ The indexer crawls the blockchain fetching information from both the Execution a
 
 ## How to run locally?
 
-1. Git clone this repo.
+1. Install dependencies
+
+```
+sudo apt install libssl-dev
+```
+
+2. Git clone this repo.
 
 ```bash
 git clone https://github.com/Blobscan/blobscan-indexer.rs.git
 ```
 
-2. Go to directory.
+3. Go to directory.
 
 ```bash
 cd blobscan-indexer.rs
 ```
 
-3. Set the environment variables.
+4. Set the environment variables.
 
-4. Run the indexer.
+Check the table below.
+
+5. Run the indexer.
 
 ```bash
 cargo run
 ```
 
-5. (Optional) Run the indexer using docker.
+6. (Optional) Run the indexer using docker.
 
 If you prefer to use docker we have created an image for the indexer which is available at [blossomlabs/blobscan-indexer](https://hub.docker.com/repository/docker/blossomlabs/blobscan-indexer/general).
 
