@@ -23,7 +23,7 @@ async fn main() -> Result<()> {
     init_subscriber(subscriber);
 
     let context = create_context()?;
-    let mut slot_processor = SlotProcessor::try_init(&context, None).await?;
+    let slot_processor = SlotProcessor::new(&context, None);
     let mut current_slot = match context.blobscan_client.get_slot().await? {
         Some(last_slot) => last_slot + 1,
         None => 0,
@@ -33,7 +33,7 @@ async fn main() -> Result<()> {
         if let Some(latest_beacon_block) = context.beacon_client.get_block(None).await? {
             let latest_slot: u32 = latest_beacon_block.slot.parse()?;
 
-            let slot_span = tracing::trace_span!("slot_processor", slot = latest_slot);
+            let slot_span = tracing::trace_span!("", slot = latest_slot);
 
             if current_slot < latest_slot {
                 slot_processor

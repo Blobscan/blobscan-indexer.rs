@@ -1,6 +1,5 @@
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
@@ -60,10 +59,7 @@ pub struct SlotProcessor<'a> {
 }
 
 impl<'a> SlotProcessor<'a> {
-    pub async fn try_init(
-        context: &'a Context,
-        options: Option<SlotProcessorOptions>,
-    ) -> Result<SlotProcessor> {
+    pub fn new(context: &'a Context, options: Option<SlotProcessorOptions>) -> SlotProcessor {
         let options = options.unwrap_or(SlotProcessorOptions {
             backoff_config: ExponentialBackoffBuilder::default()
                 .with_initial_interval(Duration::from_secs(2))
@@ -71,10 +67,10 @@ impl<'a> SlotProcessor<'a> {
                 .build(),
         });
 
-        Ok(Self { options, context })
+        Self { options, context }
     }
 
-    pub async fn process_slots(&mut self, start_slot: u32, end_slot: u32) -> Result<()> {
+    pub async fn process_slots(&self, start_slot: u32, end_slot: u32) -> Result<()> {
         let mut current_slot = start_slot;
 
         while current_slot < end_slot {
@@ -99,26 +95,11 @@ impl<'a> SlotProcessor<'a> {
     async fn process_slot_with_retry(&self, slot: u32) -> Result<()> {
         let backoff_config = self.options.backoff_config.clone();
 
-        /*
-          This is necessary because the `retry` function requires
-          the closure to be `FnMut` and the `SlotProcessor` instance is not `Clone`able. The `Arc<Mutex<>>` allows us to
-          share the `SlotProcessor` instance across multiple tasks and safely mutate it within the context of the retry loop.
-        */
-        let shared_slot_processor = Arc::new(Mutex::new(self));
-
         retry_notify(
           backoff_config,
           || {
-              let slot_processor = Arc::clone(&shared_slot_processor);
-
-              /*
-               Using unwrap() here. If Mutex is poisoned due to a panic, it returns an error. 
-               In this case, we allow the indexer to crash as the state might be invalid. 
-              */
               async move {
-                  let slot_processor = slot_processor.lock().unwrap();
-
-                  match slot_processor.process_slot(slot).await {
+                  match self.process_slot(slot).await {
                       Ok(_) => Ok(()),
                       Err(e) => Err(e),
                   }
@@ -257,7 +238,7 @@ impl<'a> SlotProcessor<'a> {
         Ok(())
     }
 
-    async fn save_slot(&mut self, slot: u32) -> Result<()> {
+    async fn save_slot(&self, slot: u32) -> Result<()> {
         self.context.blobscan_client.update_slot(slot).await?;
 
         Ok(())
