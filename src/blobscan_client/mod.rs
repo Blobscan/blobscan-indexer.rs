@@ -14,7 +14,7 @@ mod jwt_manager;
 
 pub mod types;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BlobscanClient {
     base_url: String,
     client: reqwest::Client,

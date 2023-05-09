@@ -1,18 +1,18 @@
 use anyhow::Result;
-use tracing::Instrument;
+use slot_processor_manager::SlotProcessorManager;
 
 use crate::{
     context::create_context,
-    slot_processor::SlotProcessor,
     utils::telemetry::{get_subscriber, init_subscriber},
 };
+
 use std::{thread, time::Duration};
 
 mod beacon_client;
 mod blobscan_client;
 mod context;
 mod env;
-mod slot_processor;
+mod slot_processor_manager;
 mod utils;
 
 #[tokio::main]
@@ -23,27 +23,24 @@ async fn main() -> Result<()> {
     init_subscriber(subscriber);
 
     let context = create_context()?;
-    let slot_processor = SlotProcessor::new(&context, None);
     let mut current_slot = match context.blobscan_client.get_slot().await? {
-        Some(last_slot) => last_slot + 1,
+        Some(last_slot) => last_slot,
         None => 0,
     };
+    let slot_processor_manager = SlotProcessorManager::try_new(context.clone(), None)?;
 
     loop {
         if let Some(latest_beacon_block) = context.beacon_client.get_block(None).await? {
             let latest_slot: u32 = latest_beacon_block.slot.parse()?;
 
-            let slot_span = tracing::trace_span!("", slot = latest_slot);
-
             if current_slot < latest_slot {
-                slot_processor
+                slot_processor_manager
                     .process_slots(current_slot, latest_slot)
-                    .instrument(slot_span)
                     .await?;
-
                 current_slot = latest_slot;
             }
         }
+
         thread::sleep(Duration::from_secs(10));
     }
 }

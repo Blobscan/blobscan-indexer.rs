@@ -10,7 +10,7 @@ use crate::{
 
 use super::env::{get_env_vars, Environment};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Context {
     pub beacon_client: BeaconClient,
     pub blobscan_client: BlobscanClient,
