@@ -1,9 +1,7 @@
 use std::time::{Duration, Instant};
 
 use anyhow::{Context as AnyhowContext, Result};
-use backoff::{
-    future::retry_notify, Error as BackoffError, ExponentialBackoff, ExponentialBackoffBuilder,
-};
+use backoff::{future::retry_notify, Error as BackoffError};
 use ethers::prelude::*;
 
 use tracing::{error, info, warn};
@@ -11,6 +9,7 @@ use tracing::{error, info, warn};
 use crate::{
     blobscan_client::types::{BlobEntity, BlockEntity, TransactionEntity},
     context::Context,
+    utils::exp_backoff::get_exp_backoff_config,
 };
 
 use self::errors::{SingleSlotProcessingError, SlotProcessorError};
@@ -19,25 +18,13 @@ use self::helpers::{create_tx_hash_versioned_hashes_mapping, create_versioned_ha
 pub mod errors;
 mod helpers;
 
-pub struct Config {
-    pub backoff_config: ExponentialBackoff,
-}
-
 pub struct SlotProcessor<'a> {
-    config: Config,
     context: &'a Context,
 }
 
 impl<'a> SlotProcessor<'a> {
-    pub fn new(context: &'a Context, config: Option<Config>) -> SlotProcessor {
-        let config = config.unwrap_or(Config {
-            backoff_config: ExponentialBackoffBuilder::default()
-                .with_initial_interval(Duration::from_secs(2))
-                .with_max_elapsed_time(Some(Duration::from_secs(60)))
-                .build(),
-        });
-
-        Self { config, context }
+    pub fn new(context: &'a Context) -> SlotProcessor {
+        Self { context }
     }
 
     pub async fn process_slots(
@@ -62,10 +49,10 @@ impl<'a> SlotProcessor<'a> {
     }
 
     async fn process_slot_with_retry(&self, slot: u32) -> Result<(), SingleSlotProcessingError> {
-        let backoff_config = self.config.backoff_config.clone();
+        let backoff_config = get_exp_backoff_config();
 
         retry_notify(
-        backoff_config,
+            backoff_config,
         || {
             async move {
                 self.process_slot(slot).await
@@ -96,7 +83,7 @@ impl<'a> SlotProcessor<'a> {
         let beacon_block = match beacon_client
             .get_block(Some(slot))
             .await
-            .map_err(|err| SingleSlotProcessingError::BeaconClient(err))?
+            .map_err(SingleSlotProcessingError::BeaconClient)?
         {
             Some(block) => block,
             None => {
@@ -151,7 +138,7 @@ impl<'a> SlotProcessor<'a> {
         let blobs = match beacon_client
             .get_blobs(slot)
             .await
-            .map_err(|err| SingleSlotProcessingError::BeaconClient(err))?
+            .map_err(SingleSlotProcessingError::BeaconClient)?
         {
             Some(blobs) => {
                 if blobs.is_empty() {
@@ -197,7 +184,7 @@ impl<'a> SlotProcessor<'a> {
         blobscan_client
             .index(block_entity, transactions_entities, blob_entities)
             .await
-            .map_err(|err| SingleSlotProcessingError::BlobscanClient(err))?;
+            .map_err(SingleSlotProcessingError::BlobscanClient)?;
 
         let duration = start.elapsed();
 

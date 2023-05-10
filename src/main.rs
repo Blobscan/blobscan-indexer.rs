@@ -24,10 +24,10 @@ async fn main() -> Result<()> {
 
     let context = create_context()?;
     let mut current_slot = match context.blobscan_client.get_slot().await? {
-        Some(last_slot) => last_slot,
+        Some(last_slot) => last_slot + 1,
         None => 0,
     };
-    let slot_processor_manager = SlotProcessorManager::try_new(context.clone(), None)?;
+    let slot_processor_manager = SlotProcessorManager::try_new(context.clone())?;
 
     loop {
         if let Some(latest_beacon_block) = context.beacon_client.get_block(None).await? {

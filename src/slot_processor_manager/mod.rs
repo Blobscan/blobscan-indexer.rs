@@ -1,44 +1,30 @@
 use std::{sync::Arc, time::Duration};
 
-use backoff::{
-    future::retry_notify, Error as BackoffError, ExponentialBackoff, ExponentialBackoffBuilder,
-};
+use backoff::{future::retry_notify, Error as BackoffError};
 use futures::future::join_all;
 use tokio::task::JoinHandle;
 use tracing::{warn, Instrument};
 
-use self::slot_processor::{
-    errors::SlotProcessorError, Config as SlotProcessorConfig, SlotProcessor,
+use self::slot_processor::{errors::SlotProcessorError, SlotProcessor};
+use crate::{
+    blobscan_client::types::BlobscanClientError, context::Context,
+    utils::exp_backoff::get_exp_backoff_config,
 };
-use crate::{blobscan_client::types::BlobscanClientError, context::Context};
 
 mod slot_processor;
 
 pub struct SlotProcessorManager {
     shared_context: Arc<Context>,
-    config: Config,
     max_threads_length: u32,
 }
 
-pub struct Config {
-    pub backoff_config: ExponentialBackoff,
-}
-
 impl SlotProcessorManager {
-    pub fn try_new(context: Context, config: Option<Config>) -> Result<Self, anyhow::Error> {
+    pub fn try_new(context: Context) -> Result<Self, anyhow::Error> {
         let max_threads_length = std::thread::available_parallelism()?.get() as u32;
         let shared_context = Arc::new(context);
 
-        let config = config.unwrap_or_else(|| Config {
-            backoff_config: ExponentialBackoffBuilder::default()
-                .with_initial_interval(Duration::from_secs(2))
-                .with_max_elapsed_time(Some(Duration::from_secs(60)))
-                .build(),
-        });
-
         Ok(Self {
             shared_context,
-            config,
             max_threads_length,
         })
     }
@@ -59,26 +45,23 @@ impl SlotProcessorManager {
         let mut current_slot = start_slot;
 
         for i in 0..threads_length {
-            let slots_chunk = if i == 0 {
+            let thread_slots_chunk = if i == 0 {
                 slots_per_thread + slots_chunk % self.max_threads_length
             } else {
                 slots_per_thread
             };
 
+            let backoff_config = get_exp_backoff_config();
             let thread_context = Arc::clone(&self.shared_context);
-            let backoff_config = self.config.backoff_config.clone();
+            let thread_initial_slot = current_slot;
+            let thread_final_slot = current_slot + thread_slots_chunk;
 
             let thread = tokio::spawn(async move {
                 let slot_span = tracing::trace_span!("slot_processor", slot = end_slot);
-                let slot_processor = SlotProcessor::new(
-                    &thread_context,
-                    Some(SlotProcessorConfig {
-                        backoff_config: backoff_config.clone(),
-                    }),
-                );
+                let slot_processor = SlotProcessor::new(&thread_context);
 
                 let processor_result = &slot_processor
-                    .process_slots(current_slot, current_slot + slots_chunk)
+                    .process_slots(thread_initial_slot, thread_final_slot)
                     .instrument(slot_span)
                     .await;
 
@@ -97,7 +80,7 @@ impl SlotProcessorManager {
                             },
                         };
 
-                        blobscan_client.update_slot(last_slot).await.map_err(|err| BackoffError::transient(err))
+                        blobscan_client.update_slot(last_slot).await.map_err( BackoffError::transient)
                     },
                     |e, duration: Duration| {
                         let duration = duration.as_secs();
@@ -108,7 +91,7 @@ impl SlotProcessorManager {
 
             threads.push(thread);
 
-            current_slot = current_slot + slots_chunk;
+            current_slot += thread_slots_chunk;
         }
 
         // TODO: Handle joins
