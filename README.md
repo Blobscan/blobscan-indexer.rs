@@ -58,6 +58,8 @@ Using environment variables
 
 ```bash
 docker run -e BLOBSCAN_API_ENDPOINT=http://blobscan-api:3001 -e BEACON_NODE_RPC=http://beacon:3500 -e EXECUTION_NODE_URL=http://execution:8545 --rm blossomlabs/blobscan-indexer:master
+
+# or directly using the .env file
 docker run --env-file=.env --rm blossomlabs/blobscan-indexer:master
 ```
 
