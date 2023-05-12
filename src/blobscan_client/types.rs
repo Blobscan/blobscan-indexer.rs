@@ -15,23 +15,33 @@ pub struct BlockEntity {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct TransactionEntity {
     pub hash: H256,
     pub from: Address,
     pub to: Address,
-    #[serde(rename = "blockNumber")]
     pub block_number: U64,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct BlobEntity {
-    #[serde(rename = "versionedHash")]
     pub versioned_hash: H256,
     pub commitment: String,
     pub data: Bytes,
-    #[serde(rename = "txHash")]
     pub tx_hash: H256,
     pub index: u32,
+}
+
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct FailedSlotsChunkEntity {
+    pub initial_slot: u32,
+    pub final_slot: u32,
+}
+#[derive(Serialize, Debug)]
+pub struct FailedSlotsChunksRequest {
+    pub chunks: Vec<FailedSlotsChunkEntity>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -64,6 +74,15 @@ pub enum BlobscanClientError {
 }
 
 pub type BlobscanClientResult<T> = Result<T, BlobscanClientError>;
+
+impl From<(u32, u32)> for FailedSlotsChunkEntity {
+    fn from((initial_slot, final_slot): (u32, u32)) -> Self {
+        Self {
+            initial_slot,
+            final_slot,
+        }
+    }
+}
 
 impl<'a> TryFrom<(&'a EthersBlock<EthersTransaction>, u32)> for BlockEntity {
     type Error = anyhow::Error;

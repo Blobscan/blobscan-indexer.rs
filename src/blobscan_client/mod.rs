@@ -5,8 +5,8 @@ use reqwest::{Client, StatusCode};
 use self::{
     jwt_manager::{Config as JWTManagerConfig, JWTManager},
     types::{
-        BlobEntity, BlobscanClientError, BlobscanClientResult, BlockEntity, IndexRequest,
-        SlotRequest, SlotResponse, TransactionEntity,
+        BlobEntity, BlobscanClientError, BlobscanClientResult, BlockEntity, FailedSlotsChunkEntity,
+        FailedSlotsChunksRequest, IndexRequest, SlotRequest, SlotResponse, TransactionEntity,
     },
 };
 
@@ -109,6 +109,32 @@ impl BlobscanClient {
             StatusCode::NOT_FOUND => Ok(None),
             _ => Err(BlobscanClientError::BlobscanClientError(
                 slot_response.text().await?,
+            )),
+        }
+    }
+
+    pub async fn add_failed_slots_chunks(
+        &self,
+        slots_chunks: Vec<FailedSlotsChunkEntity>,
+    ) -> BlobscanClientResult<()> {
+        let path = String::from("failed-slots-chunks");
+        let url = self.build_url(&path);
+        let token = self.jwt_manager.get_token()?;
+
+        let failed_slots_response = self
+            .client
+            .post(url)
+            .bearer_auth(token)
+            .json::<FailedSlotsChunksRequest>(&FailedSlotsChunksRequest {
+                chunks: slots_chunks,
+            })
+            .send()
+            .await?;
+
+        match failed_slots_response.status() {
+            StatusCode::OK => Ok(()),
+            _ => Err(BlobscanClientError::BlobscanClientError(
+                failed_slots_response.text().await?,
             )),
         }
     }

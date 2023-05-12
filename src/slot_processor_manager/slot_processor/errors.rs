@@ -15,6 +15,7 @@ pub enum SlotProcessorError {
     #[error("Failed to process slot {slot}: {reason}")]
     ProcessingError {
         slot: u32,
+        target_slot: u32,
         reason: SingleSlotProcessingError,
     },
 }

@@ -1,15 +1,12 @@
-use std::{sync::Arc, time::Duration};
+use core::panic;
+use std::sync::Arc;
 
-use backoff::{future::retry_notify, Error as BackoffError};
 use futures::future::join_all;
-use tokio::task::JoinHandle;
-use tracing::{warn, Instrument};
+use tokio::task::{JoinError, JoinHandle};
+use tracing::Instrument;
 
 use self::slot_processor::{errors::SlotProcessorError, SlotProcessor};
-use crate::{
-    blobscan_client::types::BlobscanClientError, context::Context,
-    utils::exp_backoff::get_exp_backoff_config,
-};
+use crate::{blobscan_client::types::FailedSlotsChunkEntity, context::Context};
 
 mod slot_processor;
 
@@ -41,7 +38,7 @@ impl SlotProcessorManager {
         } else {
             slots_chunk
         };
-        let mut threads: Vec<JoinHandle<Result<(), BlobscanClientError>>> = vec![];
+        let mut threads: Vec<JoinHandle<Result<u32, SlotProcessorError>>> = vec![];
         let mut current_slot = start_slot;
 
         for i in 0..threads_length {
@@ -51,7 +48,6 @@ impl SlotProcessorManager {
                 slots_per_thread
             };
 
-            let backoff_config = get_exp_backoff_config();
             let thread_context = Arc::clone(&self.shared_context);
             let thread_initial_slot = current_slot;
             let thread_final_slot = current_slot + thread_slots_chunk;
@@ -60,33 +56,10 @@ impl SlotProcessorManager {
                 let slot_span = tracing::trace_span!("slot_processor", slot = end_slot);
                 let slot_processor = SlotProcessor::new(&thread_context);
 
-                let processor_result = &slot_processor
+                return slot_processor
                     .process_slots(thread_initial_slot, thread_final_slot)
                     .instrument(slot_span)
                     .await;
-
-                let blobscan_client = &thread_context.blobscan_client;
-
-                retry_notify(
-                    backoff_config,
-                    || async move {
-                        let last_slot = match processor_result {
-                            Ok(_) => current_slot,
-                            Err(err) => match err {
-                                SlotProcessorError::ProcessingError { slot, reason: _ } => {
-                                    // TODO - Store error
-                                    slot.to_owned()
-                                },
-                            },
-                        };
-
-                        blobscan_client.update_slot(last_slot).await.map_err( BackoffError::transient)
-                    },
-                    |e, duration: Duration| {
-                        let duration = duration.as_secs();
-                        warn!("Couldn't update latest slot. Retrying in {duration} seconds… (Reason: {e})");
-                    },
-                ).await
             });
 
             threads.push(thread);
@@ -94,8 +67,46 @@ impl SlotProcessorManager {
             current_slot += thread_slots_chunk;
         }
 
-        // TODO: Handle joins
-        join_all(threads).await;
+        let thread_outputs = join_all(threads).await;
+
+        self.process_thread_outputs(&thread_outputs).await?;
+
+        self.shared_context
+            .blobscan_client
+            .update_slot(current_slot - 1)
+            .await?;
+
+        Ok(())
+    }
+
+    async fn process_thread_outputs(
+        &self,
+        thread_outputs: &Vec<Result<Result<u32, SlotProcessorError>, JoinError>>,
+    ) -> Result<(), anyhow::Error> {
+        let failed_slots_chunks = thread_outputs
+            .iter()
+            .filter(|thread_join| match thread_join {
+                Ok(thread_result) => thread_result.is_err(),
+                Err(_) => true,
+            })
+            .map(|thread_join| match thread_join {
+                Ok(thread_result) => match thread_result.as_ref().unwrap_err() {
+                    SlotProcessorError::ProcessingError {
+                        slot,
+                        target_slot,
+                        reason: _,
+                    } => FailedSlotsChunkEntity::from((slot.to_owned(), target_slot.to_owned())),
+                },
+                Err(join_error) => panic!("Thread panicked: {:?}", join_error),
+            })
+            .collect::<Vec<FailedSlotsChunkEntity>>();
+
+        if failed_slots_chunks.len() > 0 {
+            self.shared_context
+                .blobscan_client
+                .add_failed_slots_chunks(failed_slots_chunks)
+                .await?;
+        }
 
         Ok(())
     }

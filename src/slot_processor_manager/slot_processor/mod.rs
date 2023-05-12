@@ -31,7 +31,7 @@ impl<'a> SlotProcessor<'a> {
         &self,
         start_slot: u32,
         end_slot: u32,
-    ) -> Result<(), SlotProcessorError> {
+    ) -> Result<u32, SlotProcessorError> {
         for current_slot in start_slot..end_slot {
             let result = self.process_slot_with_retry(current_slot).await;
 
@@ -40,12 +40,13 @@ impl<'a> SlotProcessor<'a> {
 
                 return Err(SlotProcessorError::ProcessingError {
                     slot: current_slot,
+                    target_slot: end_slot,
                     reason: e,
                 });
             };
         }
 
-        Ok(())
+        Ok(end_slot - 1)
     }
 
     async fn process_slot_with_retry(&self, slot: u32) -> Result<(), SingleSlotProcessingError> {
