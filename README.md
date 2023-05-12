@@ -57,11 +57,11 @@ docker run --rm blossomlabs/blobscan-indexer:master
 Using environment variables
 
 ```bash
-docker run \
+docker run --rm \
   -e BLOBSCAN_API_ENDPOINT=http://blobscan-api:3001 \
   -e BEACON_NODE_RPC=http://beacon:3500 \
   -e EXECUTION_NODE_URL=http://execution:8545 \
-  --rm blossomlabs/blobscan-indexer:master
+  blossomlabs/blobscan-indexer:master
 ```
 
 Or directly using the .env file
