@@ -70,7 +70,7 @@ Or directly using the .env file
 docker run --env-file=.env --rm blossomlabs/blobscan-indexer:master
 ```
 
-For more information, check out [blossomlabs/blobscan-indexer](https://hub.docker.com/repository/docker/blossomlabs/blobscan-indexer/general) on Docker Hub.
+For more information, check out [Docker Hub](https://hub.docker.com/r/blossomlabs/blobscan-indexer).
 
 ## Environment variables
 
