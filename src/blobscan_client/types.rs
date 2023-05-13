@@ -19,7 +19,8 @@ pub struct BlockEntity {
 pub struct TransactionEntity {
     pub hash: H256,
     pub from: Address,
-    pub to: Address,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to: Option<Address>,
     pub block_number: U64,
 }
 
@@ -121,9 +122,7 @@ impl<'a> TryFrom<(&'a EthersTransaction, &'a EthersBlock<EthersTransaction>)>
                 .with_context(|| "Missing block number field in execution block".to_string())?,
             hash,
             from: ethers_tx.from,
-            to: ethers_tx
-                .to
-                .with_context(|| format!("Missing to field in transaction {hash}"))?,
+            to: ethers_tx.to,
         })
     }
 }
