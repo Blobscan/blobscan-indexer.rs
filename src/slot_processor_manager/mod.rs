@@ -71,11 +71,6 @@ impl SlotProcessorManager {
 
         self.process_thread_outputs(&thread_outputs).await?;
 
-        self.shared_context
-            .blobscan_client
-            .update_slot(current_slot - 1)
-            .await?;
-
         Ok(())
     }
 

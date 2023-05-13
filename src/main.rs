@@ -37,6 +37,9 @@ async fn main() -> Result<()> {
                 slot_processor_manager
                     .process_slots(current_slot, latest_slot)
                     .await?;
+
+                context.blobscan_client.update_slot(latest_slot - 1).await?;
+
                 current_slot = latest_slot;
             }
         }
