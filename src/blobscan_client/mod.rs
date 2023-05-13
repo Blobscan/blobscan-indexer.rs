@@ -27,23 +27,21 @@ pub struct Config {
     pub timeout: Option<Duration>,
 }
 
+pub fn build_jwt_manager(secret_key: String) -> JWTManager {
+    JWTManager::new(JWTManagerConfig {
+        secret_key,
+        refresh_interval: chrono::Duration::minutes(30),
+        safety_magin: None,
+    })
+}
+
 impl BlobscanClient {
-    pub fn try_from(config: Config) -> BlobscanClientResult<Self> {
-        let mut client_builder = Client::builder();
-
-        if let Some(timeout) = config.timeout {
-            client_builder = client_builder.timeout(timeout);
-        }
-
-        Ok(Self {
+    pub fn with_client(client: Client, config: Config) -> Self {
+        Self {
             base_url: config.base_url,
-            client: client_builder.build()?,
-            jwt_manager: JWTManager::new(JWTManagerConfig {
-                secret_key: config.secret_key,
-                refresh_interval: chrono::Duration::minutes(30),
-                safety_magin: None,
-            }),
-        })
+            client,
+            jwt_manager: build_jwt_manager(config.secret_key),
+        }
     }
 
     pub async fn index(

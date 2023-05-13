@@ -31,19 +31,28 @@ impl Context {
             secret_key,
             ..
         } = get_env_vars();
-        let request_timeout = Some(Duration::from_secs(8));
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(8))
+            .build()?;
 
         Ok(Self {
             inner: Arc::new(ContextRef {
-                blobscan_client: BlobscanClient::try_from(BlobscanClientConfig {
-                    base_url: blobscan_api_endpoint,
-                    secret_key,
-                    timeout: request_timeout,
-                })?,
-                beacon_client: BeaconClient::try_from(BeaconClientConfig {
-                    base_url: beacon_node_rpc,
-                    timeout: request_timeout,
-                })?,
+                blobscan_client: BlobscanClient::with_client(
+                    client.clone(),
+                    BlobscanClientConfig {
+                        base_url: blobscan_api_endpoint,
+                        secret_key,
+                        timeout: None,
+                    },
+                ),
+                beacon_client: BeaconClient::with_client(
+                    client,
+                    BeaconClientConfig {
+                        base_url: beacon_node_rpc,
+                        timeout: None,
+                    },
+                ),
                 provider: Provider::<Http>::try_from(execution_node_rpc)?,
             }),
         })

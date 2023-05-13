@@ -11,7 +11,7 @@ pub mod types;
 #[derive(Debug, Clone)]
 pub struct BeaconClient {
     base_url: String,
-    client: reqwest::Client,
+    client: Client,
 }
 
 pub struct Config {
@@ -20,17 +20,11 @@ pub struct Config {
 }
 
 impl BeaconClient {
-    pub fn try_from(config: Config) -> BeaconClientResult<Self> {
-        let mut client_builder = Client::builder();
-
-        if let Some(timeout) = config.timeout {
-            client_builder = client_builder.timeout(timeout);
-        }
-
-        Ok(Self {
+    pub fn with_client(client: Client, config: Config) -> Self {
+        Self {
             base_url: config.base_url,
-            client: client_builder.build()?,
-        })
+            client,
+        }
     }
 
     pub async fn get_block(&self, slot: Option<u32>) -> BeaconClientResult<Option<Block>> {
