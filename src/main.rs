@@ -19,6 +19,12 @@ mod utils;
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
 
+    let sentry_dsn = dotenv::var("SENTRY_DSN").unwrap();
+    let _guard = sentry::init((sentry_dsn, sentry::ClientOptions {
+        release: sentry::release_name!(),
+        ..Default::default()
+    }));
+
     let subscriber = get_subscriber("blobscan_indexer".into(), "info".into(), std::io::stdout);
     init_subscriber(subscriber);
 

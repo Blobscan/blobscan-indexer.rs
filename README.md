@@ -52,6 +52,7 @@ Below you can find a list of optional variables:
 
 | Env variable            | Description                                                                                     | Default value           |
 | ----------------------- | ----------------------------------------------------------------------------------------------- | ----------------------- |
+| `SENTRY_DSN`            | Sentry URL.                                                                                     |                         |
 | `BLOBSCAN_API_ENDPOINT` | Endpoint for the Blobscan API.                                                                  | `http://localhost:3001` |
 | `BEACON_NODE_RPC`       | A beacon chain RPC node's endpoint.                                                             | `http://localhost:3500` |
 | `EXECUTION_NODE_URL`    | An execution RPC node's endpoint.                                                               | `http://localhost:8545` |

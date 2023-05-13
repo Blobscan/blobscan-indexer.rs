@@ -13,6 +13,7 @@ ethers = "1.0.2"
 futures = "0.3.25"
 hex = "0.4.3"
 reqwest = { version = "0.11.13", features = ["json"] }
+sentry = "0.31.0"
 serde = { version = "1.0.150", features = ["derive"] }
 tokio = { version = "1.23.0", features = ["full"] }
 jsonwebtoken = "8.3.0"

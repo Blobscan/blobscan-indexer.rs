@@ -11,6 +11,7 @@ pub struct Environment {
     #[serde(default = "default_mode")]
     pub mode: String,
     pub secret_key: String,
+    pub sentry_dsn: String,
 }
 
 pub const DEV_MODE: &str = "development";
