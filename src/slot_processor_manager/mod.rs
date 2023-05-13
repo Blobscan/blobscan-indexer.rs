@@ -1,5 +1,4 @@
 use core::panic;
-use std::sync::Arc;
 
 use futures::future::join_all;
 use tokio::task::{JoinError, JoinHandle};
@@ -11,17 +10,16 @@ use crate::{blobscan_client::types::FailedSlotsChunkEntity, context::Context};
 mod slot_processor;
 
 pub struct SlotProcessorManager {
-    shared_context: Arc<Context>,
+    context: Context,
     max_threads_length: u32,
 }
 
 impl SlotProcessorManager {
     pub fn try_new(context: Context) -> Result<Self, anyhow::Error> {
         let max_threads_length = std::thread::available_parallelism()?.get() as u32;
-        let shared_context = Arc::new(context);
 
         Ok(Self {
-            shared_context,
+            context,
             max_threads_length,
         })
     }
@@ -48,13 +46,13 @@ impl SlotProcessorManager {
                 slots_per_thread
             };
 
-            let thread_context = Arc::clone(&self.shared_context);
+            let thread_context = self.context.clone();
             let thread_initial_slot = current_slot;
             let thread_final_slot = current_slot + thread_slots_chunk;
 
             let thread = tokio::spawn(async move {
                 let slot_span = tracing::trace_span!("slot_processor", slot = end_slot);
-                let slot_processor = SlotProcessor::new(&thread_context);
+                let slot_processor = SlotProcessor::new(thread_context);
 
                 slot_processor
                     .process_slots(thread_initial_slot, thread_final_slot)
@@ -97,8 +95,8 @@ impl SlotProcessorManager {
             .collect::<Vec<FailedSlotsChunkEntity>>();
 
         if !failed_slots_chunks.is_empty() {
-            self.shared_context
-                .blobscan_client
+            self.context
+                .blobscan_client()
                 .add_failed_slots_chunks(failed_slots_chunks)
                 .await?;
         }

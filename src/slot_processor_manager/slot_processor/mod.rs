@@ -2,8 +2,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context as AnyhowContext, Result};
 use backoff::{future::retry_notify, Error as BackoffError};
-use ethers::prelude::*;
 
+use ethers::prelude::*;
 use tracing::{error, info, warn};
 
 use crate::{
@@ -18,12 +18,12 @@ use self::helpers::{create_tx_hash_versioned_hashes_mapping, create_versioned_ha
 pub mod errors;
 mod helpers;
 
-pub struct SlotProcessor<'a> {
-    context: &'a Context,
+pub struct SlotProcessor {
+    context: Context,
 }
 
-impl<'a> SlotProcessor<'a> {
-    pub fn new(context: &'a Context) -> SlotProcessor {
+impl SlotProcessor {
+    pub fn new(context: Context) -> SlotProcessor {
         Self { context }
     }
 
@@ -71,11 +71,9 @@ impl<'a> SlotProcessor<'a> {
         &self,
         slot: u32,
     ) -> Result<(), backoff::Error<SingleSlotProcessingError>> {
-        let Context {
-            beacon_client,
-            blobscan_client,
-            provider,
-        } = self.context;
+        let beacon_client = self.context.beacon_client();
+        let blobscan_client = self.context.blobscan_client();
+        let provider = self.context.provider();
 
         let start = Instant::now();
 

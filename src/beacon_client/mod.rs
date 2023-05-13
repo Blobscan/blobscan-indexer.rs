@@ -38,7 +38,6 @@ impl BeaconClient {
             Some(slot) => slot.to_string(),
             None => String::from("head"),
         };
-
         let url = self.build_url(&format!("eth/v2/beacon/blocks/{slot}"));
 
         let block_response = self.client.get(url).send().await?;

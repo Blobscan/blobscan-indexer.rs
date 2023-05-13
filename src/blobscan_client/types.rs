@@ -34,12 +34,13 @@ pub struct BlobEntity {
     pub index: u32,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct FailedSlotsChunkEntity {
     pub initial_slot: u32,
     pub final_slot: u32,
 }
+
 #[derive(Serialize, Debug)]
 pub struct FailedSlotsChunksRequest {
     pub chunks: Vec<FailedSlotsChunkEntity>,
