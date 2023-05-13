@@ -1,5 +1,6 @@
 use anyhow::Result;
-use context::Context;
+use context::{Config as ContextConfig, Context};
+use env::get_env_vars;
 use slot_processor_manager::SlotProcessorManager;
 
 use crate::utils::telemetry::{get_subscriber, init_subscriber};
@@ -16,11 +17,12 @@ mod utils;
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
+    let env = get_env_vars();
 
     let subscriber = get_subscriber("blobscan_indexer".into(), "info".into(), std::io::stdout);
     init_subscriber(subscriber);
 
-    let context = Context::try_new()?;
+    let context = Context::try_new(ContextConfig::from(env))?;
     let beacon_client = context.beacon_client();
     let blobscan_client = context.blobscan_client();
     let mut current_slot = match blobscan_client.get_slot().await? {

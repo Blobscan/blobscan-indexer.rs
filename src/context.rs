@@ -6,9 +6,8 @@ use ethers::prelude::*;
 use crate::{
     beacon_client::{BeaconClient, Config as BeaconClientConfig},
     blobscan_client::{BlobscanClient, Config as BlobscanClientConfig},
+    env::Environment,
 };
-
-use super::env::{get_env_vars, Environment};
 
 #[derive(Debug, Clone)]
 struct ContextRef {
@@ -17,20 +16,25 @@ struct ContextRef {
     pub provider: Provider<Http>,
 }
 
+pub struct Config {
+    pub blobscan_api_endpoint: String,
+    pub beacon_node_rpc: String,
+    pub execution_node_rpc: String,
+    pub secret_key: String,
+}
 #[derive(Debug, Clone)]
 pub struct Context {
     inner: Arc<ContextRef>,
 }
 
 impl Context {
-    pub fn try_new() -> Result<Self> {
-        let Environment {
+    pub fn try_new(config: Config) -> Result<Self> {
+        let Config {
             blobscan_api_endpoint,
             beacon_node_rpc,
             execution_node_rpc,
             secret_key,
-            ..
-        } = get_env_vars();
+        } = config;
 
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(8))
@@ -68,5 +72,16 @@ impl Context {
 
     pub fn provider(&self) -> &Provider<Http> {
         &self.inner.provider
+    }
+}
+
+impl From<Environment> for Config {
+    fn from(env: Environment) -> Self {
+        Self {
+            blobscan_api_endpoint: env.blobscan_api_endpoint,
+            beacon_node_rpc: env.beacon_node_rpc,
+            execution_node_rpc: env.execution_node_rpc,
+            secret_key: env.secret_key,
+        }
     }
 }
