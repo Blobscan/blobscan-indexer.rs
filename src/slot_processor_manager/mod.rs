@@ -56,10 +56,10 @@ impl SlotProcessorManager {
                 let slot_span = tracing::trace_span!("slot_processor", slot = end_slot);
                 let slot_processor = SlotProcessor::new(&thread_context);
 
-                return slot_processor
+                slot_processor
                     .process_slots(thread_initial_slot, thread_final_slot)
                     .instrument(slot_span)
-                    .await;
+                    .await
             });
 
             threads.push(thread);
@@ -76,7 +76,7 @@ impl SlotProcessorManager {
 
     async fn process_thread_outputs(
         &self,
-        thread_outputs: &Vec<Result<Result<u32, SlotProcessorError>, JoinError>>,
+        thread_outputs: &[Result<Result<u32, SlotProcessorError>, JoinError>],
     ) -> Result<(), anyhow::Error> {
         let failed_slots_chunks = thread_outputs
             .iter()
@@ -96,7 +96,7 @@ impl SlotProcessorManager {
             })
             .collect::<Vec<FailedSlotsChunkEntity>>();
 
-        if failed_slots_chunks.len() > 0 {
+        if !failed_slots_chunks.is_empty() {
             self.shared_context
                 .blobscan_client
                 .add_failed_slots_chunks(failed_slots_chunks)
