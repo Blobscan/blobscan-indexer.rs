@@ -6,7 +6,8 @@ use self::{
     jwt_manager::{Config as JWTManagerConfig, JWTManager},
     types::{
         BlobEntity, BlobscanClientError, BlobscanClientResult, BlockEntity, FailedSlotsChunkEntity,
-        FailedSlotsChunksRequest, IndexRequest, SlotRequest, SlotResponse, TransactionEntity,
+        FailedSlotsChunksRequest, GetFailedSlotsChunksResponse, IndexRequest,
+        RemoveFailedSlotsChunksRequest, SlotRequest, SlotResponse, TransactionEntity,
     },
 };
 
@@ -111,6 +112,26 @@ impl BlobscanClient {
         }
     }
 
+    pub async fn get_failed_slots_chunks(
+        &self,
+    ) -> BlobscanClientResult<Vec<FailedSlotsChunkEntity>> {
+        let path = String::from("failed-slots-chunks");
+        let url = self.build_url(&path);
+        let token = self.jwt_manager.get_token()?;
+
+        let failed_slots_chunks_response = self.client.get(url).bearer_auth(token).send().await?;
+
+        match failed_slots_chunks_response.status() {
+            StatusCode::OK => Ok(failed_slots_chunks_response
+                .json::<GetFailedSlotsChunksResponse>()
+                .await?
+                .chunks),
+            _ => Err(BlobscanClientError::BlobscanClientError(
+                failed_slots_chunks_response.text().await?,
+            )),
+        }
+    }
+
     pub async fn add_failed_slots_chunks(
         &self,
         slots_chunks: Vec<FailedSlotsChunkEntity>,
@@ -126,6 +147,30 @@ impl BlobscanClient {
             .json::<FailedSlotsChunksRequest>(&FailedSlotsChunksRequest {
                 chunks: slots_chunks,
             })
+            .send()
+            .await?;
+
+        match failed_slots_response.status() {
+            StatusCode::OK => Ok(()),
+            _ => Err(BlobscanClientError::BlobscanClientError(
+                failed_slots_response.text().await?,
+            )),
+        }
+    }
+
+    pub async fn remove_failed_slots_chunks(
+        &self,
+        chunk_ids: Vec<u32>,
+    ) -> BlobscanClientResult<()> {
+        let path = String::from("delete-failed-slots-chunks");
+        let url = self.build_url(&path);
+        let token = self.jwt_manager.get_token()?;
+
+        let failed_slots_response = self
+            .client
+            .post(url)
+            .bearer_auth(token)
+            .json::<RemoveFailedSlotsChunksRequest>(&RemoveFailedSlotsChunksRequest { chunk_ids })
             .send()
             .await?;
 

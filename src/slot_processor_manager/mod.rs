@@ -1,8 +1,7 @@
-use core::panic;
-
+use anyhow::{anyhow, Context as AnyhowContext};
 use futures::future::join_all;
 use tokio::task::{JoinError, JoinHandle};
-use tracing::Instrument;
+use tracing::{error, Instrument};
 
 use self::slot_processor::{errors::SlotProcessorError, SlotProcessor};
 use crate::{blobscan_client::types::FailedSlotsChunkEntity, context::Context};
@@ -14,9 +13,20 @@ pub struct SlotProcessorManager {
     max_threads_length: u32,
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum SlotProcessorManagerError {
+    #[error("Slot processor manager failed to process the following slots chunks: {chunks:?}")]
+    FailedSlotsProcessing { chunks: Vec<FailedSlotsChunkEntity> },
+
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
+}
+
 impl SlotProcessorManager {
-    pub fn try_new(context: Context) -> Result<Self, anyhow::Error> {
-        let max_threads_length = std::thread::available_parallelism()?.get() as u32;
+    pub fn try_new(context: Context) -> Result<Self, SlotProcessorManagerError> {
+        let max_threads_length = std::thread::available_parallelism()
+            .with_context(|| "Failed to get maximum thread length")?
+            .get() as u32;
 
         Ok(Self {
             context,
@@ -24,7 +34,11 @@ impl SlotProcessorManager {
         })
     }
 
-    pub async fn process_slots(&self, start_slot: u32, end_slot: u32) -> Result<(), anyhow::Error> {
+    pub async fn process_slots(
+        &self,
+        start_slot: u32,
+        end_slot: u32,
+    ) -> Result<(), SlotProcessorManagerError> {
         if start_slot == end_slot {
             return Ok(());
         }
@@ -51,12 +65,16 @@ impl SlotProcessorManager {
             let thread_final_slot = current_slot + thread_slots_chunk;
 
             let thread = tokio::spawn(async move {
-                let slot_span = tracing::trace_span!("slot_processor", slot = end_slot);
+                let slots_chunk_span = tracing::trace_span!(
+                    "slots_chunk_processor",
+                    initial_slot = thread_initial_slot,
+                    final_slot = thread_final_slot
+                );
                 let slot_processor = SlotProcessor::new(thread_context);
 
                 slot_processor
                     .process_slots(thread_initial_slot, thread_final_slot)
-                    .instrument(slot_span)
+                    .instrument(slots_chunk_span)
                     .await
             });
 
@@ -67,40 +85,51 @@ impl SlotProcessorManager {
 
         let thread_outputs = join_all(threads).await;
 
-        self.process_thread_outputs(&thread_outputs).await?;
+        let failed_slots_chunks = self.get_failed_slots_chunks(&thread_outputs).await?;
+
+        if !failed_slots_chunks.is_empty() {
+            return Err(SlotProcessorManagerError::FailedSlotsProcessing {
+                chunks: failed_slots_chunks,
+            });
+        }
 
         Ok(())
     }
 
-    async fn process_thread_outputs(
+    async fn get_failed_slots_chunks(
         &self,
         thread_outputs: &[Result<Result<u32, SlotProcessorError>, JoinError>],
-    ) -> Result<(), anyhow::Error> {
-        let failed_slots_chunks = thread_outputs
+    ) -> Result<Vec<FailedSlotsChunkEntity>, SlotProcessorManagerError> {
+        let failed_threads = thread_outputs
             .iter()
             .filter(|thread_join| match thread_join {
                 Ok(thread_result) => thread_result.is_err(),
                 Err(_) => true,
-            })
-            .map(|thread_join| match thread_join {
+            });
+        let mut failed_slots_chunks: Vec<FailedSlotsChunkEntity> = vec![];
+
+        for thread in failed_threads.into_iter() {
+            match thread {
                 Ok(thread_result) => match thread_result.as_ref().unwrap_err() {
                     SlotProcessorError::ProcessingError {
                         slot,
                         target_slot,
                         reason: _,
-                    } => FailedSlotsChunkEntity::from((slot.to_owned(), target_slot.to_owned())),
+                    } => failed_slots_chunks.push(FailedSlotsChunkEntity::from((
+                        slot.to_owned(),
+                        target_slot.to_owned(),
+                    ))),
                 },
-                Err(join_error) => panic!("Thread panicked: {:?}", join_error),
-            })
-            .collect::<Vec<FailedSlotsChunkEntity>>();
-
-        if !failed_slots_chunks.is_empty() {
-            self.context
-                .blobscan_client()
-                .add_failed_slots_chunks(failed_slots_chunks)
-                .await?;
+                Err(join_error) => {
+                    return Err(anyhow!(format!(
+                        "Slot processing thread failed unexpectedly: {:?}",
+                        join_error
+                    ))
+                    .into())
+                }
+            }
         }
 
-        Ok(())
+        return Ok(failed_slots_chunks);
     }
 }

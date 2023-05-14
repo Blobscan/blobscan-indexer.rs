@@ -37,6 +37,8 @@ pub struct BlobEntity {
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct FailedSlotsChunkEntity {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<u32>,
     pub initial_slot: u32,
     pub final_slot: u32,
 }
@@ -44,6 +46,17 @@ pub struct FailedSlotsChunkEntity {
 #[derive(Serialize, Debug)]
 pub struct FailedSlotsChunksRequest {
     pub chunks: Vec<FailedSlotsChunkEntity>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct GetFailedSlotsChunksResponse {
+    pub chunks: Vec<FailedSlotsChunkEntity>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoveFailedSlotsChunksRequest {
+    pub chunk_ids: Vec<u32>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -80,6 +93,7 @@ pub type BlobscanClientResult<T> = Result<T, BlobscanClientError>;
 impl From<(u32, u32)> for FailedSlotsChunkEntity {
     fn from((initial_slot, final_slot): (u32, u32)) -> Self {
         Self {
+            id: None,
             initial_slot,
             final_slot,
         }

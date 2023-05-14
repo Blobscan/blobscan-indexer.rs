@@ -31,11 +31,8 @@ fn default_mode() -> String {
     DEV_MODE.to_string()
 }
 
-pub fn get_env_vars() -> Environment {
-    match envy::from_env::<Environment>() {
-        Ok(env) => env,
-        Err(e) => {
-            panic!("Couldn't read environment variables: {}", e);
-        }
+impl Environment {
+    pub fn from_env() -> Result<Self, envy::Error> {
+        envy::from_env::<Environment>()
     }
 }
