@@ -1,10 +1,10 @@
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::{Context as AnyhowContext, Result};
 use backoff::{future::retry_notify, Error as BackoffError};
 
 use ethers::prelude::*;
-use tracing::{error, info, warn};
+use tracing::{info, warn, Instrument};
 
 use crate::{
     blobscan_client::types::{BlobEntity, BlockEntity, TransactionEntity},
@@ -33,11 +33,13 @@ impl SlotProcessor {
         end_slot: u32,
     ) -> Result<u32, SlotProcessorError> {
         for current_slot in start_slot..end_slot {
-            let result = self.process_slot_with_retry(current_slot).await;
+            let slot_span = tracing::info_span!("slot_processor", slot = current_slot);
+            let result = self
+                .process_slot_with_retry(current_slot)
+                .instrument(slot_span)
+                .await;
 
             if let Err(e) = result {
-                error!("[Slot {current_slot}] Couldn't process slot: {e}");
-
                 return Err(SlotProcessorError::ProcessingError {
                     slot: current_slot,
                     target_slot: end_slot,
@@ -54,17 +56,13 @@ impl SlotProcessor {
 
         retry_notify(
             backoff_config,
-        || {
-            async move {
-                self.process_slot(slot).await
-            }
-        },
-        |e, duration: Duration| {
-            let duration = duration.as_secs();
-            warn!("[Slot {slot}] Slot processing failed. Retrying in {duration} seconds… (Reason: {e})");
-        },
-    )
-    .await
+            || async move { self.process_slot(slot).await },
+            |e, duration: Duration| {
+                let duration = duration.as_secs();
+                warn!("Slot processing failed. Retrying in {duration} seconds… (Reason: {e})");
+            },
+        )
+        .await
     }
 
     pub async fn process_slot(
@@ -75,8 +73,6 @@ impl SlotProcessor {
         let blobscan_client = self.context.blobscan_client();
         let provider = self.context.provider();
 
-        let start = Instant::now();
-
         // Fetch execution block data from a given slot and perform some checks
 
         let beacon_block = match beacon_client
@@ -86,7 +82,7 @@ impl SlotProcessor {
         {
             Some(block) => block,
             None => {
-                info!("[Slot {slot}] Skipping as there is no beacon block");
+                info!("Skipping as there is no beacon block");
 
                 return Ok(());
             }
@@ -95,7 +91,7 @@ impl SlotProcessor {
         let execution_payload = match beacon_block.body.execution_payload {
             Some(payload) => payload,
             None => {
-                info!("[Slot {slot}] Skipping as beacon block doesn't contain execution payload");
+                info!("Skipping as beacon block doesn't contain execution payload");
 
                 return Ok(());
             }
@@ -104,9 +100,7 @@ impl SlotProcessor {
         match beacon_block.body.blob_kzg_commitments {
             Some(commitments) => commitments,
             None => {
-                info!(
-                    "[Slot {slot}] Skipping as beacon block doesn't contain blob kzg commitments"
-                );
+                info!("Skipping as beacon block doesn't contain blob kzg commitments");
 
                 return Ok(());
             }
@@ -127,7 +121,7 @@ impl SlotProcessor {
             .map_err(|err| BackoffError::permanent(SingleSlotProcessingError::Other(err)))?;
 
         if tx_hash_to_versioned_hashes.is_empty() {
-            info!("[Slot {slot}] Skipping as execution block doesn't contain blob txs");
+            info!("Skipping as execution block doesn't contain blob txs");
 
             return Ok(());
         }
@@ -141,7 +135,7 @@ impl SlotProcessor {
         {
             Some(blobs) => {
                 if blobs.is_empty() {
-                    info!("[Slot {slot}] Skipping as blobs sidecar is empty");
+                    info!("Skipping as blobs sidecar is empty");
 
                     return Ok(());
                 } else {
@@ -149,7 +143,7 @@ impl SlotProcessor {
                 }
             }
             None => {
-                info!("[Slot {slot}] Skipping as there is no blobs sidecar");
+                info!("Skipping as there is no blobs sidecar");
 
                 return Ok(());
             }
@@ -185,12 +179,7 @@ impl SlotProcessor {
             .await
             .map_err(SingleSlotProcessingError::BlobscanClient)?;
 
-        let duration = start.elapsed();
-
-        info!(
-            "[Slot {slot}] Blobs indexed correctly (elapsed time: {:?}s)",
-            duration.as_secs()
-        );
+        info!("Block, txs and blobs indexed successfully");
 
         Ok(())
     }

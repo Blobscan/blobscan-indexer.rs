@@ -65,8 +65,8 @@ impl SlotProcessorManager {
             let thread_final_slot = current_slot + thread_slots_chunk;
 
             let thread = tokio::spawn(async move {
-                let slots_chunk_span = tracing::trace_span!(
-                    "slots_chunk_processor",
+                let thread_slots_span = tracing::trace_span!(
+                    "thread_slots_processor",
                     initial_slot = thread_initial_slot,
                     final_slot = thread_final_slot
                 );
@@ -74,7 +74,7 @@ impl SlotProcessorManager {
 
                 slot_processor
                     .process_slots(thread_initial_slot, thread_final_slot)
-                    .instrument(slots_chunk_span)
+                    .instrument(thread_slots_span)
                     .await
             });
 
@@ -115,10 +115,13 @@ impl SlotProcessorManager {
                         slot,
                         target_slot,
                         reason: _,
-                    } => failed_slots_chunks.push(FailedSlotsChunkEntity::from((
-                        slot.to_owned(),
-                        target_slot.to_owned(),
-                    ))),
+                    } => {
+                        error!("Failed to process slots from {} to {}", slot, target_slot);
+                        failed_slots_chunks.push(FailedSlotsChunkEntity::from((
+                            slot.to_owned(),
+                            target_slot.to_owned(),
+                        )))
+                    }
                 },
                 Err(join_error) => {
                     return Err(anyhow!(format!(

@@ -3,7 +3,7 @@ use context::{Config as ContextConfig, Context};
 use env::Environment;
 use slot_processor_manager::{SlotProcessorManager, SlotProcessorManagerError};
 use slot_retryer::SlotRetryer;
-use tracing::Instrument;
+use tracing::{error, info, Instrument};
 
 use crate::utils::telemetry::{get_subscriber, init_subscriber};
 
@@ -46,8 +46,15 @@ async fn main() -> Result<()> {
             let latest_slot: u32 = latest_beacon_block.slot.parse()?;
 
             if current_slot < latest_slot {
+                let slot_manager_span = tracing::debug_span!(
+                    "slot_processor_manager",
+                    initial_slot = current_slot,
+                    final_slot = latest_slot
+                );
+
                 match slot_processor_manager
                     .process_slots(current_slot, latest_slot)
+                    .instrument(slot_manager_span)
                     .await
                 {
                     Ok(_) => (),
@@ -56,12 +63,14 @@ async fn main() -> Result<()> {
                             blobscan_client.add_failed_slots_chunks(chunks).await?;
                         }
                         SlotProcessorManagerError::Other(err) => {
+                            error!("{err}");
                             anyhow::bail!(err);
                         }
                     },
                 }
 
                 blobscan_client.update_slot(latest_slot - 1).await?;
+                info!("Latest slot updated to {}", latest_slot - 1);
 
                 current_slot = latest_slot;
             }
