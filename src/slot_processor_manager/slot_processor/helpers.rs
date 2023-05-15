@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use ethers::types::{Block as EthersBlock, Transaction as EthersTransaction, H256};
 
 use crate::{
-    beacon_client::types::BlobData,
+    beacon_client::types::Blob as BeaconBlob,
     utils::web3::{calculate_versioned_hash, get_tx_versioned_hashes},
 };
 
@@ -24,8 +24,8 @@ pub fn create_tx_hash_versioned_hashes_mapping(
 }
 
 pub fn create_versioned_hash_blob_mapping(
-    blobs: &Vec<BlobData>,
-) -> Result<HashMap<H256, &BlobData>, anyhow::Error> {
+    blobs: &Vec<BeaconBlob>,
+) -> Result<HashMap<H256, &BeaconBlob>, anyhow::Error> {
     let mut version_hash_to_blob = HashMap::new();
 
     for blob in blobs {

@@ -4,7 +4,7 @@ use tokio::task::{JoinError, JoinHandle};
 use tracing::{error, Instrument};
 
 use self::slot_processor::{errors::SlotProcessorError, SlotProcessor};
-use crate::{blobscan_client::types::FailedSlotsChunkEntity, context::Context};
+use crate::{blobscan_client::types::FailedSlotsChunk, context::Context};
 
 mod slot_processor;
 
@@ -16,7 +16,7 @@ pub struct SlotProcessorManager {
 #[derive(Debug, thiserror::Error)]
 pub enum SlotProcessorManagerError {
     #[error("Slot processor manager failed to process the following slots chunks: {chunks:?}")]
-    FailedSlotsProcessing { chunks: Vec<FailedSlotsChunkEntity> },
+    FailedSlotsProcessing { chunks: Vec<FailedSlotsChunk> },
 
     #[error(transparent)]
     Other(#[from] anyhow::Error),
@@ -99,14 +99,14 @@ impl SlotProcessorManager {
     async fn get_failed_slots_chunks(
         &self,
         thread_outputs: &[Result<Result<u32, SlotProcessorError>, JoinError>],
-    ) -> Result<Vec<FailedSlotsChunkEntity>, SlotProcessorManagerError> {
+    ) -> Result<Vec<FailedSlotsChunk>, SlotProcessorManagerError> {
         let failed_threads = thread_outputs
             .iter()
             .filter(|thread_join| match thread_join {
                 Ok(thread_result) => thread_result.is_err(),
                 Err(_) => true,
             });
-        let mut failed_slots_chunks: Vec<FailedSlotsChunkEntity> = vec![];
+        let mut failed_slots_chunks: Vec<FailedSlotsChunk> = vec![];
 
         for thread in failed_threads.into_iter() {
             match thread {
@@ -117,7 +117,7 @@ impl SlotProcessorManager {
                         reason: _,
                     } => {
                         error!("Failed to process slots from {} to {}", slot, target_slot);
-                        failed_slots_chunks.push(FailedSlotsChunkEntity::from((
+                        failed_slots_chunks.push(FailedSlotsChunk::from((
                             slot.to_owned(),
                             target_slot.to_owned(),
                         )))
@@ -133,6 +133,6 @@ impl SlotProcessorManager {
             }
         }
 
-        return Ok(failed_slots_chunks);
+        Ok(failed_slots_chunks)
     }
 }

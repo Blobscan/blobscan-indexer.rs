@@ -2,7 +2,7 @@ use reqwest::{Client, StatusCode};
 use std::time::Duration;
 
 use self::types::{
-    BeaconClientError, BeaconClientResult, BlobData, BlobsResponse, BlockMessage as Block,
+    BeaconClientError, BeaconClientResult, Blob, BlobsResponse, BlockMessage as Block,
     BlockResponse,
 };
 
@@ -47,7 +47,7 @@ impl BeaconClient {
         }
     }
 
-    pub async fn get_blobs(&self, slot: u32) -> BeaconClientResult<Option<Vec<BlobData>>> {
+    pub async fn get_blobs(&self, slot: u32) -> BeaconClientResult<Option<Vec<Blob>>> {
         let url = self.build_url(&format!("eth/v1/beacon/blobs/{slot}"));
 
         let blobs_response = self.client.get(url).send().await?;

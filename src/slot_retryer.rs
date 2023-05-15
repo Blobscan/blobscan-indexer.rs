@@ -1,7 +1,7 @@
 use tracing::info;
 
 use crate::{
-    blobscan_client::types::FailedSlotsChunkEntity,
+    blobscan_client::types::FailedSlotsChunk,
     context::Context,
     slot_processor_manager::{SlotProcessorManager, SlotProcessorManagerError},
 };
@@ -23,7 +23,7 @@ impl SlotRetryer {
 
         let failed_slots_chunks = blobscan_client.get_failed_slots_chunks().await?;
         let mut chunk_ids: Vec<u32> = vec![];
-        let mut failed_sub_chunks: Vec<FailedSlotsChunkEntity> = vec![];
+        let mut failed_sub_chunks: Vec<FailedSlotsChunk> = vec![];
 
         if !failed_slots_chunks.is_empty() {
             for failed_chunk in failed_slots_chunks.iter() {

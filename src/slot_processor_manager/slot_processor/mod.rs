@@ -7,7 +7,7 @@ use ethers::prelude::*;
 use tracing::{info, warn, Instrument};
 
 use crate::{
-    blobscan_client::types::{BlobEntity, BlockEntity, TransactionEntity},
+    blobscan_client::types::{Blob, Block, Transaction},
     context::Context,
     utils::exp_backoff::get_exp_backoff_config,
 };
@@ -151,26 +151,26 @@ impl SlotProcessor {
 
         // Create entities to be indexed
 
-        let block_entity = BlockEntity::try_from((&execution_block, slot))
+        let block_entity = Block::try_from((&execution_block, slot))
             .map_err(|err| BackoffError::Permanent(SingleSlotProcessingError::Other(err)))?;
 
         let transactions_entities = execution_block
             .transactions
             .iter()
             .filter(|tx| tx_hash_to_versioned_hashes.contains_key(&tx.hash))
-            .map(|tx| TransactionEntity::try_from((tx, &execution_block)))
-            .collect::<Result<Vec<TransactionEntity>>>()
+            .map(|tx| Transaction::try_from((tx, &execution_block)))
+            .collect::<Result<Vec<Transaction>>>()
             .map_err(|err| BackoffError::Permanent(SingleSlotProcessingError::Other(err)))?;
 
         let versioned_hash_to_blob = create_versioned_hash_blob_mapping(&blobs)
             .map_err(|err| BackoffError::Permanent(SingleSlotProcessingError::Other(err)))?;
-        let mut blob_entities: Vec<BlobEntity> = vec![];
+        let mut blob_entities: Vec<Blob> = vec![];
 
         for (tx_hash, versioned_hashes) in tx_hash_to_versioned_hashes.iter() {
             for (i, versioned_hash) in versioned_hashes.iter().enumerate() {
                 let blob = *versioned_hash_to_blob.get(versioned_hash).with_context(|| format!("Sidecar not found for blob {i} with versioned hash {versioned_hash} from tx {tx_hash}")).map_err(|err| BackoffError::Permanent(SingleSlotProcessingError::Other(err)))?;
 
-                blob_entities.push(BlobEntity::from((blob, versioned_hash, i, tx_hash)));
+                blob_entities.push(Blob::from((blob, versioned_hash, i, tx_hash)));
             }
         }
 

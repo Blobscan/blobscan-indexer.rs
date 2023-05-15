@@ -1,6 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
-use anyhow::Result;
+use anyhow::Result as AnyhowResult;
 use ethers::prelude::*;
 
 use crate::{
@@ -28,7 +28,7 @@ pub struct Context {
 }
 
 impl Context {
-    pub fn try_new(config: Config) -> Result<Self> {
+    pub fn try_new(config: Config) -> AnyhowResult<Self> {
         let Config {
             blobscan_api_endpoint,
             beacon_node_rpc,

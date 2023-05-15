@@ -5,9 +5,9 @@ use reqwest::{Client, StatusCode};
 use self::{
     jwt_manager::{Config as JWTManagerConfig, JWTManager},
     types::{
-        BlobEntity, BlobscanClientError, BlobscanClientResult, BlockEntity, FailedSlotsChunkEntity,
-        FailedSlotsChunksRequest, GetFailedSlotsChunksResponse, IndexRequest,
-        RemoveFailedSlotsChunksRequest, SlotRequest, SlotResponse, TransactionEntity,
+        Blob, BlobscanClientError, BlobscanClientResult, Block, FailedSlotsChunk,
+        FailedSlotsChunksRequest, FailedSlotsChunksResponse, IndexRequest,
+        RemoveFailedSlotsChunksRequest, SlotRequest, SlotResponse, Transaction,
     },
 };
 
@@ -47,9 +47,9 @@ impl BlobscanClient {
 
     pub async fn index(
         &self,
-        block: BlockEntity,
-        transactions: Vec<TransactionEntity>,
-        blobs: Vec<BlobEntity>,
+        block: Block,
+        transactions: Vec<Transaction>,
+        blobs: Vec<Blob>,
     ) -> BlobscanClientResult<()> {
         let path = String::from("index");
         let url = self.build_url(&path);
@@ -70,9 +70,7 @@ impl BlobscanClient {
 
         match index_response.status() {
             StatusCode::OK => Ok(()),
-            _ => Err(BlobscanClientError::BlobscanClientError(
-                index_response.text().await?,
-            )),
+            _ => Err(BlobscanClientError::ApiError(index_response.text().await?)),
         }
     }
 
@@ -91,9 +89,7 @@ impl BlobscanClient {
 
         match slot_response.status() {
             StatusCode::OK => Ok(()),
-            _ => Err(BlobscanClientError::BlobscanClientError(
-                slot_response.text().await?,
-            )),
+            _ => Err(BlobscanClientError::ApiError(slot_response.text().await?)),
         }
     }
 
@@ -106,15 +102,11 @@ impl BlobscanClient {
         match slot_response.status() {
             StatusCode::OK => Ok(Some(slot_response.json::<SlotResponse>().await?.slot)),
             StatusCode::NOT_FOUND => Ok(None),
-            _ => Err(BlobscanClientError::BlobscanClientError(
-                slot_response.text().await?,
-            )),
+            _ => Err(BlobscanClientError::ApiError(slot_response.text().await?)),
         }
     }
 
-    pub async fn get_failed_slots_chunks(
-        &self,
-    ) -> BlobscanClientResult<Vec<FailedSlotsChunkEntity>> {
+    pub async fn get_failed_slots_chunks(&self) -> BlobscanClientResult<Vec<FailedSlotsChunk>> {
         let path = String::from("failed-slots-chunks");
         let url = self.build_url(&path);
         let token = self.jwt_manager.get_token()?;
@@ -123,10 +115,10 @@ impl BlobscanClient {
 
         match failed_slots_chunks_response.status() {
             StatusCode::OK => Ok(failed_slots_chunks_response
-                .json::<GetFailedSlotsChunksResponse>()
+                .json::<FailedSlotsChunksResponse>()
                 .await?
                 .chunks),
-            _ => Err(BlobscanClientError::BlobscanClientError(
+            _ => Err(BlobscanClientError::ApiError(
                 failed_slots_chunks_response.text().await?,
             )),
         }
@@ -134,7 +126,7 @@ impl BlobscanClient {
 
     pub async fn add_failed_slots_chunks(
         &self,
-        slots_chunks: Vec<FailedSlotsChunkEntity>,
+        slots_chunks: Vec<FailedSlotsChunk>,
     ) -> BlobscanClientResult<()> {
         let path = String::from("failed-slots-chunks");
         let url = self.build_url(&path);
@@ -152,7 +144,7 @@ impl BlobscanClient {
 
         match failed_slots_response.status() {
             StatusCode::OK => Ok(()),
-            _ => Err(BlobscanClientError::BlobscanClientError(
+            _ => Err(BlobscanClientError::ApiError(
                 failed_slots_response.text().await?,
             )),
         }
@@ -176,7 +168,7 @@ impl BlobscanClient {
 
         match failed_slots_response.status() {
             StatusCode::OK => Ok(()),
-            _ => Err(BlobscanClientError::BlobscanClientError(
+            _ => Err(BlobscanClientError::ApiError(
                 failed_slots_response.text().await?,
             )),
         }
