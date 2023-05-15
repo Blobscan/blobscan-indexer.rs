@@ -8,12 +8,8 @@ pub struct Environment {
     pub beacon_node_rpc: String,
     #[serde(default = "default_execution_node_rpc")]
     pub execution_node_rpc: String,
-    #[serde(default = "default_mode")]
-    pub mode: String,
     pub secret_key: String,
 }
-
-pub const DEV_MODE: &str = "development";
 
 fn default_blobscan_api_endpoint() -> String {
     "http://localhost:3001".to_string()
@@ -25,10 +21,6 @@ fn default_beacon_node_rpc() -> String {
 
 fn default_execution_node_rpc() -> String {
     "http://localhost:8545".to_string()
-}
-
-fn default_mode() -> String {
-    DEV_MODE.to_string()
 }
 
 impl Environment {
