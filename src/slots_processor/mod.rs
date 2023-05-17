@@ -14,18 +14,25 @@ mod slot_processor;
 
 pub struct SlotsProcessor {
     context: Context,
-    max_threads_length: u32,
+    config: Config,
+}
+
+pub struct Config {
+    pub threads_length: u32,
 }
 
 impl SlotsProcessor {
-    pub fn try_new(context: Context) -> Result<Self, SlotsProcessorError> {
-        let max_threads_length = std::thread::available_parallelism()
-            .with_context(|| "Failed to get maximum thread length")?
-            .get() as u32;
-
+    pub fn try_new(context: Context, config: Option<Config>) -> Result<Self, SlotsProcessorError> {
         Ok(Self {
             context,
-            max_threads_length,
+            config: match config {
+                Some(config) => config,
+                None => Config {
+                    threads_length: std::thread::available_parallelism()
+                        .with_context(|| "Failed to get max thread length")?
+                        .get() as u32,
+                },
+            },
         })
     }
 
@@ -39,9 +46,9 @@ impl SlotsProcessor {
         }
 
         let slots_chunk = end_slot - start_slot;
-        let slots_per_thread = slots_chunk / self.max_threads_length;
+        let slots_per_thread = slots_chunk / self.config.threads_length;
         let threads_length = if slots_per_thread > 0 {
-            self.max_threads_length
+            self.config.threads_length
         } else {
             slots_chunk
         };
@@ -50,7 +57,7 @@ impl SlotsProcessor {
 
         for i in 0..threads_length {
             let thread_slots_chunk = if i == 0 {
-                slots_per_thread + slots_chunk % self.max_threads_length
+                slots_per_thread + slots_chunk % self.config.threads_length
             } else {
                 slots_per_thread
             };

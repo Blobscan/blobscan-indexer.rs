@@ -1,7 +1,7 @@
 use anyhow::Result;
 use context::{Config as ContextConfig, Context};
 use env::Environment;
-use slots_processor::SlotsProcessor;
+use slots_processor::{Config as SlotsProcessorConfig, SlotsProcessor};
 use tracing::{info, Instrument};
 
 use crate::utils::telemetry::{get_subscriber, init_subscriber};
@@ -23,6 +23,9 @@ async fn main() -> Result<()> {
     let subscriber = get_subscriber("blobscan_indexer".into(), "info".into(), std::io::stdout);
     init_subscriber(subscriber);
 
+    let slots_processor_config = env
+        .num_processing_threads
+        .map(|threads_length| SlotsProcessorConfig { threads_length });
     let context = Context::try_new(ContextConfig::from(env))?;
     let beacon_client = context.beacon_client();
     let blobscan_client = context.blobscan_client();
@@ -32,7 +35,7 @@ async fn main() -> Result<()> {
         None => 0,
     };
 
-    let slot_processor_manager = SlotsProcessor::try_new(context.clone())?;
+    let slots_processor = SlotsProcessor::try_new(context.clone(), slots_processor_config)?;
 
     loop {
         if let Some(latest_beacon_block) = beacon_client.get_block(None).await? {
@@ -45,7 +48,7 @@ async fn main() -> Result<()> {
                     final_slot = latest_slot
                 );
 
-                slot_processor_manager
+                slots_processor
                     .process_slots(current_slot, latest_slot)
                     .instrument(slot_manager_span)
                     .await?;
