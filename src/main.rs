@@ -1,7 +1,7 @@
 use anyhow::Result;
 use context::{Config as ContextConfig, Context};
 use env::Environment;
-use slot_processor_manager::SlotsProcessor;
+use slots_processor::SlotsProcessor;
 use tracing::{info, Instrument};
 
 use crate::utils::telemetry::{get_subscriber, init_subscriber};
@@ -12,7 +12,7 @@ mod beacon_client;
 mod blobscan_client;
 mod context;
 mod env;
-mod slot_processor_manager;
+mod slots_processor;
 mod utils;
 
 #[tokio::main]
