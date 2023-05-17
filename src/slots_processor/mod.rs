@@ -45,28 +45,30 @@ impl SlotsProcessor {
             return Ok(());
         }
 
-        let slots_chunk = end_slot - start_slot;
-        let slots_per_thread = slots_chunk / self.config.threads_length;
-        let threads_length = if slots_per_thread > 0 {
-            self.config.threads_length
+        let unprocessed_slots = end_slot - start_slot;
+        let num_threads = std::cmp::min(self.config.threads_length, unprocessed_slots);
+        let slots_per_thread = unprocessed_slots / num_threads;
+        let remaining_slots = unprocessed_slots % num_threads;
+        let num_threads = if slots_per_thread > 0 {
+            num_threads
         } else {
-            slots_chunk
+            unprocessed_slots
         };
-        let mut handles: Vec<JoinHandle<Result<(), SlotsChunkThreadError>>> = vec![];
-        let mut current_slot = start_slot;
 
-        for i in 0..threads_length {
-            let thread_slots_chunk = if i == 0 {
-                slots_per_thread + slots_chunk % self.config.threads_length
+        let mut handles: Vec<JoinHandle<Result<(), SlotsChunkThreadError>>> = vec![];
+
+        for i in 0..num_threads {
+            let slots_in_current_thread = if i == num_threads - 1 {
+                slots_per_thread + remaining_slots
             } else {
                 slots_per_thread
             };
 
             let thread_context = self.context.clone();
-            let thread_initial_slot = current_slot;
-            let thread_final_slot = current_slot + thread_slots_chunk;
+            let thread_initial_slot = start_slot + i * slots_per_thread;
+            let thread_final_slot = thread_initial_slot + slots_in_current_thread;
 
-            let thread_slots_span = tracing::info_span!(
+            let thread_slots_span = tracing::debug_span!(
                 "slots_chunk_processor",
                 chunk_initial_slot = thread_initial_slot,
                 chunk_final_slot = thread_final_slot
@@ -102,8 +104,6 @@ impl SlotsProcessor {
             );
 
             handles.push(handle);
-
-            current_slot += thread_slots_chunk;
         }
 
         let handle_outputs = join_all(handles).await;

@@ -15,6 +15,8 @@ mod env;
 mod slots_processor;
 mod utils;
 
+const MAX_SLOTS_PER_SAVE: u32 = 1000;
+
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
@@ -42,21 +44,60 @@ async fn main() -> Result<()> {
             let latest_slot: u32 = latest_beacon_block.slot.parse()?;
 
             if current_slot < latest_slot {
-                let slot_manager_span = tracing::debug_span!(
-                    "slot_processor_manager",
-                    initial_slot = current_slot,
-                    final_slot = latest_slot
+                let unprocessed_slots = latest_slot - current_slot;
+                let current_max_slots_size = std::cmp::min(unprocessed_slots, MAX_SLOTS_PER_SAVE);
+                let num_chunks = unprocessed_slots / current_max_slots_size;
+
+                let remaining_slots = unprocessed_slots % current_max_slots_size;
+                let num_chunks = if remaining_slots > 0 {
+                    num_chunks + 1
+                } else {
+                    num_chunks
+                };
+
+                info!(
+                    "Processing slots from {} to {}, partitioned into {} chunks…",
+                    current_slot, latest_slot, num_chunks
                 );
 
-                slots_processor
-                    .process_slots(current_slot, latest_slot)
-                    .instrument(slot_manager_span)
-                    .await?;
+                for i in 0..num_chunks {
+                    let slots_in_current_chunk = if i == num_chunks - 1 {
+                        current_max_slots_size + remaining_slots
+                    } else {
+                        current_max_slots_size
+                    };
 
-                blobscan_client.update_slot(latest_slot - 1).await?;
-                info!("Latest slot updated to {}", latest_slot - 1);
+                    let chunk_initial_slot = current_slot + i * current_max_slots_size;
+                    let chunk_final_slot = chunk_initial_slot + slots_in_current_chunk;
+
+                    let slot_manager_span = tracing::info_span!(
+                        "slots_processor",
+                        initial_slot = chunk_initial_slot,
+                        final_slot = chunk_final_slot
+                    );
+
+                    slots_processor
+                        .process_slots(chunk_initial_slot, chunk_final_slot)
+                        .instrument(slot_manager_span)
+                        .await?;
+
+                    blobscan_client.update_slot(chunk_final_slot - 1).await?;
+
+                    info!(
+                        "Chunk {} of {} ({} slots) processed successfully!. Updating latest slot to {}.",
+                        i+1,
+                        num_chunks,
+                        chunk_final_slot - chunk_initial_slot,
+                        chunk_final_slot - 1
+                    );
+                }
 
                 current_slot = latest_slot;
+
+                info!(
+                    "All slots processed successfully! Total slots processed: {}",
+                    unprocessed_slots
+                );
             }
         }
 

@@ -12,10 +12,10 @@ use crate::{
     utils::exp_backoff::get_exp_backoff_config,
 };
 
-use self::errors::SlotProcessorError;
+use self::error::SlotProcessorError;
 use self::helpers::{create_tx_hash_versioned_hashes_mapping, create_versioned_hash_blob_mapping};
 
-pub mod errors;
+pub mod error;
 mod helpers;
 
 pub struct SlotProcessor {

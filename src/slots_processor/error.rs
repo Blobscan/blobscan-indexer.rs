@@ -1,4 +1,4 @@
-use super::slot_processor::errors::SlotProcessorError;
+use super::slot_processor::error::SlotProcessorError;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SlotsChunkThreadError {

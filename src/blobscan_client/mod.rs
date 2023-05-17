@@ -61,7 +61,7 @@ impl BlobscanClient {
 
         let index_response = self
             .client
-            .post(url)
+            .put(url)
             .bearer_auth(token)
             .json(&index_request)
             .send()
