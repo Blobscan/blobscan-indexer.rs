@@ -16,7 +16,7 @@ fn default_blobscan_api_endpoint() -> String {
 }
 
 fn default_beacon_node_rpc() -> String {
-    "http://localhost:3500".to_string()
+    "http://localhost:5052".to_string()
 }
 
 fn default_execution_node_rpc() -> String {
