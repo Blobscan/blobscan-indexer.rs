@@ -5,9 +5,8 @@ use reqwest::{Client, StatusCode};
 use self::{
     jwt_manager::{Config as JWTManagerConfig, JWTManager},
     types::{
-        Blob, BlobscanClientError, BlobscanClientResult, Block, FailedSlotsChunk,
-        FailedSlotsChunksRequest, FailedSlotsChunksResponse, IndexRequest,
-        RemoveFailedSlotsChunksRequest, SlotRequest, SlotResponse, Transaction,
+        Blob, BlobscanClientError, BlobscanClientResult, Block, IndexRequest, SlotRequest,
+        SlotResponse, Transaction,
     },
 };
 
@@ -103,74 +102,6 @@ impl BlobscanClient {
             StatusCode::OK => Ok(Some(slot_response.json::<SlotResponse>().await?.slot)),
             StatusCode::NOT_FOUND => Ok(None),
             _ => Err(BlobscanClientError::ApiError(slot_response.text().await?)),
-        }
-    }
-
-    pub async fn get_failed_slots_chunks(&self) -> BlobscanClientResult<Vec<FailedSlotsChunk>> {
-        let path = String::from("failed-slots-chunks");
-        let url = self.build_url(&path);
-        let token = self.jwt_manager.get_token()?;
-
-        let failed_slots_chunks_response = self.client.get(url).bearer_auth(token).send().await?;
-
-        match failed_slots_chunks_response.status() {
-            StatusCode::OK => Ok(failed_slots_chunks_response
-                .json::<FailedSlotsChunksResponse>()
-                .await?
-                .chunks),
-            _ => Err(BlobscanClientError::ApiError(
-                failed_slots_chunks_response.text().await?,
-            )),
-        }
-    }
-
-    pub async fn add_failed_slots_chunks(
-        &self,
-        slots_chunks: Vec<FailedSlotsChunk>,
-    ) -> BlobscanClientResult<()> {
-        let path = String::from("failed-slots-chunks");
-        let url = self.build_url(&path);
-        let token = self.jwt_manager.get_token()?;
-
-        let failed_slots_response = self
-            .client
-            .post(url)
-            .bearer_auth(token)
-            .json::<FailedSlotsChunksRequest>(&FailedSlotsChunksRequest {
-                chunks: slots_chunks,
-            })
-            .send()
-            .await?;
-
-        match failed_slots_response.status() {
-            StatusCode::OK => Ok(()),
-            _ => Err(BlobscanClientError::ApiError(
-                failed_slots_response.text().await?,
-            )),
-        }
-    }
-
-    pub async fn remove_failed_slots_chunks(
-        &self,
-        chunk_ids: Vec<u32>,
-    ) -> BlobscanClientResult<()> {
-        let path = String::from("delete-failed-slots-chunks");
-        let url = self.build_url(&path);
-        let token = self.jwt_manager.get_token()?;
-
-        let failed_slots_response = self
-            .client
-            .post(url)
-            .bearer_auth(token)
-            .json::<RemoveFailedSlotsChunksRequest>(&RemoveFailedSlotsChunksRequest { chunk_ids })
-            .send()
-            .await?;
-
-        match failed_slots_response.status() {
-            StatusCode::OK => Ok(()),
-            _ => Err(BlobscanClientError::ApiError(
-                failed_slots_response.text().await?,
-            )),
         }
     }
 

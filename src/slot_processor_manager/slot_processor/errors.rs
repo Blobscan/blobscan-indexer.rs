@@ -1,5 +1,5 @@
 #[derive(Debug, thiserror::Error)]
-pub enum SingleSlotProcessingError {
+pub enum SlotProcessorError {
     #[error(transparent)]
     BlobscanClient(#[from] crate::blobscan_client::types::BlobscanClientError),
     #[error(transparent)]
@@ -8,14 +8,4 @@ pub enum SingleSlotProcessingError {
     Provider(#[from] ethers::providers::ProviderError),
     #[error(transparent)]
     Other(#[from] anyhow::Error),
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum SlotProcessorError {
-    #[error("Failed to process slot {slot}: {reason}")]
-    ProcessingError {
-        slot: u32,
-        target_slot: u32,
-        reason: SingleSlotProcessingError,
-    },
 }

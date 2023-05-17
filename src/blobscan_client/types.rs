@@ -44,22 +44,6 @@ pub struct FailedSlotsChunk {
 }
 
 #[derive(Serialize, Debug)]
-pub struct FailedSlotsChunksRequest {
-    pub chunks: Vec<FailedSlotsChunk>,
-}
-
-#[derive(Deserialize, Debug)]
-pub struct FailedSlotsChunksResponse {
-    pub chunks: Vec<FailedSlotsChunk>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct RemoveFailedSlotsChunksRequest {
-    pub chunk_ids: Vec<u32>,
-}
-
-#[derive(Serialize, Debug)]
 pub struct SlotRequest {
     pub slot: u32,
 }

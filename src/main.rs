@@ -1,9 +1,8 @@
 use anyhow::Result;
 use context::{Config as ContextConfig, Context};
 use env::Environment;
-use slot_processor_manager::{SlotProcessorManager, SlotProcessorManagerError};
-use slot_retryer::SlotRetryer;
-use tracing::{error, info, Instrument};
+use slot_processor_manager::SlotsProcessor;
+use tracing::{info, Instrument};
 
 use crate::utils::telemetry::{get_subscriber, init_subscriber};
 
@@ -14,7 +13,6 @@ mod blobscan_client;
 mod context;
 mod env;
 mod slot_processor_manager;
-mod slot_retryer;
 mod utils;
 
 #[tokio::main]
@@ -34,12 +32,7 @@ async fn main() -> Result<()> {
         None => 0,
     };
 
-    let slot_retryer = SlotRetryer::new(context.clone());
-    let slot_retryer_span = tracing::info_span!("slot_retryer");
-
-    slot_retryer.run().instrument(slot_retryer_span).await?;
-
-    let slot_processor_manager = SlotProcessorManager::try_new(context.clone())?;
+    let slot_processor_manager = SlotsProcessor::try_new(context.clone())?;
 
     loop {
         if let Some(latest_beacon_block) = beacon_client.get_block(None).await? {
@@ -52,22 +45,10 @@ async fn main() -> Result<()> {
                     final_slot = latest_slot
                 );
 
-                match slot_processor_manager
+                slot_processor_manager
                     .process_slots(current_slot, latest_slot)
                     .instrument(slot_manager_span)
-                    .await
-                {
-                    Ok(_) => (),
-                    Err(err) => match err {
-                        SlotProcessorManagerError::FailedSlotsProcessing { chunks } => {
-                            blobscan_client.add_failed_slots_chunks(chunks).await?;
-                        }
-                        SlotProcessorManagerError::Other(err) => {
-                            error!("{err}");
-                            anyhow::bail!(err);
-                        }
-                    },
-                }
+                    .await?;
 
                 blobscan_client.update_slot(latest_slot - 1).await?;
                 info!("Latest slot updated to {}", latest_slot - 1);
