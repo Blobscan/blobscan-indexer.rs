@@ -1,8 +1,10 @@
 use anyhow::Result;
+use backoff::future::retry_notify;
 use context::{Config as ContextConfig, Context};
 use env::Environment;
 use slots_processor::{Config as SlotsProcessorConfig, SlotsProcessor};
-use tracing::{info, Instrument};
+use tracing::{error, info, warn, Instrument};
+use utils::exp_backoff::get_exp_backoff_config;
 
 use crate::utils::telemetry::{get_subscriber, init_subscriber};
 
@@ -81,10 +83,27 @@ async fn main() -> Result<()> {
                         .instrument(slot_manager_span)
                         .await?;
 
-                    blobscan_client.update_slot(chunk_final_slot - 1).await?;
+                    match retry_notify(
+                        get_exp_backoff_config(),
+                        || async move {
+                            blobscan_client
+                                .update_slot(chunk_final_slot - 1)
+                                .await.map_err(|err| err.into())
+                        },
+                        |e, duration: Duration| {
+                            let duration = duration.as_secs();
+                            warn!("Failed to update latest slot to {}. Retrying in {duration} seconds… (Reason: {e})", chunk_final_slot - 1);
+                        },
+                    ).await {
+                        Ok(_) => (),
+                        Err(err) => {
+                            error!("Failed to update latest slot to {}", chunk_final_slot - 1);
+                            return Err(err.into());
+                        }
+                    };
 
                     info!(
-                        "Chunk {} of {} ({} slots) processed successfully!. Updating latest slot to {}.",
+                        "Chunk {} of {} ({} slots) processed successfully!. Latest slot updated to {}.",
                         i+1,
                         num_chunks,
                         chunk_final_slot - chunk_initial_slot,
