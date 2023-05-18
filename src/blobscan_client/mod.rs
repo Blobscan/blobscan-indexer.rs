@@ -30,7 +30,7 @@ pub struct Config {
 pub fn build_jwt_manager(secret_key: String) -> JWTManager {
     JWTManager::new(JWTManagerConfig {
         secret_key,
-        refresh_interval: chrono::Duration::minutes(30),
+        refresh_interval: chrono::Duration::hours(1),
         safety_magin: None,
     })
 }

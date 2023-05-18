@@ -35,7 +35,7 @@ impl JWTManager {
             refresh_interval: config.refresh_interval,
             safety_margin: match config.safety_magin {
                 Some(safety_margin) => safety_margin,
-                None => Duration::seconds(10),
+                None => Duration::minutes(1),
             },
         }
     }
