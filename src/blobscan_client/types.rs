@@ -4,10 +4,10 @@ use ethers::types::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::{beacon_client::types::BlobData, utils::web3::calculate_versioned_hash};
+use crate::{beacon_client::types::Blob as BeaconBlob, utils::web3::calculate_versioned_hash};
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct BlockEntity {
+pub struct Block {
     pub number: U64,
     pub hash: H256,
     pub timestamp: U256,
@@ -15,40 +15,48 @@ pub struct BlockEntity {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct TransactionEntity {
+#[serde(rename_all = "camelCase")]
+pub struct Transaction {
     pub hash: H256,
     pub from: Address,
-    pub to: Address,
-    #[serde(rename = "blockNumber")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to: Option<Address>,
     pub block_number: U64,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct BlobEntity {
-    #[serde(rename = "versionedHash")]
+#[serde(rename_all = "camelCase")]
+pub struct Blob {
     pub versioned_hash: H256,
     pub commitment: String,
     pub data: Bytes,
-    #[serde(rename = "txHash")]
     pub tx_hash: H256,
     pub index: u32,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct FailedSlotsChunk {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<u32>,
+    pub initial_slot: u32,
+    pub final_slot: u32,
+}
+
+#[derive(Serialize, Debug)]
+pub struct SlotRequest {
+    pub slot: u32,
+}
+#[derive(Deserialize, Debug)]
 pub struct SlotResponse {
     pub slot: u32,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct SlotRequest {
-    pub slot: u32,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Debug)]
 pub struct IndexRequest {
-    pub block: BlockEntity,
-    pub transactions: Vec<TransactionEntity>,
-    pub blobs: Vec<BlobEntity>,
+    pub block: Block,
+    pub transactions: Vec<Transaction>,
+    pub blobs: Vec<Blob>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -56,16 +64,26 @@ pub enum BlobscanClientError {
     #[error(transparent)]
     Reqwest(#[from] reqwest::Error),
 
-    #[error("Blobscan client error: {0}")]
-    BlobscanClientError(String),
+    #[error("API usage error: {0}")]
+    ApiError(String),
 
     #[error(transparent)]
-    JWTError(#[from] anyhow::Error),
+    Other(#[from] anyhow::Error),
 }
 
 pub type BlobscanClientResult<T> = Result<T, BlobscanClientError>;
 
-impl<'a> TryFrom<(&'a EthersBlock<EthersTransaction>, u32)> for BlockEntity {
+impl From<(u32, u32)> for FailedSlotsChunk {
+    fn from((initial_slot, final_slot): (u32, u32)) -> Self {
+        Self {
+            id: None,
+            initial_slot,
+            final_slot,
+        }
+    }
+}
+
+impl<'a> TryFrom<(&'a EthersBlock<EthersTransaction>, u32)> for Block {
     type Error = anyhow::Error;
 
     fn try_from(
@@ -86,9 +104,7 @@ impl<'a> TryFrom<(&'a EthersBlock<EthersTransaction>, u32)> for BlockEntity {
     }
 }
 
-impl<'a> TryFrom<(&'a EthersTransaction, &'a EthersBlock<EthersTransaction>)>
-    for TransactionEntity
-{
+impl<'a> TryFrom<(&'a EthersTransaction, &'a EthersBlock<EthersTransaction>)> for Transaction {
     type Error = anyhow::Error;
 
     fn try_from(
@@ -102,18 +118,16 @@ impl<'a> TryFrom<(&'a EthersTransaction, &'a EthersBlock<EthersTransaction>)>
                 .with_context(|| "Missing block number field in execution block".to_string())?,
             hash,
             from: ethers_tx.from,
-            to: ethers_tx
-                .to
-                .with_context(|| format!("Missing to field in transaction {hash}"))?,
+            to: ethers_tx.to,
         })
     }
 }
 
-impl<'a> TryFrom<(&'a BlobData, u32, H256)> for BlobEntity {
+impl<'a> TryFrom<(&'a BeaconBlob, u32, H256)> for Blob {
     type Error = anyhow::Error;
 
     fn try_from(
-        (blob_data, index, tx_hash): (&'a BlobData, u32, H256),
+        (blob_data, index, tx_hash): (&'a BeaconBlob, u32, H256),
     ) -> Result<Self, Self::Error> {
         Ok(Self {
             tx_hash,
@@ -125,9 +139,9 @@ impl<'a> TryFrom<(&'a BlobData, u32, H256)> for BlobEntity {
     }
 }
 
-impl<'a> From<(&'a BlobData, &'a H256, usize, &'a H256)> for BlobEntity {
+impl<'a> From<(&'a BeaconBlob, &'a H256, usize, &'a H256)> for Blob {
     fn from(
-        (blob_data, versioned_hash, index, tx_hash): (&'a BlobData, &'a H256, usize, &'a H256),
+        (blob_data, versioned_hash, index, tx_hash): (&'a BeaconBlob, &'a H256, usize, &'a H256),
     ) -> Self {
         Self {
             tx_hash: *tx_hash,

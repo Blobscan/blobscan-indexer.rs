@@ -8,12 +8,9 @@ pub struct Environment {
     pub beacon_node_rpc: String,
     #[serde(default = "default_execution_node_rpc")]
     pub execution_node_rpc: String,
-    #[serde(default = "default_mode")]
-    pub mode: String,
+    pub num_processing_threads: Option<u32>,
     pub secret_key: String,
 }
-
-pub const DEV_MODE: &str = "development";
 
 fn default_blobscan_api_endpoint() -> String {
     "http://localhost:3001".to_string()
@@ -27,15 +24,8 @@ fn default_execution_node_rpc() -> String {
     "http://localhost:8545".to_string()
 }
 
-fn default_mode() -> String {
-    DEV_MODE.to_string()
-}
-
-pub fn get_env_vars() -> Environment {
-    match envy::from_env::<Environment>() {
-        Ok(env) => env,
-        Err(e) => {
-            panic!("Couldn't read environment variables: {}", e);
-        }
+impl Environment {
+    pub fn from_env() -> Result<Self, envy::Error> {
+        envy::from_env::<Environment>()
     }
 }

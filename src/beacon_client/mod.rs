@@ -2,7 +2,7 @@ use reqwest::{Client, StatusCode};
 use std::time::Duration;
 
 use self::types::{
-    BeaconClientError, BeaconClientResult, BlobData, BlobsResponse, BlockMessage as Block,
+    BeaconClientError, BeaconClientResult, Blob, BlobsResponse, BlockMessage as Block,
     BlockResponse,
 };
 
@@ -11,7 +11,7 @@ pub mod types;
 #[derive(Debug, Clone)]
 pub struct BeaconClient {
     base_url: String,
-    client: reqwest::Client,
+    client: Client,
 }
 
 pub struct Config {
@@ -20,17 +20,11 @@ pub struct Config {
 }
 
 impl BeaconClient {
-    pub fn try_from(config: Config) -> BeaconClientResult<Self> {
-        let mut client_builder = Client::builder();
-
-        if let Some(timeout) = config.timeout {
-            client_builder = client_builder.timeout(timeout);
-        }
-
-        Ok(Self {
+    pub fn with_client(client: Client, config: Config) -> Self {
+        Self {
             base_url: config.base_url,
-            client: client_builder.build()?,
-        })
+            client,
+        }
     }
 
     pub async fn get_block(&self, slot: Option<u32>) -> BeaconClientResult<Option<Block>> {
@@ -38,7 +32,6 @@ impl BeaconClient {
             Some(slot) => slot.to_string(),
             None => String::from("head"),
         };
-
         let url = self.build_url(&format!("eth/v2/beacon/blocks/{slot}"));
 
         let block_response = self.client.get(url).send().await?;
@@ -54,7 +47,7 @@ impl BeaconClient {
         }
     }
 
-    pub async fn get_blobs(&self, slot: u32) -> BeaconClientResult<Option<Vec<BlobData>>> {
+    pub async fn get_blobs(&self, slot: u32) -> BeaconClientResult<Option<Vec<Blob>>> {
         let url = self.build_url(&format!("eth/v1/beacon/blobs/{slot}"));
 
         let blobs_response = self.client.get(url).send().await?;
