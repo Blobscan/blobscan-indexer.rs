@@ -35,7 +35,10 @@ impl SlotProcessor {
             || async move { self._process_slot(slot).await },
             |e, duration: Duration| {
                 let duration = duration.as_secs();
-                warn!("Failed to process slot. Retrying in {duration} seconds… (Reason: {e})");
+                warn!(
+                    slot,
+                    "Failed to process slot. Retrying in {duration} seconds… (Reason: {e})"
+                );
             },
         )
         .await
@@ -55,7 +58,7 @@ impl SlotProcessor {
         {
             Some(block) => block,
             None => {
-                info!("Skipping as there is no beacon block");
+                info!(slot, "Skipping as there is no beacon block");
 
                 return Ok(());
             }
@@ -64,7 +67,10 @@ impl SlotProcessor {
         let execution_payload = match beacon_block.body.execution_payload {
             Some(payload) => payload,
             None => {
-                info!("Skipping as beacon block doesn't contain execution payload");
+                info!(
+                    slot,
+                    "Skipping as beacon block doesn't contain execution payload"
+                );
 
                 return Ok(());
             }
@@ -73,7 +79,10 @@ impl SlotProcessor {
         match beacon_block.body.blob_kzg_commitments {
             Some(commitments) => commitments,
             None => {
-                info!("Skipping as beacon block doesn't contain blob kzg commitments");
+                info!(
+                    slot,
+                    "Skipping as beacon block doesn't contain blob kzg commitments"
+                );
 
                 return Ok(());
             }
@@ -94,7 +103,7 @@ impl SlotProcessor {
             .map_err(|err| BackoffError::permanent(SlotProcessorError::Other(err)))?;
 
         if tx_hash_to_versioned_hashes.is_empty() {
-            info!("Skipping as execution block doesn't contain blob txs");
+            info!(slot, "Skipping as execution block doesn't contain blob txs");
 
             return Ok(());
         }
@@ -108,7 +117,7 @@ impl SlotProcessor {
         {
             Some(blobs) => {
                 if blobs.is_empty() {
-                    info!("Skipping as blobs sidecar is empty");
+                    info!(slot, "Skipping as blobs sidecar is empty");
 
                     return Ok(());
                 } else {
@@ -116,7 +125,7 @@ impl SlotProcessor {
                 }
             }
             None => {
-                info!("Skipping as there is no blobs sidecar");
+                info!(slot, "Skipping as there is no blobs sidecar");
 
                 return Ok(());
             }
@@ -152,7 +161,7 @@ impl SlotProcessor {
             .await
             .map_err(SlotProcessorError::BlobscanClient)?;
 
-        info!("Block, txs and blobs indexed successfully");
+        info!(slot, "Block, txs and blobs indexed successfully");
 
         Ok(())
     }

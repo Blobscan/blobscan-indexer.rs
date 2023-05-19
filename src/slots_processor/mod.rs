@@ -68,7 +68,7 @@ impl SlotsProcessor {
             let thread_initial_slot = start_slot + i * slots_per_thread;
             let thread_final_slot = thread_initial_slot + slots_in_current_thread;
 
-            let thread_slots_span = tracing::debug_span!(
+            let thread_slots_span = tracing::trace_span!(
                 "slots_chunk_processor",
                 chunk_initial_slot = thread_initial_slot,
                 chunk_final_slot = thread_final_slot
@@ -79,7 +79,7 @@ impl SlotsProcessor {
                     let slot_processor = SlotProcessor::new(thread_context);
 
                     for current_slot in thread_initial_slot..thread_final_slot {
-                        let slot_span = tracing::info_span!("slot_processor", slot = current_slot);
+                        let slot_span = tracing::trace_span!("slot_processor");
 
                         let result = slot_processor
                             .process_slot(current_slot)
@@ -87,7 +87,7 @@ impl SlotsProcessor {
                             .await;
 
                         if let Err(error) = result {
-                            error!("Failed to process slot {current_slot}: {error}");
+                            error!(current_slot, "Failed to process slot: {error}");
 
                             return Err(SlotsChunkThreadError::FailedChunkProcessing {
                                 initial_slot: thread_initial_slot,

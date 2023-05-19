@@ -57,11 +57,6 @@ async fn main() -> Result<()> {
                     num_chunks
                 };
 
-                info!(
-                    "Processing slots from {} to {}, partitioned into {} chunks…",
-                    current_slot, latest_slot, num_chunks
-                );
-
                 for i in 0..num_chunks {
                     let slots_in_current_chunk = if i == num_chunks - 1 {
                         current_max_slots_size + remaining_slots
@@ -92,22 +87,21 @@ async fn main() -> Result<()> {
                         },
                         |e, duration: Duration| {
                             let duration = duration.as_secs();
-                            warn!("Failed to update latest slot to {}. Retrying in {duration} seconds… (Reason: {e})", chunk_final_slot - 1);
+                            warn!(latest_slot = chunk_final_slot - 1, "Failed to update latest slot. Retrying in {duration} seconds… (Reason: {e})");
                         },
                     ).await {
                         Ok(_) => (),
                         Err(err) => {
-                            error!("Failed to update latest slot to {}", chunk_final_slot - 1);
+                            error!(latest_slot = chunk_final_slot - 1, "Failed to update latest slot");
                             return Err(err.into());
                         }
                     };
 
                     info!(
-                        "Chunk {} of {} ({} slots) processed successfully!. Latest slot updated to {}.",
-                        i+1,
+                        "Chunk {} of {}: {} slots processed successfully!.",
+                        i + 1,
                         num_chunks,
                         chunk_final_slot - chunk_initial_slot,
-                        chunk_final_slot - 1
                     );
                 }
 
