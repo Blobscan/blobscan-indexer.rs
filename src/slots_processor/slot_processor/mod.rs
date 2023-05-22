@@ -7,7 +7,7 @@ use ethers::prelude::*;
 use tracing::{info, warn};
 
 use crate::{
-    blobscan_client::types::{Blob, Block, Transaction},
+    clients::blobscan::types::{Blob, Block, Transaction},
     context::Context,
     utils::exp_backoff::get_exp_backoff_config,
 };
@@ -54,7 +54,7 @@ impl SlotProcessor {
         let beacon_block = match beacon_client
             .get_block(Some(slot))
             .await
-            .map_err(SlotProcessorError::BeaconClient)?
+            .map_err(SlotProcessorError::ClientError)?
         {
             Some(block) => block,
             None => {
@@ -113,7 +113,7 @@ impl SlotProcessor {
         let blobs = match beacon_client
             .get_blobs(slot)
             .await
-            .map_err(SlotProcessorError::BeaconClient)?
+            .map_err(SlotProcessorError::ClientError)?
         {
             Some(blobs) => {
                 if blobs.is_empty() {
@@ -159,9 +159,10 @@ impl SlotProcessor {
         blobscan_client
             .index(block_entity, transactions_entities, blob_entities)
             .await
-            .map_err(SlotProcessorError::BlobscanClient)?;
+            .map_err(SlotProcessorError::ClientError)?;
 
         info!(slot, "Block, txs and blobs indexed successfully");
+        println!("----------------------------------------------------------------------------------------------");
 
         Ok(())
     }

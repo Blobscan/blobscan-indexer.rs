@@ -3,15 +3,14 @@ use backoff::future::retry_notify;
 use context::{Config as ContextConfig, Context};
 use env::Environment;
 use slots_processor::{Config as SlotsProcessorConfig, SlotsProcessor};
-use tracing::{error, info, warn, Instrument};
+use tracing::{debug, error, warn, Instrument};
 use utils::exp_backoff::get_exp_backoff_config;
 
 use crate::utils::telemetry::{get_subscriber, init_subscriber};
 
 use std::{thread, time::Duration};
 
-mod beacon_client;
-mod blobscan_client;
+mod clients;
 mod context;
 mod env;
 mod slots_processor;
@@ -97,7 +96,7 @@ async fn main() -> Result<()> {
                         }
                     };
 
-                    info!(
+                    debug!(
                         "Chunk {} of {}: {} slots processed successfully!.",
                         i + 1,
                         num_chunks,
@@ -106,11 +105,6 @@ async fn main() -> Result<()> {
                 }
 
                 current_slot = latest_slot;
-
-                info!(
-                    "All slots processed successfully! Total slots processed: {}",
-                    unprocessed_slots
-                );
             }
         }
 

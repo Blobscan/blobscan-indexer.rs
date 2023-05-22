@@ -4,8 +4,8 @@ use anyhow::Result as AnyhowResult;
 use ethers::prelude::*;
 
 use crate::{
-    beacon_client::{BeaconClient, Config as BeaconClientConfig},
-    blobscan_client::{BlobscanClient, Config as BlobscanClientConfig},
+    clients::beacon::{BeaconClient, Config as BeaconClientConfig},
+    clients::blobscan::{BlobscanClient, Config as BlobscanClientConfig},
     env::Environment,
 };
 
@@ -22,6 +22,7 @@ pub struct Config {
     pub execution_node_rpc: String,
     pub secret_key: String,
 }
+
 #[derive(Debug, Clone)]
 pub struct Context {
     inner: Arc<ContextRef>,
@@ -42,21 +43,21 @@ impl Context {
 
         Ok(Self {
             inner: Arc::new(ContextRef {
-                blobscan_client: BlobscanClient::with_client(
+                blobscan_client: BlobscanClient::try_with_client(
                     client.clone(),
                     BlobscanClientConfig {
                         base_url: blobscan_api_endpoint,
                         secret_key,
                         timeout: None,
                     },
-                ),
-                beacon_client: BeaconClient::with_client(
+                )?,
+                beacon_client: BeaconClient::try_with_client(
                     client,
                     BeaconClientConfig {
                         base_url: beacon_node_rpc,
                         timeout: None,
                     },
-                ),
+                )?,
                 provider: Provider::<Http>::try_from(execution_node_rpc)?,
             }),
         })
