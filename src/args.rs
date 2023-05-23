@@ -8,7 +8,7 @@ pub struct Args {
     #[arg(short, long)]
     pub from_slot: Option<u32>,
 
-    /// Number of threads to use for indexing
+    /// Number of threads used for parallel indexing
     #[arg(short, long)]
     pub num_threads: Option<u32>,
 }
