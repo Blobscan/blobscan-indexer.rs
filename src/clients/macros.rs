@@ -33,8 +33,7 @@ macro_rules! json_get {
                     response = text.as_str(),
                     "Unexpected response from server"
                 );
-                println!("here");
-                println!("{e}");
+
                 Err(e.into())
             },
             Ok(response) => {

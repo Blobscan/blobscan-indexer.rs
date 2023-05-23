@@ -28,7 +28,7 @@ pub struct Config {
 
 impl BlobscanClient {
     pub fn try_with_client(client: Client, config: Config) -> ClientResult<Self> {
-        let base_url = Url::parse(&format!("{}/api/", config.base_url))
+        let base_url = Url::parse(&format!("{}/api/indexer/", config.base_url))
             .with_context(|| "Failed to parse base URL")?;
         let jwt_manager = JWTManager::new(JWTManagerConfig {
             secret_key: config.secret_key,
@@ -49,7 +49,7 @@ impl BlobscanClient {
         transactions: Vec<Transaction>,
         blobs: Vec<Blob>,
     ) -> ClientResult<()> {
-        let url = self.base_url.join("index")?;
+        let url = self.base_url.join("block-txs-blobs")?;
         let token = self.jwt_manager.get_token()?;
         let req = IndexRequest {
             block,
@@ -71,12 +71,7 @@ impl BlobscanClient {
     pub async fn get_slot(&self) -> ClientResult<Option<u32>> {
         let url = self.base_url.join("slot")?;
 
-        json_get!(
-            &self.client,
-            url,
-            SlotResponse,
-            self.jwt_manager.get_token()?
-        )
-        .map(|res: Option<SlotResponse>| Some(res.unwrap().slot))
+        json_get!(&self.client, url, SlotResponse)
+            .map(|res: Option<SlotResponse>| Some(res.unwrap().slot))
     }
 }
