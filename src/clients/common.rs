@@ -93,8 +93,8 @@ impl From<ErrorResponse> for ClientError {
 impl Display for NumericOrTextCode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::String(s) => f.write_str(&format!("{s}")),
-            Self::Number(n) => f.write_str(&format!("{n}")),
+            Self::String(s) => f.write_str(s.to_string().as_ref()),
+            Self::Number(n) => f.write_str(n.to_string().as_ref()),
         }
     }
 }

@@ -23,7 +23,7 @@ macro_rules! json_get {
         };
 
         let text = resp.text().await?;
-        let result: Result<crate::clients::common::ClientResponse<$expected>, _> = serde_json::from_str(&text);
+        let result: Result<$crate::clients::common::ClientResponse<$expected>, _> = serde_json::from_str(&text);
 
         match result {
             Err(e) => {
@@ -62,7 +62,7 @@ macro_rules! json_put {
             .await?;
 
         let text = resp.text().await?;
-        let result: crate::clients::common::ClientResponse<_> = text.parse()?;
+        let result: $crate::clients::common::ClientResponse<_> = text.parse()?;
 
         if result.is_err() {
             tracing::warn!(
