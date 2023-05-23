@@ -32,3 +32,4 @@ thiserror = "1.0.40"
 backoff = { version = "0.4.0", features = ["tokio"] }
 chrono = "0.4.24"
 serde_json = "1.0.96"
+clap = { version = "4.3.0", features = ["derive"] }

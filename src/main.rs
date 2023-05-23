@@ -1,5 +1,7 @@
 use anyhow::Result;
+use args::Args;
 use backoff::future::retry_notify;
+use clap::Parser;
 use context::{Config as ContextConfig, Context};
 use env::Environment;
 use slots_processor::{Config as SlotsProcessorConfig, SlotsProcessor};
@@ -10,6 +12,7 @@ use crate::utils::telemetry::{get_subscriber, init_subscriber};
 
 use std::{thread, time::Duration};
 
+mod args;
 mod clients;
 mod context;
 mod env;
@@ -22,20 +25,24 @@ const MAX_SLOTS_PER_SAVE: u32 = 1000;
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
     let env = Environment::from_env()?;
+    let args = Args::parse();
 
     let subscriber = get_subscriber("blobscan_indexer".into(), "info".into(), std::io::stdout);
     init_subscriber(subscriber);
 
-    let slots_processor_config = env
-        .num_processing_threads
+    let slots_processor_config = args
+        .num_threads
         .map(|threads_length| SlotsProcessorConfig { threads_length });
     let context = Context::try_new(ContextConfig::from(env))?;
     let beacon_client = context.beacon_client();
     let blobscan_client = context.blobscan_client();
 
-    let mut current_slot = match blobscan_client.get_slot().await? {
-        Some(last_slot) => last_slot + 1,
-        None => 0,
+    let mut current_slot = match args.from_slot {
+        Some(from_slot) => from_slot,
+        None => match blobscan_client.get_slot().await? {
+            Some(last_slot) => last_slot + 1,
+            None => 0,
+        },
     };
 
     let slots_processor = SlotsProcessor::try_new(context.clone(), slots_processor_config)?;

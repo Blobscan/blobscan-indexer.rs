@@ -8,7 +8,6 @@ pub struct Environment {
     pub beacon_node_rpc: String,
     #[serde(default = "default_execution_node_rpc")]
     pub execution_node_rpc: String,
-    pub num_processing_threads: Option<u32>,
     pub secret_key: String,
 }
 
