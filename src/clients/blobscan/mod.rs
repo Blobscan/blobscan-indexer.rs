@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use anyhow::Context;
 use reqwest::{Client, Url};
 
 use crate::{clients::common::ClientResult, json_get, json_put};
@@ -28,8 +27,7 @@ pub struct Config {
 
 impl BlobscanClient {
     pub fn try_with_client(client: Client, config: Config) -> ClientResult<Self> {
-        let base_url = Url::parse(&format!("{}/api/indexer/", config.base_url))
-            .with_context(|| "Failed to parse base URL")?;
+        let base_url = Url::parse(&format!("{}/api/indexer/", config.base_url))?;
         let jwt_manager = JWTManager::new(JWTManagerConfig {
             secret_key: config.secret_key,
             refresh_interval: chrono::Duration::hours(1),

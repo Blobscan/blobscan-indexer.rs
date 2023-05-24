@@ -9,6 +9,7 @@ pub struct Environment {
     #[serde(default = "default_execution_node_rpc")]
     pub execution_node_rpc: String,
     pub secret_key: String,
+    pub sentry_dsn: Option<String>,
 }
 
 fn default_blobscan_api_endpoint() -> String {

@@ -7,7 +7,8 @@ macro_rules! json_get {
     };
     ($client:expr, $url:expr, $expected:ty, $auth_token:expr) => {{
         let url = $url.clone();
-        tracing::debug!(url = url.as_str(), method = "GET", "Dispatching API request");
+
+        tracing::debug!(method = "GET", url = url.as_str(), "Dispatching API request");
 
         let mut req = $client.get($url);
 
@@ -15,7 +16,20 @@ macro_rules! json_get {
           req = req.bearer_auth($auth_token);
         }
 
-        let resp = req.send().await?;
+        let resp = match req.send().await {
+            Err(error) => {
+                tracing::warn!(
+                    method = "GET",
+                    url = %url,
+                    ?error,
+                    "Failed to send request"
+                );
+
+                return Err(error.into())
+            },
+            Ok(resp) => resp
+        };
+
         let status = resp.status();
 
         if status.as_u16() == 404 {
@@ -51,15 +65,28 @@ macro_rules! json_put {
         let url = $url.clone();
         let body = format!("{:?}", $body);
 
-        tracing::debug!(url = url.as_str(), method = "PUT", body = body, "Dispatching API client request");
+        tracing::debug!(method = "PUT", url = url.as_str(), body = body, "Dispatching API client request");
 
 
-        let resp = $client
+        let resp = match $client
             .put($url)
             .bearer_auth($auth_token)
             .json($body)
             .send()
-            .await?;
+            .await {
+                Err(error) => {
+                    tracing::warn!(
+                        method = "PUT",
+                        url = %url,
+                        body = body,
+                        ?error,
+                        "Failed to send request"
+                    );
+
+                    return Err(error.into())
+                },
+                Ok(resp) => resp
+            };
 
         let text = resp.text().await?;
         let result: $crate::clients::common::ClientResponse<_> = text.parse()?;
