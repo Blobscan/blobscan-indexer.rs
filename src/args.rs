@@ -11,4 +11,8 @@ pub struct Args {
     /// Number of threads used for parallel indexing
     #[arg(short, long)]
     pub num_threads: Option<u32>,
+
+    /// Amount of slots to be processed before saving latest slot in the database
+    #[arg(short, long)]
+    pub slots_per_save: Option<u32>,
 }
