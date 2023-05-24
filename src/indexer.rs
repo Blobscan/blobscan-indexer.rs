@@ -103,7 +103,7 @@ pub async fn run() -> Result<()> {
                         .instrument(slot_manager_span)
                         .await?;
 
-                    match retry_notify(
+                    if let Err(error) = retry_notify(
                         get_exp_backoff_config(),
                         || async move {
                             blobscan_client
@@ -122,13 +122,10 @@ pub async fn run() -> Result<()> {
                     )
                     .await
                     {
-                        Err(error) => {
-                            error!(target = "indexer", ?error, "Failed to update latest slot");
+                        error!(target = "indexer", ?error, "Failed to update latest slot");
 
-                            return Err(error.into());
-                        }
-                        Ok(_) => (),
-                    };
+                        return Err(error.into());
+                    }
 
                     info!(
                         target = "indexer",

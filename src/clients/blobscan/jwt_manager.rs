@@ -91,7 +91,7 @@ impl JWTManager {
             Err(error) => {
                 error!(target = "jwt_manager", ?error, "Failed to create JWT");
 
-                return Err(error.into());
+                Err(error.into())
             }
             Ok(t) => {
                 debug!(target = "jwt_manager", "JWT created");
