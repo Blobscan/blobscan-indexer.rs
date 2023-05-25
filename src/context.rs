@@ -4,8 +4,8 @@ use anyhow::Result as AnyhowResult;
 use ethers::prelude::*;
 
 use crate::{
-    beacon_client::{BeaconClient, Config as BeaconClientConfig},
-    blobscan_client::{BlobscanClient, Config as BlobscanClientConfig},
+    clients::beacon::{BeaconClient, Config as BeaconClientConfig},
+    clients::blobscan::{BlobscanClient, Config as BlobscanClientConfig},
     env::Environment,
 };
 
@@ -18,10 +18,11 @@ struct ContextRef {
 
 pub struct Config {
     pub blobscan_api_endpoint: String,
-    pub beacon_node_rpc: String,
+    pub beacon_node_url: String,
     pub execution_node_rpc: String,
     pub secret_key: String,
 }
+
 #[derive(Debug, Clone)]
 pub struct Context {
     inner: Arc<ContextRef>,
@@ -31,7 +32,7 @@ impl Context {
     pub fn try_new(config: Config) -> AnyhowResult<Self> {
         let Config {
             blobscan_api_endpoint,
-            beacon_node_rpc,
+            beacon_node_url,
             execution_node_rpc,
             secret_key,
         } = config;
@@ -42,21 +43,21 @@ impl Context {
 
         Ok(Self {
             inner: Arc::new(ContextRef {
-                blobscan_client: BlobscanClient::with_client(
+                blobscan_client: BlobscanClient::try_with_client(
                     client.clone(),
                     BlobscanClientConfig {
                         base_url: blobscan_api_endpoint,
                         secret_key,
                         timeout: None,
                     },
-                ),
-                beacon_client: BeaconClient::with_client(
+                )?,
+                beacon_client: BeaconClient::try_with_client(
                     client,
                     BeaconClientConfig {
-                        base_url: beacon_node_rpc,
+                        base_url: beacon_node_url,
                         timeout: None,
                     },
-                ),
+                )?,
                 provider: Provider::<Http>::try_from(execution_node_rpc)?,
             }),
         })
@@ -79,7 +80,7 @@ impl From<Environment> for Config {
     fn from(env: Environment) -> Self {
         Self {
             blobscan_api_endpoint: env.blobscan_api_endpoint,
-            beacon_node_rpc: env.beacon_node_rpc,
+            beacon_node_url: env.beacon_node_url,
             execution_node_rpc: env.execution_node_rpc,
             secret_key: env.secret_key,
         }

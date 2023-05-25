@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 use chrono::{Duration, Utc};
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use serde::{Deserialize, Serialize};
+use tracing::{debug, error};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
@@ -52,6 +53,12 @@ impl JWTManager {
                 ))?;
 
                 if now > expiration_date {
+                    debug!(
+                        target = "jwt_manager",
+                        expiration_date = expiration_date.to_string(),
+                        "JWT expired. Refreshing token"
+                    );
+
                     let (token, expiration_date) = self.create_token()?;
 
                     *token_guard = Some(token.clone());
@@ -80,8 +87,17 @@ impl JWTManager {
         };
         let header = Header::new(Algorithm::HS512);
 
-        let token = encode(&header, &claims, &encoding_key)?;
+        match encode(&header, &claims, &encoding_key) {
+            Err(error) => {
+                error!(target = "jwt_manager", ?error, "Failed to create JWT");
 
-        Ok((token, expiration_date))
+                Err(error.into())
+            }
+            Ok(t) => {
+                debug!(target = "jwt_manager", "JWT created");
+
+                Ok((t, expiration_date))
+            }
+        }
     }
 }

@@ -59,7 +59,7 @@ Using environment variables
 ```bash
 docker run --rm \
   -e BLOBSCAN_API_ENDPOINT=http://blobscan-api:3001 \
-  -e BEACON_NODE_RPC=http://beacon:3500 \
+  -e BEACON_NODE_URL=http://beacon:3500 \
   -e EXECUTION_NODE_RPC=http://execution:8545 \
   blossomlabs/blobscan-indexer:master
 ```
@@ -76,12 +76,44 @@ For more information, check out [Docker Hub](https://hub.docker.com/r/blossomlab
 
 Below you can find a list of supported variables:
 
-| Name                    | Required | Description                                                                            | Default value           |
-| ----------------------- | -------- | -------------------------------------------------------------------------------------- | ----------------------- |
-| `SECRET_KEY`            | **Yes**  | Shared secret key Blobscan API JWT authentication.                                     |                         |
-| `BLOBSCAN_API_ENDPOINT` | No       | Endpoint for the Blobscan API.                                                         | `http://localhost:3001` |
-| `BEACON_NODE_RPC`       | No       | A consensus client RPC endpoint.                                                       | `http://localhost:3500` |
-| `EXECUTION_NODE_RPC`    | No       | An execution client RPC endpoint.                                                      | `http://localhost:8545` |
+| Name                    | Required | Description                                        | Default value           |
+| ----------------------- | -------- | -------------------------------------------------- | ----------------------- |
+| `SECRET_KEY`            | **Yes**  | Shared secret key Blobscan API JWT authentication. |                         |
+| `BLOBSCAN_API_ENDPOINT` | No       | Endpoint for the Blobscan API.                     | `http://localhost:3001` |
+| `BEACON_NODE_URL`       | No       | A consensus client RPC endpoint.                   | `http://localhost:3500` |
+| `EXECUTION_NODE_URL`    | No       | An execution client RPC endpoint.                  | `http://localhost:8545` |
+| `SENTRY_DSN`            | No       | Sentry client key.                                 |                         |
+
+## Command-Line Arguments
+
+The indexer supports the following command-line arguments for configuring the indexing process:
+
+- `-f, --from-slot <FROM_SLOT>`: It allows you to specify the starting slot for indexing ignoring the default behavior, which is starting from the latest slot stored in the database.
+
+- `-n, --num-threads <NUM_THREADS>`: It allows you to specify the number of threads that will be utilized to parallelize the indexing process. If the argument is not provided, the number of cores of the machine will be used.
+- `-s, --slots-per-save <SLOTS_PER_SAVE>`: It allows you to specify the number of slots to be processed before saving the latest slot in the database.
+
+### Example usage
+
+```sh
+cargo run -- -f 1000 -n 10
+```
+
+## A note on tracing
+
+The indexer uses the [`EnvFilter`](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html) and [`Bunyan`](https://docs.rs/tracing-bunyan-formatter/0.1.6/tracing_bunyan_formatter/struct.BunyanFormattingLayer.html) tracing layers to provide more customizable and legible events by using the bunyan format.
+
+To display the formatted logs you'll need to have the bunyan CLI [installed](https://github.com/LukeMathWalker/bunyan#how-to-install) and pipe the indexer's output to the bunyan cli as shown below:
+
+```sh
+cargo run -q | bunyan
+```
+
+To filter spans and events through the `EnvFilter` layer you can use the default env variable `RUST_LOG` to define the directives to be used.
+
+```sh
+RUST_LOG=blob_indexer[span{field=value}]=level cargo run
+```
 
 # About Blossom Labs
 

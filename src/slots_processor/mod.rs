@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context as AnyhowContext};
+use anyhow::anyhow;
 use futures::future::join_all;
 use tokio::task::JoinHandle;
 use tracing::{error, Instrument};
@@ -29,7 +29,7 @@ impl SlotsProcessor {
                 Some(config) => config,
                 None => Config {
                     threads_length: std::thread::available_parallelism()
-                        .with_context(|| "Failed to get max thread length")?
+                        .map_err(|err| anyhow!("Failed to default thread amount: {err}"))?
                         .get() as u32,
                 },
             },
@@ -87,7 +87,12 @@ impl SlotsProcessor {
                             .await;
 
                         if let Err(error) = result {
-                            error!(current_slot, "Failed to process slot: {error}");
+                            error!(
+                                target = "slots_processor",
+                                current_slot,
+                                ?error,
+                                "Failed to process slot"
+                            );
 
                             return Err(SlotsChunkThreadError::FailedChunkProcessing {
                                 initial_slot: thread_initial_slot,
@@ -116,9 +121,16 @@ impl SlotsProcessor {
                     Ok(_) => (),
                     Err(error) => errors.push(error),
                 },
-                Err(join_error) => {
-                    let err = anyhow!(format!("Slots processor thread panicked: {:?}", join_error));
-                    errors.push(SlotsChunkThreadError::Other(err));
+                Err(error) => {
+                    let err = anyhow!("Slots processing thread panicked: {:?}", error);
+
+                    error!(
+                        target = "slots_processor",
+                        ?error,
+                        "Slots processing thread panicked"
+                    );
+
+                    errors.push(err.into());
                 }
             }
         }

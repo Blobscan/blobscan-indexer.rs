@@ -1,10 +1,12 @@
+use core::fmt;
+
 use anyhow::{Context, Result};
 use ethers::types::{
     Address, Block as EthersBlock, Bytes, Transaction as EthersTransaction, H256, U256, U64,
 };
 use serde::{Deserialize, Serialize};
 
-use crate::{beacon_client::types::Blob as BeaconBlob, utils::web3::calculate_versioned_hash};
+use crate::{clients::beacon::types::Blob as BeaconBlob, utils::web3::calculate_versioned_hash};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Block {
@@ -24,7 +26,7 @@ pub struct Transaction {
     pub block_number: U64,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Blob {
     pub versioned_hash: H256,
@@ -47,6 +49,7 @@ pub struct FailedSlotsChunk {
 pub struct SlotRequest {
     pub slot: u32,
 }
+
 #[derive(Deserialize, Debug)]
 pub struct SlotResponse {
     pub slot: u32,
@@ -59,19 +62,15 @@ pub struct IndexRequest {
     pub blobs: Vec<Blob>,
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum BlobscanClientError {
-    #[error(transparent)]
-    Reqwest(#[from] reqwest::Error),
-
-    #[error("API usage error: {0}")]
-    ApiError(String),
-
-    #[error(transparent)]
-    Other(#[from] anyhow::Error),
+impl fmt::Debug for Blob {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Blob {{ versioned_hash: {}, commitment: {}, tx_hash: {}, index: {}, data: [omitted] }}",
+            self.versioned_hash, self.commitment, self.tx_hash, self.index
+        )
+    }
 }
-
-pub type BlobscanClientResult<T> = Result<T, BlobscanClientError>;
 
 impl From<(u32, u32)> for FailedSlotsChunk {
     fn from((initial_slot, final_slot): (u32, u32)) -> Self {

@@ -22,6 +22,7 @@ where
         .with(env_filter)
         .with(JsonStorageLayer)
         .with(formatting_layer)
+        .with(sentry_tracing::layer())
 }
 
 /// Inits the logger with the given subscriber.

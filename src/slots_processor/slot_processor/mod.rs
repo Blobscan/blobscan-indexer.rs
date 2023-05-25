@@ -7,7 +7,7 @@ use ethers::prelude::*;
 use tracing::{info, warn};
 
 use crate::{
-    blobscan_client::types::{Blob, Block, Transaction},
+    clients::blobscan::types::{Blob, Block, Transaction},
     context::Context,
     utils::exp_backoff::get_exp_backoff_config,
 };
@@ -33,11 +33,13 @@ impl SlotProcessor {
         retry_notify(
             backoff_config,
             || async move { self._process_slot(slot).await },
-            |e, duration: Duration| {
+            |error, duration: Duration| {
                 let duration = duration.as_secs();
                 warn!(
+                    target = "slot_processor",
                     slot,
-                    "Failed to process slot. Retrying in {duration} seconds… (Reason: {e})"
+                    ?error,
+                    "Failed to process slot. Retrying in {duration} seconds…"
                 );
             },
         )
@@ -54,11 +56,14 @@ impl SlotProcessor {
         let beacon_block = match beacon_client
             .get_block(Some(slot))
             .await
-            .map_err(SlotProcessorError::BeaconClient)?
+            .map_err(SlotProcessorError::ClientError)?
         {
             Some(block) => block,
             None => {
-                info!(slot, "Skipping as there is no beacon block");
+                info!(
+                    target = "slot_processor",
+                    slot, "Skipping as there is no beacon block"
+                );
 
                 return Ok(());
             }
@@ -68,8 +73,8 @@ impl SlotProcessor {
             Some(payload) => payload,
             None => {
                 info!(
-                    slot,
-                    "Skipping as beacon block doesn't contain execution payload"
+                    target = "slot_processor",
+                    slot, "Skipping as beacon block doesn't contain execution payload"
                 );
 
                 return Ok(());
@@ -80,8 +85,8 @@ impl SlotProcessor {
             Some(commitments) => commitments,
             None => {
                 info!(
-                    slot,
-                    "Skipping as beacon block doesn't contain blob kzg commitments"
+                    target = "slot_processor",
+                    slot, "Skipping as beacon block doesn't contain blob kzg commitments"
                 );
 
                 return Ok(());
@@ -95,15 +100,18 @@ impl SlotProcessor {
         let execution_block = provider
             .get_block_with_txs(execution_block_hash)
             .await
-            .map_err(|err| BackoffError::permanent(SlotProcessorError::Provider(err)))?
+            .map_err(|err| BackoffError::permanent(err.into()))?
             .with_context(|| format!("Execution block {execution_block_hash} not found"))
-            .map_err(|err| BackoffError::permanent(SlotProcessorError::Other(err)))?;
+            .map_err(|err| BackoffError::permanent(err.into()))?;
 
         let tx_hash_to_versioned_hashes = create_tx_hash_versioned_hashes_mapping(&execution_block)
-            .map_err(|err| BackoffError::permanent(SlotProcessorError::Other(err)))?;
+            .map_err(|err| BackoffError::permanent(err.into()))?;
 
         if tx_hash_to_versioned_hashes.is_empty() {
-            info!(slot, "Skipping as execution block doesn't contain blob txs");
+            info!(
+                target = "slot_processor",
+                slot, "Skipping as execution block doesn't contain blob txs"
+            );
 
             return Ok(());
         }
@@ -113,11 +121,14 @@ impl SlotProcessor {
         let blobs = match beacon_client
             .get_blobs(slot)
             .await
-            .map_err(SlotProcessorError::BeaconClient)?
+            .map_err(SlotProcessorError::ClientError)?
         {
             Some(blobs) => {
                 if blobs.is_empty() {
-                    info!(slot, "Skipping as blobs sidecar is empty");
+                    info!(
+                        target = "slot_processor",
+                        slot, "Skipping as blobs sidecar is empty"
+                    );
 
                     return Ok(());
                 } else {
@@ -125,7 +136,10 @@ impl SlotProcessor {
                 }
             }
             None => {
-                info!(slot, "Skipping as there is no blobs sidecar");
+                info!(
+                    target = "slot_processor",
+                    slot, "Skipping as there is no blobs sidecar"
+                );
 
                 return Ok(());
             }
@@ -134,7 +148,7 @@ impl SlotProcessor {
         // Create entities to be indexed
 
         let block_entity = Block::try_from((&execution_block, slot))
-            .map_err(|err| BackoffError::Permanent(SlotProcessorError::Other(err)))?;
+            .map_err(|err| BackoffError::Permanent(err.into()))?;
 
         let transactions_entities = execution_block
             .transactions
@@ -142,15 +156,15 @@ impl SlotProcessor {
             .filter(|tx| tx_hash_to_versioned_hashes.contains_key(&tx.hash))
             .map(|tx| Transaction::try_from((tx, &execution_block)))
             .collect::<Result<Vec<Transaction>>>()
-            .map_err(|err| BackoffError::Permanent(SlotProcessorError::Other(err)))?;
+            .map_err(|err| BackoffError::Permanent(err.into()))?;
 
         let versioned_hash_to_blob = create_versioned_hash_blob_mapping(&blobs)
-            .map_err(|err| BackoffError::Permanent(SlotProcessorError::Other(err)))?;
+            .map_err(|err| BackoffError::Permanent(err.into()))?;
         let mut blob_entities: Vec<Blob> = vec![];
 
         for (tx_hash, versioned_hashes) in tx_hash_to_versioned_hashes.iter() {
             for (i, versioned_hash) in versioned_hashes.iter().enumerate() {
-                let blob = *versioned_hash_to_blob.get(versioned_hash).with_context(|| format!("Sidecar not found for blob {i} with versioned hash {versioned_hash} from tx {tx_hash}")).map_err(|err| BackoffError::Permanent(SlotProcessorError::Other(err)))?;
+                let blob = *versioned_hash_to_blob.get(versioned_hash).with_context(|| format!("Sidecar not found for blob {i} with versioned hash {versioned_hash} from tx {tx_hash}")).map_err(|err| BackoffError::Permanent(err.into()))?;
 
                 blob_entities.push(Blob::from((blob, versioned_hash, i, tx_hash)));
             }
@@ -159,9 +173,12 @@ impl SlotProcessor {
         blobscan_client
             .index(block_entity, transactions_entities, blob_entities)
             .await
-            .map_err(SlotProcessorError::BlobscanClient)?;
+            .map_err(SlotProcessorError::ClientError)?;
 
-        info!(slot, "Block, txs and blobs indexed successfully");
+        info!(
+            target = "slot_processor",
+            slot, "Block, txs and blobs indexed successfully!"
+        );
 
         Ok(())
     }
