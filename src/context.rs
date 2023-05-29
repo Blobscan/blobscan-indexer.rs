@@ -80,7 +80,7 @@ impl From<Environment> for Config {
     fn from(env: Environment) -> Self {
         Self {
             blobscan_api_endpoint: env.blobscan_api_endpoint,
-            beacon_node_url: env.beacon_node_url,
+            beacon_node_url: env.beacon_node_rpc,
             execution_node_rpc: env.execution_node_rpc,
             secret_key: env.secret_key,
         }

@@ -59,7 +59,7 @@ Using environment variables
 ```bash
 docker run --rm \
   -e BLOBSCAN_API_ENDPOINT=http://blobscan-api:3001 \
-  -e BEACON_NODE_URL=http://beacon:3500 \
+  -e BEACON_NODE_RPC=http://beacon:3500 \
   -e EXECUTION_NODE_RPC=http://execution:8545 \
   blossomlabs/blobscan-indexer:master
 ```
@@ -80,8 +80,8 @@ Below you can find a list of supported variables:
 | ----------------------- | -------- | -------------------------------------------------- | ----------------------- |
 | `SECRET_KEY`            | **Yes**  | Shared secret key Blobscan API JWT authentication. |                         |
 | `BLOBSCAN_API_ENDPOINT` | No       | Endpoint for the Blobscan API.                     | `http://localhost:3001` |
-| `BEACON_NODE_URL`       | No       | A consensus client RPC endpoint.                   | `http://localhost:3500` |
-| `EXECUTION_NODE_URL`    | No       | An execution client RPC endpoint.                  | `http://localhost:8545` |
+| `BEACON_NODE_RPC`       | No       | A consensus client RPC endpoint.                   | `http://localhost:3500` |
+| `EXECUTION_NODE_RPC`    | No       | An execution client RPC endpoint.                  | `http://localhost:8545` |
 | `SENTRY_DSN`            | No       | Sentry client key.                                 |                         |
 
 ## Command-Line Arguments
