@@ -59,8 +59,8 @@ Using environment variables
 ```bash
 docker run --rm \
   -e BLOBSCAN_API_ENDPOINT=http://blobscan-api:3001 \
-  -e BEACON_NODE_RPC=http://beacon:3500 \
-  -e EXECUTION_NODE_RPC=http://execution:8545 \
+  -e BEACON_NODE_ENDPOINT=http://beacon:3500 \
+  -e EXECUTION_NODE_ENDPOINT=http://execution:8545 \
   blossomlabs/blobscan-indexer:master
 ```
 
@@ -76,13 +76,13 @@ For more information, check out [Docker Hub](https://hub.docker.com/r/blossomlab
 
 Below you can find a list of supported variables:
 
-| Name                    | Required | Description                                        | Default value           |
-| ----------------------- | -------- | -------------------------------------------------- | ----------------------- |
-| `SECRET_KEY`            | **Yes**  | Shared secret key Blobscan API JWT authentication. |                         |
-| `BLOBSCAN_API_ENDPOINT` | No       | Endpoint for the Blobscan API.                     | `http://localhost:3001` |
-| `BEACON_NODE_RPC`       | No       | A consensus client RPC endpoint.                   | `http://localhost:3500` |
-| `EXECUTION_NODE_RPC`    | No       | An execution client RPC endpoint.                  | `http://localhost:8545` |
-| `SENTRY_DSN`            | No       | Sentry client key.                                 |                         |
+| Name                      | Required | Description                                        | Default value           |
+| ------------------------- | -------- | -------------------------------------------------- | ----------------------- |
+| `SECRET_KEY`              | **Yes**  | Shared secret key Blobscan API JWT authentication. |                         |
+| `BLOBSCAN_API_ENDPOINT`   | No       | Endpoint for the Blobscan API.                     | `http://localhost:3001` |
+| `BEACON_NODE_ENDPOINT`    | No       | A consensus node REST endpoint.                    | `http://localhost:3500` |
+| `EXECUTION_NODE_ENDPOINT` | No       | An execution node RPC endpoint.                    | `http://localhost:8545` |
+| `SENTRY_DSN`              | No       | Sentry client key.                                 |                         |
 
 ## Command-Line Arguments
 

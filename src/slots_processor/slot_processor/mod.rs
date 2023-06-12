@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use anyhow::{Context as AnyhowContext, Result};
+use anyhow::{anyhow, Context as AnyhowContext, Result};
 use backoff::{future::retry_notify, Error as BackoffError};
 
 use ethers::prelude::*;
@@ -81,17 +81,19 @@ impl SlotProcessor {
             }
         };
 
-        match beacon_block.body.blob_kzg_commitments {
-            Some(commitments) => commitments,
-            None => {
-                info!(
-                    target = "slot_processor",
-                    slot, "Skipping as beacon block doesn't contain blob kzg commitments"
-                );
-
-                return Ok(());
-            }
+        let has_kzg_blob_commitments = match beacon_block.body.blob_kzg_commitments {
+            Some(commitments) => !commitments.is_empty(),
+            None => false,
         };
+
+        if !has_kzg_blob_commitments {
+            info!(
+                target = "slot_processor",
+                slot, "Skipping as beacon block doesn't contain blob kzg commitments"
+            );
+
+            return Ok(());
+        }
 
         let execution_block_hash = execution_payload.block_hash;
 
@@ -108,12 +110,7 @@ impl SlotProcessor {
             .map_err(|err| BackoffError::permanent(err.into()))?;
 
         if tx_hash_to_versioned_hashes.is_empty() {
-            info!(
-                target = "slot_processor",
-                slot, "Skipping as execution block doesn't contain blob txs"
-            );
-
-            return Ok(());
+            return Err(BackoffError::permanent(anyhow!("Blocks mismatch: Beacon block contains blob KZG commitments, but the corresponding execution block does not contain any blob transactions").into()));
         }
 
         // Fetch blobs and perform some checks

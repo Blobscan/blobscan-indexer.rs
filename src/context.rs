@@ -19,7 +19,7 @@ struct ContextRef {
 pub struct Config {
     pub blobscan_api_endpoint: String,
     pub beacon_node_url: String,
-    pub execution_node_rpc: String,
+    pub execution_node_endpoint: String,
     pub secret_key: String,
 }
 
@@ -33,7 +33,7 @@ impl Context {
         let Config {
             blobscan_api_endpoint,
             beacon_node_url,
-            execution_node_rpc,
+            execution_node_endpoint,
             secret_key,
         } = config;
 
@@ -58,7 +58,7 @@ impl Context {
                         timeout: None,
                     },
                 )?,
-                provider: Provider::<Http>::try_from(execution_node_rpc)?,
+                provider: Provider::<Http>::try_from(execution_node_endpoint)?,
             }),
         })
     }
@@ -80,8 +80,8 @@ impl From<Environment> for Config {
     fn from(env: Environment) -> Self {
         Self {
             blobscan_api_endpoint: env.blobscan_api_endpoint,
-            beacon_node_url: env.beacon_node_rpc,
-            execution_node_rpc: env.execution_node_rpc,
+            beacon_node_url: env.beacon_node_endpoint,
+            execution_node_endpoint: env.execution_node_endpoint,
             secret_key: env.secret_key,
         }
     }
