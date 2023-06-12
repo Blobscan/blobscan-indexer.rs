@@ -65,7 +65,7 @@ macro_rules! json_put {
         let url = $url.clone();
         let body = format!("{:?}", $body);
 
-        tracing::debug!(method = "PUT", url = url.as_str(), body = body, "Dispatching API client request");
+        tracing::debug!(method = "PUT", url = url.as_str(), body, "Dispatching API client request");
 
 
         let resp = match $client
@@ -95,7 +95,7 @@ macro_rules! json_put {
             tracing::warn!(
                 method = "PUT",
                 url = %url,
-                body = body,
+                body,
                 response = text.as_str(),
                 "Unexpected response from server"
             );

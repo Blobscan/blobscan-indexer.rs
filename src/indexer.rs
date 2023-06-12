@@ -3,7 +3,7 @@ use std::{thread, time::Duration};
 use anyhow::Result;
 use backoff::future::retry_notify;
 use clap::Parser;
-use tracing::{error, info, warn, Instrument};
+use tracing::{debug, error, warn, Instrument};
 
 use crate::{
     args::Args,
@@ -92,7 +92,7 @@ pub async fn run() -> Result<()> {
                     let chunk_initial_slot = current_slot;
                     let chunk_final_slot = current_slot + slots_chunk;
 
-                    let slot_manager_span = tracing::info_span!(
+                    let slot_manager_span = tracing::debug_span!(
                         "slots_processor",
                         initial_slot = chunk_initial_slot,
                         final_slot = chunk_final_slot
@@ -127,7 +127,7 @@ pub async fn run() -> Result<()> {
                         return Err(error.into());
                     }
 
-                    info!(
+                    debug!(
                         target = "indexer",
                         latest_slot = chunk_final_slot - 1,
                         "Latest slot updated"

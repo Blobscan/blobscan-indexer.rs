@@ -4,7 +4,7 @@ use anyhow::{anyhow, Context as AnyhowContext, Result};
 use backoff::{future::retry_notify, Error as BackoffError};
 
 use ethers::prelude::*;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use crate::{
     clients::blobscan::types::{Blob, Block, Transaction},
@@ -60,7 +60,7 @@ impl SlotProcessor {
         {
             Some(block) => block,
             None => {
-                info!(
+                debug!(
                     target = "slot_processor",
                     slot, "Skipping as there is no beacon block"
                 );
@@ -72,7 +72,7 @@ impl SlotProcessor {
         let execution_payload = match beacon_block.body.execution_payload {
             Some(payload) => payload,
             None => {
-                info!(
+                debug!(
                     target = "slot_processor",
                     slot, "Skipping as beacon block doesn't contain execution payload"
                 );
@@ -87,7 +87,7 @@ impl SlotProcessor {
         };
 
         if !has_kzg_blob_commitments {
-            info!(
+            debug!(
                 target = "slot_processor",
                 slot, "Skipping as beacon block doesn't contain blob kzg commitments"
             );
@@ -122,7 +122,7 @@ impl SlotProcessor {
         {
             Some(blobs) => {
                 if blobs.is_empty() {
-                    info!(
+                    debug!(
                         target = "slot_processor",
                         slot, "Skipping as blobs sidecar is empty"
                     );
@@ -133,7 +133,7 @@ impl SlotProcessor {
                 }
             }
             None => {
-                info!(
+                debug!(
                     target = "slot_processor",
                     slot, "Skipping as there is no blobs sidecar"
                 );
@@ -167,6 +167,15 @@ impl SlotProcessor {
             }
         }
 
+        let tx_hashes = transactions_entities
+            .iter()
+            .map(|tx| tx.hash.to_string())
+            .collect::<Vec<String>>();
+        let blob_versioned_hashes = blob_entities
+            .iter()
+            .map(|blob| blob.versioned_hash.to_string())
+            .collect::<Vec<String>>();
+
         blobscan_client
             .index(block_entity, transactions_entities, blob_entities)
             .await
@@ -174,7 +183,11 @@ impl SlotProcessor {
 
         info!(
             target = "slot_processor",
-            slot, "Block, txs and blobs indexed successfully!"
+            slot,
+            block = execution_block_hash.to_string(),
+            transactions = format!("{:?}", tx_hashes),
+            blobs = format!("{:?}", blob_versioned_hashes),
+            "Block, transactions and blobs indexed successfully!"
         );
 
         Ok(())
