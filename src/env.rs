@@ -1,3 +1,4 @@
+use envy::Error::MissingValue;
 use serde::Deserialize;
 
 #[derive(Deserialize, Debug)]
@@ -26,6 +27,21 @@ fn default_execution_node_endpoint() -> String {
 
 impl Environment {
     pub fn from_env() -> Result<Self, envy::Error> {
-        envy::from_env::<Environment>()
+        match envy::from_env::<Environment>() {
+            Ok(config) => {
+                if config.beacon_node_endpoint.is_empty() {
+                    return Err(MissingValue("BEACON_NODE_ENDPOINT"));
+                } else if config.blobscan_api_endpoint.is_empty() {
+                    return Err(MissingValue("BLOBSCAN_API_ENDPOINT"));
+                } else if config.execution_node_endpoint.is_empty() {
+                    return Err(MissingValue("EXECUTION_NODE_ENDPOINT"));
+                } else if config.secret_key.is_empty() {
+                    return Err(MissingValue("SECRET_KEY"));
+                }
+
+                Ok(config)
+            }
+            Err(err) => Err(err),
+        }
     }
 }

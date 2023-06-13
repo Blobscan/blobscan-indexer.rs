@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use env::Environment;
 use utils::telemetry::{get_subscriber, init_subscriber};
 
@@ -12,7 +12,10 @@ mod utils;
 
 async fn run() -> Result<()> {
     dotenv::dotenv().ok();
-    let env = Environment::from_env()?;
+    let env = match Environment::from_env() {
+        Ok(env) => env,
+        Err(err) => return Err(anyhow!(format!("Failed to load env variables: {}", err))),
+    };
 
     let mut _guard;
 
