@@ -32,7 +32,7 @@ async fn run() -> Result<()> {
     let subscriber = get_subscriber("blobscan_indexer".into(), "info".into(), std::io::stdout);
     init_subscriber(subscriber);
 
-    indexer::run().await
+    indexer::run(env).await
 }
 
 #[tokio::main]

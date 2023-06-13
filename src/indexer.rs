@@ -1,9 +1,13 @@
-use std::{thread, time::Duration};
+use std::{
+    cmp::{min, Ordering},
+    thread,
+    time::Duration,
+};
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use backoff::future::retry_notify;
 use clap::Parser;
-use tracing::{debug, error, warn, Instrument};
+use tracing::{debug, error, info, warn, Instrument};
 
 use crate::{
     args::Args,
@@ -13,8 +17,7 @@ use crate::{
     utils::exp_backoff::get_exp_backoff_config,
 };
 
-pub async fn run() -> Result<()> {
-    let env = Environment::from_env()?;
+pub async fn run(env: Environment) -> Result<()> {
     let args = Args::parse();
 
     let max_slot_per_save = args.slots_per_save.unwrap_or(1000);
@@ -84,58 +87,84 @@ pub async fn run() -> Result<()> {
         if let Some(latest_beacon_block) = beacon_head_result {
             let latest_slot: u32 = latest_beacon_block.slot.parse()?;
 
-            if current_slot < latest_slot {
-                let mut unprocessed_slots = latest_slot - current_slot;
+            match current_slot.cmp(&latest_slot) {
+                Ordering::Less => {
+                    let mut unprocessed_slots = latest_slot - current_slot;
+                    let plural_suffix = if unprocessed_slots > 1 { "s" } else { "" };
 
-                while unprocessed_slots > 0 {
-                    let slots_chunk = std::cmp::min(unprocessed_slots, max_slot_per_save);
-                    let chunk_initial_slot = current_slot;
-                    let chunk_final_slot = current_slot + slots_chunk;
-
-                    let slot_manager_span = tracing::debug_span!(
-                        "slots_processor",
-                        initial_slot = chunk_initial_slot,
-                        final_slot = chunk_final_slot
-                    );
-
-                    slots_processor
-                        .process_slots(chunk_initial_slot, chunk_final_slot)
-                        .instrument(slot_manager_span)
-                        .await?;
-
-                    if let Err(error) = retry_notify(
-                        get_exp_backoff_config(),
-                        || async move {
-                            blobscan_client
-                                .update_slot(chunk_final_slot - 1)
-                                .await
-                                .map_err(|err| err.into())
-                        },
-                        |_, duration: Duration| {
-                            let duration = duration.as_secs();
-                            warn!(
-                                target = "indexer",
-                                latest_slot = chunk_final_slot - 1,
-                                "Failed to update latest slot. Retrying in {duration} seconds…"
-                            );
-                        },
-                    )
-                    .await
-                    {
-                        error!(target = "indexer", ?error, "Failed to update latest slot");
-
-                        return Err(error.into());
-                    }
-
-                    debug!(
+                    info!(
                         target = "indexer",
-                        latest_slot = chunk_final_slot - 1,
-                        "Latest slot updated"
+                        current_slot,
+                        latest_slot,
+                        "Syncing {unprocessed_slots} slot{plural_suffix}…"
                     );
 
-                    current_slot += slots_chunk;
-                    unprocessed_slots -= slots_chunk;
+                    while unprocessed_slots > 0 {
+                        let slots_chunk = min(unprocessed_slots, max_slot_per_save);
+                        let chunk_initial_slot = current_slot;
+                        let chunk_final_slot = current_slot + slots_chunk;
+
+                        let slot_manager_span = tracing::debug_span!(
+                            "slots_processor",
+                            initial_slot = chunk_initial_slot,
+                            final_slot = chunk_final_slot
+                        );
+
+                        slots_processor
+                            .process_slots(chunk_initial_slot, chunk_final_slot)
+                            .instrument(slot_manager_span)
+                            .await?;
+
+                        if let Err(error) = retry_notify(
+                            get_exp_backoff_config(),
+                            || async move {
+                                blobscan_client
+                                    .update_slot(chunk_final_slot - 1)
+                                    .await
+                                    .map_err(|err| err.into())
+                            },
+                            |_, duration: Duration| {
+                                let duration = duration.as_secs();
+                                warn!(
+                                    target = "indexer",
+                                    latest_slot = chunk_final_slot - 1,
+                                    "Failed to update latest indexed slot. Retrying in {duration} seconds…"
+                                );
+                            },
+                        )
+                        .await
+                        {
+                            error!(target = "indexer", ?error, "Failed to update latest slot");
+
+                            return Err(error.into());
+                        }
+
+                        debug!(
+                            target = "indexer",
+                            latest_slot = chunk_final_slot - 1,
+                            "Latest indexed slot updated"
+                        );
+
+                        current_slot += slots_chunk;
+                        unprocessed_slots -= slots_chunk;
+                    }
                 }
+                Ordering::Greater => {
+                    let err = anyhow!(
+                        "Current indexer slot ({current_slot}) is greater than head slot ({latest_slot})"
+                    );
+
+                    error!(
+                        target = "indexer",
+                        current_slot,
+                        latest_slot,
+                        "{}",
+                        err.to_string()
+                    );
+
+                    return Err(err);
+                }
+                Ordering::Equal => (),
             }
         }
 
