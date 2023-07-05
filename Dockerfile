@@ -12,6 +12,7 @@ COPY . .
 RUN cargo build --release --bin blob-indexer
 
 FROM debian:bookworm
+RUN apt-get update -y && apt-get install -y ca-certificates
 WORKDIR /app
 COPY --from=builder /app/target/release/blob-indexer .
 ENTRYPOINT ["/app/blob-indexer"]
