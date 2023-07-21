@@ -42,7 +42,7 @@ impl BeaconClient {
     }
 
     pub async fn get_blobs(&self, slot: u32) -> ClientResult<Option<Vec<Blob>>> {
-        let path = format!("v1/beacon/blob_sidecars/{slot}");
+        let path = format!("v1/beacon/blobs/{slot}");
         let url = self.base_url.join(path.as_str())?;
 
         json_get!(&self.client, url, BlobsResponse).map(|res| match res {
