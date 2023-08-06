@@ -11,8 +11,9 @@ RUN cargo chef cook --release --recipe-path recipe.json
 COPY . .
 RUN cargo build --release --bin blob-indexer
 
-FROM debian:bullseye-slim
+FROM node:20-bullseye-slim
 RUN apt-get update -y && apt-get install -y ca-certificates
 WORKDIR /app
+RUN npm install -g bunyan
 COPY --from=builder /app/target/release/blob-indexer .
-ENTRYPOINT ["/app/blob-indexer"]
+ENTRYPOINT ["/bin/sh", "-c", "/app/blob-indexer | bunyan"]
