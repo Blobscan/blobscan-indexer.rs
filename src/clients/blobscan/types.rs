@@ -104,33 +104,33 @@ impl<'a> TryFrom<(&'a EthersBlock<EthersTransaction>, u32)> for Block {
                 .with_context(|| format!("Missing block hash field in execution block {number}"))?,
             timestamp: ethers_block.timestamp,
             slot,
-            blob_gas_used: match ethers_block.other.get("dataGasUsed") {
-                Some(data_gas_used) => {
-                    let data_gas_used = data_gas_used.as_str().with_context(|| {
-                        format!("Failed to convert data gas used field in execution block {number}")
+            blob_gas_used: match ethers_block.other.get("blobGasUsed") {
+                Some(blob_gas_used) => {
+                    let blob_gas_used = blob_gas_used.as_str().with_context(|| {
+                        format!("Failed to convert `blobGasUsed` field in execution block {number}")
                     })?;
 
-                    U256::from_str_radix(data_gas_used, 16)?
+                    U256::from_str_radix(blob_gas_used, 16)?
                 }
                 None => {
                     return Err(anyhow::anyhow!(
-                        "Missing `dataGasUsed` field in execution block {number}"
+                        "Missing `blobGasUsed` field in execution block {number}"
                     ))
                 }
             },
-            excess_blob_gas: match ethers_block.other.get("excessDataGas") {
-                Some(excess_data_gas) => {
-                    let excess_data_gas = excess_data_gas.as_str().with_context(|| {
+            excess_blob_gas: match ethers_block.other.get("excessBlobGas") {
+                Some(excess_gas_gas) => {
+                    let excess_blob_gas = excess_gas_gas.as_str().with_context(|| {
                         format!(
-                            "Failed to convert excess data gas field in execution block {number}"
+                            "Failed to convert excess blob gas field in execution block {number}"
                         )
                     })?;
 
-                    U256::from_str_radix(excess_data_gas, 16)?
+                    U256::from_str_radix(excess_blob_gas, 16)?
                 }
                 None => {
                     return Err(anyhow::anyhow!(
-                        "Missing `excessDataGas` field in execution block {number}"
+                        "Missing `excessBlobGas` field in execution block {number}"
                     ))
                 }
             },
@@ -156,21 +156,21 @@ impl<'a> TryFrom<(&'a EthersTransaction, &'a EthersBlock<EthersTransaction>)> fo
             gas_price: ethers_tx.gas_price.with_context(|| {
                 format!("Missing gas price field in transaction {hash}", hash = hash)
             })?,
-            max_fee_per_blob_gas: match ethers_tx.other.get("maxFeePerDataGas") {
-                Some(max_fee_per_data_gas) => {
-                    let max_fee_per_data_gas =
-                        max_fee_per_data_gas.as_str().with_context(|| {
+            max_fee_per_blob_gas: match ethers_tx.other.get("maxFeePerBlobGas") {
+                Some(max_fee_per_blob_gas) => {
+                    let max_fee_per_blob_gas =
+                        max_fee_per_blob_gas.as_str().with_context(|| {
                             format!(
-                            "Failed to convert max fee per data gas field in transaction {hash}",
-                            hash = hash
-                        )
+                                "Failed to convert `maxFeePerBlobGas` field in transaction {hash}",
+                                hash = hash
+                            )
                         })?;
 
-                    U256::from_str_radix(max_fee_per_data_gas, 16)?
+                    U256::from_str_radix(max_fee_per_blob_gas, 16)?
                 }
                 None => {
                     return Err(anyhow::anyhow!(
-                        "Missing `maxFeePerDataGas` field in transaction {hash}",
+                        "Missing `maxFeePerBlobGas` field in transaction {hash}",
                         hash = hash
                     ))
                 }
