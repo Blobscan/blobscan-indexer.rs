@@ -9,11 +9,14 @@ use serde::{Deserialize, Serialize};
 use crate::{clients::beacon::types::Blob as BeaconBlob, utils::web3::calculate_versioned_hash};
 
 #[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct Block {
     pub number: U64,
     pub hash: H256,
     pub timestamp: U256,
     pub slot: u32,
+    pub blob_gas_used: U256,
+    pub excess_blob_gas: U256,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -24,6 +27,8 @@ pub struct Transaction {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub to: Option<Address>,
     pub block_number: U64,
+    pub gas_price: U256,
+    pub max_fee_per_blob_gas: U256,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -99,6 +104,36 @@ impl<'a> TryFrom<(&'a EthersBlock<EthersTransaction>, u32)> for Block {
                 .with_context(|| format!("Missing block hash field in execution block {number}"))?,
             timestamp: ethers_block.timestamp,
             slot,
+            blob_gas_used: match ethers_block.other.get("dataGasUsed") {
+                Some(data_gas_used) => {
+                    let data_gas_used = data_gas_used.as_str().with_context(|| {
+                        format!("Failed to convert data gas used field in execution block {number}")
+                    })?;
+
+                    U256::from_str_radix(data_gas_used, 16)?
+                }
+                None => {
+                    return Err(anyhow::anyhow!(
+                        "Missing `dataGasUsed` field in execution block {number}"
+                    ))
+                }
+            },
+            excess_blob_gas: match ethers_block.other.get("excessDataGas") {
+                Some(excess_data_gas) => {
+                    let excess_data_gas = excess_data_gas.as_str().with_context(|| {
+                        format!(
+                            "Failed to convert excess data gas field in execution block {number}"
+                        )
+                    })?;
+
+                    U256::from_str_radix(excess_data_gas, 16)?
+                }
+                None => {
+                    return Err(anyhow::anyhow!(
+                        "Missing `excessDataGas` field in execution block {number}"
+                    ))
+                }
+            },
         })
     }
 }
@@ -118,6 +153,28 @@ impl<'a> TryFrom<(&'a EthersTransaction, &'a EthersBlock<EthersTransaction>)> fo
             hash,
             from: ethers_tx.from,
             to: ethers_tx.to,
+            gas_price: ethers_tx.gas_price.with_context(|| {
+                format!("Missing gas price field in transaction {hash}", hash = hash)
+            })?,
+            max_fee_per_blob_gas: match ethers_tx.other.get("maxFeePerDataGas") {
+                Some(max_fee_per_data_gas) => {
+                    let max_fee_per_data_gas =
+                        max_fee_per_data_gas.as_str().with_context(|| {
+                            format!(
+                            "Failed to convert max fee per data gas field in transaction {hash}",
+                            hash = hash
+                        )
+                        })?;
+
+                    U256::from_str_radix(max_fee_per_data_gas, 16)?
+                }
+                None => {
+                    return Err(anyhow::anyhow!(
+                        "Missing `maxFeePerDataGas` field in transaction {hash}",
+                        hash = hash
+                    ))
+                }
+            },
         })
     }
 }
