@@ -17,13 +17,39 @@ use crate::{
     utils::exp_backoff::get_exp_backoff_config,
 };
 
+pub fn print_banner(args: &Args, env: &Environment) {
+    let num_threads = args.num_threads.unwrap_or_default();
+    let sentry_dsn = env.sentry_dsn.clone();
+    println!("____  _       _                         ");
+    println!("| __ )| | ___ | |__  ___  ___ __ _ _ __  ");
+    println!("|  _ \\| |/ _ \\| '_ \\/ __|/ __/ _` | '_ \\ ");
+    println!("| |_) | | (_) | |_) \\__ \\ (_| (_| | | | |");
+    println!("|____/|_|\\___/|_.__/|___/\\___\\__,_|_| |_|");
+    println!("");
+    println!("Blobscan indexer (EIP-4844 blob indexer) - blobscan.com");
+    println!("=======================================================");
+    if num_threads == 0 {
+        println!("Number of threads: auto");
+    } else {
+        println!("Number of threads: {}", num_threads);
+    }
+    println!("Slot chunk size: {}", args.slots_per_save);
+    println!("Blobscan API endpoint: {}", env.blobscan_api_endpoint);
+    println!("CL endpoint: {}", env.beacon_node_endpoint);
+    println!("EL endpoint: {}", env.execution_node_endpoint);
+    println!("Sentry DSN: {}", sentry_dsn.unwrap_or_default());
+    println!("");
+}
+
 pub async fn run(env: Environment) -> Result<()> {
     let args = Args::parse();
 
-    let max_slot_per_save = args.slots_per_save.unwrap_or(1000);
     let slots_processor_config = args
         .num_threads
         .map(|threads_length| SlotsProcessorConfig { threads_length });
+
+    print_banner(&args, &env);
+
     let context = match Context::try_new(ContextConfig::from(env)) {
         Ok(c) => c,
         Err(error) => {
@@ -100,7 +126,7 @@ pub async fn run(env: Environment) -> Result<()> {
                     );
 
                     while unprocessed_slots > 0 {
-                        let slots_chunk = min(unprocessed_slots, max_slot_per_save);
+                        let slots_chunk = min(unprocessed_slots, args.slots_per_save);
                         let chunk_initial_slot = current_slot;
                         let chunk_final_slot = current_slot + slots_chunk;
 
