@@ -90,8 +90,8 @@ The indexer supports the following command-line arguments for configuring the in
 
 - `-f, --from-slot <FROM_SLOT>`: It allows you to specify the starting slot for indexing ignoring the default behavior, which is starting from the latest slot stored in the database.
 
-- `-n, --num-threads <NUM_THREADS>`: It allows you to specify the number of threads that will be utilized to parallelize the indexing process. If the argument is not provided, the number of cores of the machine will be used.
-- `-s, --slots-per-save <SLOTS_PER_SAVE>`: It allows you to specify the number of slots to be processed before saving the latest slot in the database.
+- `-n, --num-threads <NUM_THREADS>`: It allows you to specify the number of threads that will be utilized to parallelize the indexing process. Default: the number of CPU cores.
+- `-s, --slots-per-save <SLOTS_PER_SAVE>`: It allows you to specify the number of slots to be processed before saving the latest slot in the database. Default: 1000
 
 ### Example usage
 
