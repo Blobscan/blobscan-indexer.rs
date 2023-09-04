@@ -24,8 +24,7 @@ pub fn print_banner(args: &Args, env: &Environment) {
     println!("| __ )| | ___ | |__  ___  ___ __ _ _ __  ");
     println!("|  _ \\| |/ _ \\| '_ \\/ __|/ __/ _` | '_ \\ ");
     println!("| |_) | | (_) | |_) \\__ \\ (_| (_| | | | |");
-    println!("|____/|_|\\___/|_.__/|___/\\___\\__,_|_| |_|");
-    println!("");
+    println!("|____/|_|\\___/|_.__/|___/\\___\\__,_|_| |_|\n");
     println!("Blobscan indexer (EIP-4844 blob indexer) - blobscan.com");
     println!("=======================================================");
     if num_threads == 0 {
@@ -38,7 +37,7 @@ pub fn print_banner(args: &Args, env: &Environment) {
     println!("CL endpoint: {}", env.beacon_node_endpoint);
     println!("EL endpoint: {}", env.execution_node_endpoint);
     println!("Sentry DSN: {}", sentry_dsn.unwrap_or_default());
-    println!("");
+    println!("\n");
 }
 
 pub async fn run(env: Environment) -> Result<()> {
