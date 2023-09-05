@@ -11,7 +11,7 @@ RUN cargo chef cook --release --recipe-path recipe.json
 COPY . .
 RUN cargo build --release --bin blob-indexer
 
-FROM debian:bullseye-slim
+FROM debian:bookworm-slim
 RUN apt-get update -y && apt-get install -y ca-certificates
 WORKDIR /app
 COPY --from=builder /app/target/release/blob-indexer .
