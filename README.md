@@ -67,7 +67,7 @@ docker run --rm \
 Or directly using the .env file
 
 ```
-docker run --env-file=.env --rm blossomlabs/blobscan-indexer:master
+docker run --network host --env-file=.env --rm blossomlabs/blobscan-indexer:master
 ```
 
 For more information, check out [Docker Hub](https://hub.docker.com/r/blossomlabs/blobscan-indexer).
