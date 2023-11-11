@@ -1,0 +1,10 @@
+---
+version: "3.7"
+
+services:
+  indexer:
+    image: blossomlabs/blobscan-indexer:master
+    network_mode: host
+    restart: always
+    env_file:
+      - ".env"
