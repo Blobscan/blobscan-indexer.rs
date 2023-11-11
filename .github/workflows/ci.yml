@@ -84,9 +84,7 @@ jobs:
     if: github.ref_name == 'next'
     name: Deploy blobscan api (staging)
     runs-on: ubuntu-latest
-    environment:
-      name: staging
-      url: https://staging.blobscan.com
+    environment: staging
     needs: docker
     steps:
       - uses: appleboy/ssh-action@v0.0.7
@@ -95,15 +93,13 @@ jobs:
           username: deploy
           port: ${{ secrets.SSH_PORT }}
           key: ${{ secrets.SSH_KEY }}
-          script: ./deploy-blobscan.sh
+          script: ./deploy-blobscan-indexer.rs.sh
 
   deploy_prod:
     if: github.ref_name == 'master'
     name: Deploy blobscan api (prod)
     runs-on: ubuntu-latest
-    environment:
-      name: production
-      url: https://blobscan.com
+    environment: production
     needs: docker
     steps:
       - uses: appleboy/ssh-action@v0.0.7
@@ -112,4 +108,4 @@ jobs:
           username: deploy
           port: ${{ secrets.SSH_PORT }}
           key: ${{ secrets.SSH_KEY }}
-          script: ./deploy-blobscan.sh
+          script: ./deploy-blobscan-indexer.rs.sh
