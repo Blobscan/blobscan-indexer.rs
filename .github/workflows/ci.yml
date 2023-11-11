@@ -81,25 +81,10 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
 
   deploy_staging:
-    if: github.ref_name == 'next'
+    if: github.ref_name == 'master'
     name: Deploy blobscan api (staging)
     runs-on: ubuntu-latest
     environment: staging
-    needs: docker
-    steps:
-      - uses: appleboy/ssh-action@v0.0.7
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: deploy
-          port: ${{ secrets.SSH_PORT }}
-          key: ${{ secrets.SSH_KEY }}
-          script: ./deploy-blobscan-indexer.rs.sh
-
-  deploy_prod:
-    if: github.ref_name == 'master'
-    name: Deploy blobscan api (prod)
-    runs-on: ubuntu-latest
-    environment: production
     needs: docker
     steps:
       - uses: appleboy/ssh-action@v0.0.7
