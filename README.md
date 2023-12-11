@@ -1,4 +1,4 @@
-# Blobscan indexer <a href="#"><img align="right" src=".github/assets/blobi.jpeg" height="80px" /></a>
+# Blobscan indexer <a href="#"><img align="right" src=".github/assets/logo.svg" height="80px" /></a>
 
 The indexer for the [Blobscan](https://github.com/Blobscan/blobscan) explorer implemented in Rust.
 
