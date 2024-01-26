@@ -13,6 +13,7 @@ ethers = "1.0.2"
 futures = "0.3.25"
 hex = "0.4.3"
 reqwest = { version = "0.11.13", features = ["json"] }
+reqwest-eventsource = "0.5.0"
 url = { version = "2.3.1", features = ["serde"] }
 serde = { version = "1.0.150", features = ["derive"] }
 tokio = { version = "1.23.0", features = ["full"] }

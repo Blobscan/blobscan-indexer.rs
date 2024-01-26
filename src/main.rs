@@ -3,6 +3,7 @@ use env::Environment;
 use utils::telemetry::{get_subscriber, init_subscriber};
 
 mod args;
+mod chain_reorg_handler;
 mod clients;
 mod context;
 mod env;

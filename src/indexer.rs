@@ -11,6 +11,7 @@ use tracing::{debug, error, info, warn, Instrument};
 
 use crate::{
     args::Args,
+    chain_reorg_handler::ChainReorgHandler,
     context::{Config as ContextConfig, Context},
     env::Environment,
     slots_processor::{Config as SlotsProcessorConfig, SlotsProcessor},
@@ -57,6 +58,10 @@ pub async fn run(env: Environment) -> Result<()> {
             return Err(error);
         }
     };
+
+    let chain_reorg_handler = ChainReorgHandler::new(context.clone());
+
+    let _handler = chain_reorg_handler.run();
 
     let beacon_client = context.beacon_client();
     let blobscan_client = context.blobscan_client();

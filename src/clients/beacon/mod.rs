@@ -1,10 +1,11 @@
 use anyhow::Context as AnyhowContext;
 use reqwest::{Client, Url};
+use reqwest_eventsource::EventSource;
 use std::time::Duration;
 
 use crate::{clients::common::ClientResult, json_get};
 
-use self::types::{Blob, BlobsResponse, BlockMessage as Block, BlockResponse};
+use self::types::{Blob, BlobsResponse, BlockMessage as Block, BlockResponse, Topic};
 
 pub mod types;
 
@@ -49,5 +50,19 @@ impl BeaconClient {
             Some(r) => Some(r.data),
             None => None,
         })
+    }
+
+    pub fn subscribe_to_events(&self, topics: Vec<Topic>) -> ClientResult<EventSource> {
+        let topics = topics
+            .iter()
+            .map(|topic| topic.to_string())
+            .collect::<Vec<String>>()
+            .join("&");
+        let path = format!("v1/events?topics={topics}");
+        let url = self.base_url.join(&path)?;
+
+        let event_source = EventSource::get(url);
+
+        Ok(event_source)
     }
 }

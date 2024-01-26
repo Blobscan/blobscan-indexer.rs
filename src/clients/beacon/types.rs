@@ -1,6 +1,18 @@
 use ethers::types::{Bytes, H256};
 use serde::Deserialize;
 
+pub enum Topic {
+    ChainReorg,
+}
+
+impl Topic {
+    pub fn to_string(&self) -> String {
+        match self {
+            Topic::ChainReorg => String::from("chain_reorg"),
+        }
+    }
+}
+
 #[derive(Deserialize, Debug)]
 pub struct ExecutionPayload {
     pub block_hash: H256,
@@ -37,4 +49,12 @@ pub struct Blob {
 #[derive(Deserialize, Debug)]
 pub struct BlobsResponse {
     pub data: Vec<Blob>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct ChainReorgResponse {
+    pub slot: String,
+    pub depth: String,
+    pub old_head_block: String,
+    pub new_head_block: String,
 }

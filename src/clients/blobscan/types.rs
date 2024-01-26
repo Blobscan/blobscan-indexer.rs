@@ -67,6 +67,12 @@ pub struct IndexRequest {
     pub blobs: Vec<Blob>,
 }
 
+#[derive(Serialize, Debug)]
+pub struct ReorgBlockRequest {
+    pub slot: u32,
+    pub depth: u32,
+}
+
 impl fmt::Debug for Blob {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
