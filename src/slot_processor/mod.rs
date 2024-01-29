@@ -1,15 +1,11 @@
-use std::time::Duration;
-
 use anyhow::{anyhow, Context as AnyhowContext, Result};
-use backoff::{future::retry_notify, Error as BackoffError};
 
 use ethers::prelude::*;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 use crate::{
     clients::blobscan::types::{Blob, Block, Transaction},
     context::Context,
-    utils::exp_backoff::build_exp_backoff_config,
 };
 
 use self::error::SlotProcessorError;
@@ -28,26 +24,6 @@ impl SlotProcessor {
     }
 
     pub async fn process_slot(&self, slot: u32) -> Result<(), SlotProcessorError> {
-        let backoff_config = build_exp_backoff_config();
-
-        retry_notify(
-            backoff_config,
-            || async move { self._process_slot(slot).await },
-            |error, duration: Duration| {
-                let duration = duration.as_secs();
-
-                warn!(
-                    target = "slot_processor",
-                    slot,
-                    ?error,
-                    "Failed to process slot. Retrying in {duration} seconds…"
-                );
-            },
-        )
-        .await
-    }
-
-    async fn _process_slot(&self, slot: u32) -> Result<(), backoff::Error<SlotProcessorError>> {
         let beacon_client = self.context.beacon_client();
         let blobscan_client = self.context.blobscan_client();
         let provider = self.context.provider();
@@ -102,16 +78,14 @@ impl SlotProcessor {
 
         let execution_block = provider
             .get_block_with_txs(execution_block_hash)
-            .await
-            .map_err(|err| BackoffError::permanent(err.into()))?
-            .with_context(|| format!("Execution block {execution_block_hash} not found"))
-            .map_err(|err| BackoffError::permanent(err.into()))?;
+            .await?
+            .with_context(|| format!("Execution block {execution_block_hash} not found"))?;
 
-        let tx_hash_to_versioned_hashes = create_tx_hash_versioned_hashes_mapping(&execution_block)
-            .map_err(|err| BackoffError::permanent(err.into()))?;
+        let tx_hash_to_versioned_hashes =
+            create_tx_hash_versioned_hashes_mapping(&execution_block)?;
 
         if tx_hash_to_versioned_hashes.is_empty() {
-            return Err(BackoffError::permanent(anyhow!("Blocks mismatch: Beacon block contains blob KZG commitments, but the corresponding execution block does not contain any blob transactions").into()));
+            return Err(anyhow!("Blocks mismatch: Beacon block contains blob KZG commitments, but the corresponding execution block does not contain any blob transactions").into());
         }
 
         // Fetch blobs and perform some checks
@@ -145,24 +119,21 @@ impl SlotProcessor {
 
         // Create entities to be indexed
 
-        let block_entity = Block::try_from((&execution_block, slot))
-            .map_err(|err| BackoffError::Permanent(err.into()))?;
+        let block_entity = Block::try_from((&execution_block, slot))?;
 
         let transactions_entities = execution_block
             .transactions
             .iter()
             .filter(|tx| tx_hash_to_versioned_hashes.contains_key(&tx.hash))
             .map(|tx| Transaction::try_from((tx, &execution_block)))
-            .collect::<Result<Vec<Transaction>>>()
-            .map_err(|err| BackoffError::Permanent(err.into()))?;
+            .collect::<Result<Vec<Transaction>>>()?;
 
-        let versioned_hash_to_blob = create_versioned_hash_blob_mapping(&blobs)
-            .map_err(|err| BackoffError::Permanent(err.into()))?;
+        let versioned_hash_to_blob = create_versioned_hash_blob_mapping(&blobs)?;
         let mut blob_entities: Vec<Blob> = vec![];
 
         for (tx_hash, versioned_hashes) in tx_hash_to_versioned_hashes.iter() {
             for (i, versioned_hash) in versioned_hashes.iter().enumerate() {
-                let blob = *versioned_hash_to_blob.get(versioned_hash).with_context(|| format!("Sidecar not found for blob {i} with versioned hash {versioned_hash} from tx {tx_hash}")).map_err(|err| BackoffError::Permanent(err.into()))?;
+                let blob = *versioned_hash_to_blob.get(versioned_hash).with_context(|| format!("Sidecar not found for blob {i} with versioned hash {versioned_hash} from tx {tx_hash}"))?;
 
                 blob_entities.push(Blob::from((blob, versioned_hash, i, tx_hash)));
             }

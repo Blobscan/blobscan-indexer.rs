@@ -1,16 +1,14 @@
 use std::{thread, time::Duration};
 
 use anyhow::Result;
-use backoff::future::retry_notify;
 use clap::Parser;
-use tracing::{error, warn};
+use tracing::error;
 
 use crate::{
     args::Args,
     context::{Config as ContextConfig, Context},
     env::Environment,
-    synchronizer::{config::ConfigBuilder as SynchronizerConfigBuilder, Synchronizer},
-    utils::exp_backoff::build_exp_backoff_config,
+    synchronizer::SynchronizerBuilder,
 };
 
 pub fn print_banner(args: &Args, env: &Environment) {
@@ -48,14 +46,14 @@ pub fn print_banner(args: &Args, env: &Environment) {
 pub async fn run(env: Environment) -> Result<()> {
     let args = Args::parse();
 
-    let mut synchronizer_config_builder = SynchronizerConfigBuilder::new()?;
+    let mut synchronizer_builder = SynchronizerBuilder::new()?;
 
     if let Some(num_threads) = args.num_threads {
-        synchronizer_config_builder.with_num_threads(num_threads);
+        synchronizer_builder.with_num_threads(num_threads);
     }
 
     if let Some(slots_checkpoint) = args.slots_per_save {
-        synchronizer_config_builder.with_slots_checkpoint(slots_checkpoint);
+        synchronizer_builder.with_slots_checkpoint(slots_checkpoint);
     }
 
     print_banner(&args, &env);
@@ -87,27 +85,10 @@ pub async fn run(env: Environment) -> Result<()> {
         },
     };
 
-    let synchronizer = Synchronizer::new(context.clone(), synchronizer_config_builder.build());
+    let synchronizer = synchronizer_builder.build(context.clone());
 
     loop {
-        let beacon_head_result = match retry_notify(
-            build_exp_backoff_config(),
-            || async move {
-                beacon_client
-                    .get_block(None)
-                    .await
-                    .map_err(|err| err.into())
-            },
-            |_, duration: Duration| {
-                let duration = duration.as_secs();
-                warn!(
-                    target = "indexer",
-                    "Failed to fetch beacon head block. Retrying in {duration} seconds…"
-                );
-            },
-        )
-        .await
-        {
+        let beacon_head_result = match beacon_client.get_block(None).await {
             Ok(res) => res,
             Err(error) => {
                 error!(

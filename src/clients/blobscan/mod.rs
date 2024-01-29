@@ -1,5 +1,4 @@
-use std::time::Duration;
-
+use backoff::ExponentialBackoff;
 use reqwest::{Client, Url};
 
 use crate::{clients::common::ClientResult, json_get, json_put};
@@ -17,12 +16,13 @@ pub struct BlobscanClient {
     base_url: Url,
     client: reqwest::Client,
     jwt_manager: JWTManager,
+    exp_backoff: Option<ExponentialBackoff>,
 }
 
 pub struct Config {
     pub base_url: String,
     pub secret_key: String,
-    pub timeout: Option<Duration>,
+    pub exp_backoff: Option<ExponentialBackoff>,
 }
 
 impl BlobscanClient {
@@ -33,11 +33,13 @@ impl BlobscanClient {
             refresh_interval: chrono::Duration::hours(1),
             safety_magin: None,
         });
+        let exp_backoff = config.exp_backoff;
 
         Ok(Self {
             base_url,
             client,
             jwt_manager,
+            exp_backoff,
         })
     }
 
@@ -69,7 +71,7 @@ impl BlobscanClient {
     pub async fn get_slot(&self) -> ClientResult<Option<u32>> {
         let url = self.base_url.join("slot")?;
 
-        json_get!(&self.client, url, SlotResponse)
+        json_get!(&self.client, url, SlotResponse, self.exp_backoff.clone())
             .map(|res: Option<SlotResponse>| Some(res.unwrap().slot))
     }
 }

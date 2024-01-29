@@ -1,40 +1,69 @@
-use std::{cmp::Ordering, time::Duration};
+use std::{cmp::Ordering, thread};
 
 use anyhow::anyhow;
-use backoff::future::retry_notify;
 use futures::future::join_all;
 use tokio::task::JoinHandle;
-use tracing::{debug, debug_span, error, info, warn, Instrument};
+use tracing::{debug, debug_span, error, info, Instrument};
 
-use crate::{
-    context::Context, slot_processor::SlotProcessor, utils::exp_backoff::build_exp_backoff_config,
-};
+use crate::{context::Context, slot_processor::SlotProcessor};
 
-use self::{config::Config, error::{MultipleSlotsChunkErrors, SynchronizerError, SynchronizerThreadError}};
+use self::error::{MultipleSlotsChunkErrors, SynchronizerError, SynchronizerThreadError};
 
-pub mod config;
 mod error;
+
+#[derive(Debug)]
+pub struct SynchronizerBuilder {
+    num_threads: u32,
+    slots_checkpoint: u32,
+}
+
+impl SynchronizerBuilder {
+    pub fn new() -> Result<Self, anyhow::Error> {
+        SynchronizerBuilder::default()
+    }
+
+    pub fn default() -> Result<Self, anyhow::Error> {
+        Ok(Self {
+            num_threads: thread::available_parallelism()
+                .map_err(|err| anyhow!("Failed to get number of available threads: {:?}", err))?
+                .get() as u32,
+            slots_checkpoint: 1000,
+        })
+    }
+
+    pub fn with_num_threads(&mut self, num_threads: u32) -> &mut Self {
+        self.num_threads = num_threads;
+        self
+    }
+
+    pub fn with_slots_checkpoint(&mut self, slots_checkpoint: u32) -> &mut Self {
+        self.slots_checkpoint = slots_checkpoint;
+        self
+    }
+
+    pub fn build(&self, context: Context) -> Synchronizer {
+        Synchronizer {
+            context,
+            num_threads: self.num_threads,
+            slots_checkpoint: self.slots_checkpoint,
+        }
+    }
+}
 
 pub struct Synchronizer {
     context: Context,
-    config: Config,
+    num_threads: u32,
+    slots_checkpoint: u32,
 }
 
 impl Synchronizer {
-    pub fn new(context: Context, config: Config) -> Self {
-        Self {
-            context,
-            config
-        }
-    }
-
     async fn _sync_slots(&self, from_slot: u32, to_slot: u32) -> Result<(), SynchronizerError> {
         if from_slot == to_slot {
             return Ok(());
         }
 
         let unprocessed_slots = to_slot - from_slot;
-        let num_threads = std::cmp::min(self.config.num_threads, unprocessed_slots);
+        let num_threads = std::cmp::min(self.num_threads, unprocessed_slots);
         let slots_per_thread = unprocessed_slots / num_threads;
         let remaining_slots = unprocessed_slots % num_threads;
         let num_threads = if slots_per_thread > 0 {
@@ -157,67 +186,49 @@ impl Synchronizer {
                 let blobscan_client = self.context.blobscan_client();
                 let mut current_slot = from_slot;
                 let mut unprocessed_slots = to_slot - current_slot;
-        
+
                 info!(
                     target = "synchronizer",
                     to_slot, from_slot, "Syncing {unprocessed_slots} slots…"
                 );
-        
+
                 while unprocessed_slots > 0 {
-                    let slots_chunk = std::cmp::min(unprocessed_slots, self.config.slots_checkpoint);
+                    let slots_chunk = std::cmp::min(unprocessed_slots, self.slots_checkpoint);
                     let initial_chunk_slot = current_slot;
                     let final_chunk_slot = current_slot + slots_chunk;
-        
+
                     let sync_slots_chunk_span = debug_span!(
                         "synchronizer",
                         initial_slot = initial_chunk_slot,
                         final_slot = final_chunk_slot
                     );
-        
+
                     self._sync_slots(initial_chunk_slot, final_chunk_slot)
                         .instrument(sync_slots_chunk_span)
                         .await?;
-        
-                    if let Err(error) = retry_notify(
-                        build_exp_backoff_config(),
-                        || async move {
-                            blobscan_client
-                                .update_slot(final_chunk_slot - 1)
-                                .await
-                                .map_err(|err| err.into())
-                        },
-                        |_, duration: Duration| {
-                            let duration = duration.as_secs();
-                            warn!(
-                                target = "synchronizer",
-                                latest_slot = final_chunk_slot - 1,
-                                "Failed to update latest indexed slot. Retrying in {duration} seconds…"
-                            );
-                        },
-                    )
-                    .await
-                    {
+
+                    if let Err(error) = blobscan_client.update_slot(final_chunk_slot - 1).await {
                         error!(
                             target = "synchronizer",
+                            new_latest_slot = final_chunk_slot - 1,
                             ?error,
-                            "Failed to update latest slot"
+                            "Failed to update indexer's latest slot"
                         );
-        
+
                         return Err(error.into());
                     }
-        
+
                     debug!(
                         target = "synchronizer",
                         latest_slot = final_chunk_slot - 1,
-                        "Latest indexed slot updated"
+                        "Checkpoint reached. Latest indexed slot updated"
                     );
-        
+
                     current_slot += slots_chunk;
                     unprocessed_slots -= slots_chunk;
                 }
-            },
+            }
         }
-        
 
         Ok(())
     }

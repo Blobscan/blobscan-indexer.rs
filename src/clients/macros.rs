@@ -2,10 +2,10 @@
 /// Make a GET request sending and expecting JSON.
 /// if JSON deser fails, emit a `WARN` level tracing event
 macro_rules! json_get {
-    ($client:expr, $url:expr, $expected:ty) => {
-        json_get!($client, $url, $expected, "")
+    ($client:expr, $url:expr, $expected:ty, $exp_backoff:expr) => {
+        json_get!($client, $url, $expected, "", $exp_backoff)
     };
-    ($client:expr, $url:expr, $expected:ty, $auth_token:expr) => {{
+    ($client:expr, $url:expr, $expected:ty, $auth_token:expr, $exp_backoff: expr) => {{
         let url = $url.clone();
 
         tracing::debug!(method = "GET", url = url.as_str(), "Dispatching API request");
@@ -16,18 +16,52 @@ macro_rules! json_get {
           req = req.bearer_auth($auth_token);
         }
 
-        let resp = match req.send().await {
-            Err(error) => {
-                tracing::warn!(
-                    method = "GET",
-                    url = %url,
-                    ?error,
-                    "Failed to send request"
-                );
+        let resp = if $exp_backoff.is_some() {
+            match backoff::future::retry_notify(
+                $exp_backoff.unwrap(),
+                || {
+                    let req = req.try_clone().unwrap();
 
-                return Err(error.into())
-            },
-            Ok(resp) => resp
+                    async move { req.send().await.map_err(|err| err.into()) }
+                },
+                |error, duration: std::time::Duration| {
+                    let duration = duration.as_secs();
+
+                    tracing::warn!(
+                        method = "GET",
+                        url = %url,
+                        ?error,
+                        "Failed to send request. Retrying in {duration} seconds…"
+                    );
+                },
+            )
+            .await {
+                Ok(resp) => resp,
+                Err(error) => {
+                    tracing::warn!(
+                        method = "GET",
+                        url = %url,
+                        ?error,
+                        "Failed to send request. All retries failed"
+                    );
+
+                    return Err(error.into())
+                }
+            }
+        } else {
+            match req.send().await {
+                Err(error) => {
+                    tracing::warn!(
+                        method = "GET",
+                        url = %url,
+                        ?error,
+                        "Failed to send request"
+                    );
+
+                    return Err(error.into())
+                },
+                Ok(resp) => resp
+            }
         };
 
         let status = resp.status();
