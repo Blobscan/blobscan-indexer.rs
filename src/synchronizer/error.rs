@@ -1,11 +1,11 @@
-use super::slot_processor::error::SlotProcessorError;
+use crate::slot_processor::error::SlotProcessorError;
 
 #[derive(Debug, thiserror::Error)]
-pub enum SlotsChunkThreadError {
+pub enum SynchronizerThreadError {
     #[error(
-        "Couldn't process slots chunk {initial_slot} to {final_slot}. Slot {failed_slot} failed: {error}"
+        "Error processing slots chunk {initial_slot}-{final_slot}. Slot {failed_slot} failed: {error}"
     )]
-    FailedChunkProcessing {
+    FailedSlotsChunkProcessing {
         initial_slot: u32,
         final_slot: u32,
         failed_slot: u32,
@@ -17,22 +17,23 @@ pub enum SlotsChunkThreadError {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum SlotsProcessorError {
+pub enum SynchronizerError {
     #[error("Failed to process slots from {initial_slot} to {final_slot}:\n{chunk_errors}")]
     FailedSlotsProcessing {
         initial_slot: u32,
         final_slot: u32,
-        chunk_errors: MultipleSlotChunkErrors,
+        chunk_errors: MultipleSlotsChunkErrors,
     },
-
+    #[error(transparent)]
+    ClientError(#[from] crate::clients::common::ClientError),
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }
 
 #[derive(Debug)]
-pub struct MultipleSlotChunkErrors(pub Vec<SlotsChunkThreadError>);
+pub struct MultipleSlotsChunkErrors(pub Vec<SynchronizerThreadError>);
 
-impl std::fmt::Display for MultipleSlotChunkErrors {
+impl std::fmt::Display for MultipleSlotsChunkErrors {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for err in self.0.iter() {
             writeln!(f, "- {}", err)?;

@@ -1,19 +1,15 @@
-use std::{
-    cmp::{min, Ordering},
-    thread,
-    time::Duration,
-};
+use std::{thread, time::Duration};
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use backoff::future::retry_notify;
 use clap::Parser;
-use tracing::{debug, error, info, warn, Instrument};
+use tracing::{error, warn};
 
 use crate::{
     args::Args,
     context::{Config as ContextConfig, Context},
     env::Environment,
-    slots_processor::{Config as SlotsProcessorConfig, SlotsProcessor},
+    synchronizer::{Config as SynchronizerConfig, Synchronizer},
     utils::exp_backoff::get_exp_backoff_config,
 };
 
@@ -43,9 +39,10 @@ pub fn print_banner(args: &Args, env: &Environment) {
 pub async fn run(env: Environment) -> Result<()> {
     let args = Args::parse();
 
-    let slots_processor_config = args
-        .num_threads
-        .map(|threads_length| SlotsProcessorConfig { threads_length });
+    let synchronizer_config = args.num_threads.map(|num_threads| SynchronizerConfig {
+        num_threads,
+        slots_checkpoint: 1000,
+    });
 
     print_banner(&args, &env);
 
@@ -76,7 +73,7 @@ pub async fn run(env: Environment) -> Result<()> {
         },
     };
 
-    let slots_processor = SlotsProcessor::try_new(context.clone(), slots_processor_config)?;
+    let synchronizer = Synchronizer::try_new(context.clone(), synchronizer_config)?;
 
     loop {
         let beacon_head_result = match retry_notify(
@@ -97,6 +94,7 @@ pub async fn run(env: Environment) -> Result<()> {
         )
         .await
         {
+            Ok(res) => res,
             Err(error) => {
                 error!(
                     target = "indexer",
@@ -106,91 +104,14 @@ pub async fn run(env: Environment) -> Result<()> {
 
                 return Err(error.into());
             }
-            Ok(res) => res,
         };
 
-        if let Some(latest_beacon_block) = beacon_head_result {
-            let latest_slot: u32 = latest_beacon_block.slot.parse()?;
+        if let Some(beacon_head_block) = beacon_head_result {
+            let head_slot: u32 = beacon_head_block.slot.parse()?;
 
-            match current_slot.cmp(&latest_slot) {
-                Ordering::Less => {
-                    let mut unprocessed_slots = latest_slot - current_slot;
-                    let plural_suffix = if unprocessed_slots > 1 { "s" } else { "" };
+            synchronizer.run(current_slot, head_slot).await?;
 
-                    info!(
-                        target = "indexer",
-                        current_slot,
-                        latest_slot,
-                        "Syncing {unprocessed_slots} slot{plural_suffix}…"
-                    );
-
-                    while unprocessed_slots > 0 {
-                        let slots_chunk = min(unprocessed_slots, args.slots_per_save);
-                        let chunk_initial_slot = current_slot;
-                        let chunk_final_slot = current_slot + slots_chunk;
-
-                        let slot_manager_span = tracing::debug_span!(
-                            "slots_processor",
-                            initial_slot = chunk_initial_slot,
-                            final_slot = chunk_final_slot
-                        );
-
-                        slots_processor
-                            .process_slots(chunk_initial_slot, chunk_final_slot)
-                            .instrument(slot_manager_span)
-                            .await?;
-
-                        if let Err(error) = retry_notify(
-                            get_exp_backoff_config(),
-                            || async move {
-                                blobscan_client
-                                    .update_slot(chunk_final_slot - 1)
-                                    .await
-                                    .map_err(|err| err.into())
-                            },
-                            |_, duration: Duration| {
-                                let duration = duration.as_secs();
-                                warn!(
-                                    target = "indexer",
-                                    latest_slot = chunk_final_slot - 1,
-                                    "Failed to update latest indexed slot. Retrying in {duration} seconds…"
-                                );
-                            },
-                        )
-                        .await
-                        {
-                            error!(target = "indexer", ?error, "Failed to update latest slot");
-
-                            return Err(error.into());
-                        }
-
-                        debug!(
-                            target = "indexer",
-                            latest_slot = chunk_final_slot - 1,
-                            "Latest indexed slot updated"
-                        );
-
-                        current_slot += slots_chunk;
-                        unprocessed_slots -= slots_chunk;
-                    }
-                }
-                Ordering::Greater => {
-                    let err = anyhow!(
-                        "Current indexer slot ({current_slot}) is greater than head slot ({latest_slot})"
-                    );
-
-                    error!(
-                        target = "indexer",
-                        current_slot,
-                        latest_slot,
-                        "{}",
-                        err.to_string()
-                    );
-
-                    return Err(err);
-                }
-                Ordering::Equal => (),
-            }
+            current_slot = head_slot;
         }
 
         thread::sleep(Duration::from_secs(10));

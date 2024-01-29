@@ -35,6 +35,7 @@ impl SlotProcessor {
             || async move { self._process_slot(slot).await },
             |error, duration: Duration| {
                 let duration = duration.as_secs();
+
                 warn!(
                     target = "slot_processor",
                     slot,

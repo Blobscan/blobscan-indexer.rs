@@ -7,7 +7,8 @@ mod clients;
 mod context;
 mod env;
 mod indexer;
-mod slots_processor;
+mod slot_processor;
+mod synchronizer;
 mod utils;
 
 async fn run() -> Result<()> {
