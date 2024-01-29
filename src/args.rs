@@ -13,6 +13,6 @@ pub struct Args {
     pub num_threads: Option<u32>,
 
     /// Amount of slots to be processed before saving latest slot in the database
-    #[arg(short, long, default_value_t = 1000)]
-    pub slots_per_save: u32,
+    #[arg(short, long)]
+    pub slots_per_save: Option<u32>,
 }

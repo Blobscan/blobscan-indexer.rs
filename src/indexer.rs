@@ -9,13 +9,11 @@ use crate::{
     args::Args,
     context::{Config as ContextConfig, Context},
     env::Environment,
-    synchronizer::{Config as SynchronizerConfig, Synchronizer},
+    synchronizer::{config::ConfigBuilder as SynchronizerConfigBuilder, Synchronizer},
     utils::exp_backoff::get_exp_backoff_config,
 };
 
 pub fn print_banner(args: &Args, env: &Environment) {
-    let num_threads = args.num_threads.unwrap_or_default();
-    let sentry_dsn = env.sentry_dsn.clone();
     println!("____  _       _                         ");
     println!("| __ )| | ___ | |__  ___  ___ __ _ _ __  ");
     println!("|  _ \\| |/ _ \\| '_ \\/ __|/ __/ _` | '_ \\ ");
@@ -23,26 +21,42 @@ pub fn print_banner(args: &Args, env: &Environment) {
     println!("|____/|_|\\___/|_.__/|___/\\___\\__,_|_| |_|\n");
     println!("Blobscan indexer (EIP-4844 blob indexer) - blobscan.com");
     println!("=======================================================");
-    if num_threads == 0 {
-        println!("Number of threads: auto");
-    } else {
+
+    if let Some(num_threads) = args.num_threads {
         println!("Number of threads: {}", num_threads);
+    } else {
+        println!("Number of threads: auto");
     }
-    println!("Slot chunk size: {}", args.slots_per_save);
+
+    if let Some(slots_per_save) = args.slots_per_save {
+        println!("Slot chunk size: {}", slots_per_save);
+    } else {
+        println!("Slot chunk size: auto");
+    }
+
     println!("Blobscan API endpoint: {}", env.blobscan_api_endpoint);
     println!("CL endpoint: {}", env.beacon_node_endpoint);
     println!("EL endpoint: {}", env.execution_node_endpoint);
-    println!("Sentry DSN: {}", sentry_dsn.unwrap_or_default());
+
+    if let Some(sentry_dsn) = env.sentry_dsn.clone() {
+        println!("Sentry DSN: {}", sentry_dsn);
+    }
+
     println!("\n");
 }
 
 pub async fn run(env: Environment) -> Result<()> {
     let args = Args::parse();
 
-    let synchronizer_config = args.num_threads.map(|num_threads| SynchronizerConfig {
-        num_threads,
-        slots_checkpoint: 1000,
-    });
+    let mut synchronizer_config_builder = SynchronizerConfigBuilder::new()?;
+
+    if let Some(num_threads) = args.num_threads {
+        synchronizer_config_builder.with_num_threads(num_threads);
+    }
+
+    if let Some(slots_checkpoint) = args.slots_per_save {
+        synchronizer_config_builder.with_slots_checkpoint(slots_checkpoint);
+    }
 
     print_banner(&args, &env);
 
@@ -73,7 +87,7 @@ pub async fn run(env: Environment) -> Result<()> {
         },
     };
 
-    let synchronizer = Synchronizer::try_new(context.clone(), synchronizer_config)?;
+    let synchronizer = Synchronizer::new(context.clone(), synchronizer_config_builder.build());
 
     loop {
         let beacon_head_result = match retry_notify(

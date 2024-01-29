@@ -1,4 +1,4 @@
-use std::{cmp::Ordering, thread, time::Duration};
+use std::{cmp::Ordering, time::Duration};
 
 use anyhow::anyhow;
 use backoff::future::retry_notify;
@@ -10,35 +10,22 @@ use crate::{
     context::Context, slot_processor::SlotProcessor, utils::exp_backoff::get_exp_backoff_config,
 };
 
-use self::error::{MultipleSlotsChunkErrors, SynchronizerError, SynchronizerThreadError};
+use self::{config::Config, error::{MultipleSlotsChunkErrors, SynchronizerError, SynchronizerThreadError}};
 
+pub mod config;
 mod error;
 
-pub struct Config {
-    pub num_threads: u32,
-    pub slots_checkpoint: u32,
-}
 pub struct Synchronizer {
     context: Context,
     config: Config,
 }
 
 impl Synchronizer {
-    pub fn try_new(context: Context, config: Option<Config>) -> Result<Self, SynchronizerError> {
-        Ok(Self {
+    pub fn new(context: Context, config: Config) -> Self {
+        Self {
             context,
-            config: match config {
-                Some(config) => config,
-                None => Config {
-                    num_threads: thread::available_parallelism()
-                        .map_err(|err| {
-                            anyhow!("Failed to fetch default synchronizer thread amount: {err}")
-                        })?
-                        .get() as u32,
-                    slots_checkpoint: 1000,
-                },
-            },
-        })
+            config
+        }
     }
 
     async fn _sync_slots(&self, from_slot: u32, to_slot: u32) -> Result<(), SynchronizerError> {
