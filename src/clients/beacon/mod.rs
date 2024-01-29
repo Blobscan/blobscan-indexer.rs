@@ -4,7 +4,7 @@ use reqwest::{Client, Url};
 
 use crate::{clients::common::ClientResult, json_get};
 
-use self::types::{Blob, BlobsResponse, BlockMessage as Block, BlockResponse};
+use self::types::{Blob, BlobsResponse, BlockId, BlockMessage as Block, BlockResponse};
 
 pub mod types;
 
@@ -33,11 +33,7 @@ impl BeaconClient {
         })
     }
 
-    pub async fn get_block(&self, slot: Option<u32>) -> ClientResult<Option<Block>> {
-        let slot = match slot {
-            Some(slot) => slot.to_string(),
-            None => String::from("head"),
-        };
+    pub async fn get_block(&self, slot: BlockId) -> ClientResult<Option<Block>> {
         let path = format!("v2/beacon/blocks/{slot}");
         let url = self.base_url.join(path.as_str())?;
 
@@ -47,7 +43,7 @@ impl BeaconClient {
         })
     }
 
-    pub async fn get_blobs(&self, slot: u32) -> ClientResult<Option<Vec<Blob>>> {
+    pub async fn get_blobs(&self, slot: BlockId) -> ClientResult<Option<Vec<Blob>>> {
         let path = format!("v1/beacon/blob_sidecars/{slot}");
         let url = self.base_url.join(path.as_str())?;
 

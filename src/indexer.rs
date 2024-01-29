@@ -5,6 +5,7 @@ use tracing::error;
 
 use crate::{
     args::Args,
+    clients::beacon::types::BlockId,
     context::{Config as ContextConfig, Context},
     env::Environment,
     synchronizer::{Synchronizer, SynchronizerBuilder},
@@ -63,7 +64,7 @@ impl Indexer {
         };
 
         loop {
-            let beacon_head_result = match beacon_client.get_block(None).await {
+            let beacon_head_result = match beacon_client.get_block(BlockId::Head).await {
                 Ok(res) => res,
                 Err(error) => {
                     error!(

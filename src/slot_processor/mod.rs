@@ -4,7 +4,10 @@ use ethers::prelude::*;
 use tracing::{debug, info};
 
 use crate::{
-    clients::blobscan::types::{Blob, Block, Transaction},
+    clients::{
+        beacon::types::BlockId,
+        blobscan::types::{Blob, Block, Transaction},
+    },
     context::Context,
 };
 
@@ -31,7 +34,7 @@ impl SlotProcessor {
         // Fetch execution block data from a given slot and perform some checks
 
         let beacon_block = match beacon_client
-            .get_block(Some(slot))
+            .get_block(BlockId::Slot(slot))
             .await
             .map_err(SlotProcessorError::ClientError)?
         {
@@ -91,7 +94,7 @@ impl SlotProcessor {
         // Fetch blobs and perform some checks
 
         let blobs = match beacon_client
-            .get_blobs(slot)
+            .get_blobs(BlockId::Slot(slot))
             .await
             .map_err(SlotProcessorError::ClientError)?
         {
