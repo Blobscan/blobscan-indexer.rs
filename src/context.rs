@@ -78,13 +78,13 @@ impl Context {
     }
 }
 
-impl From<Environment> for Config {
-    fn from(env: Environment) -> Self {
+impl From<&Environment> for Config {
+    fn from(env: &Environment) -> Self {
         Self {
-            blobscan_api_endpoint: env.blobscan_api_endpoint,
-            beacon_node_url: env.beacon_node_endpoint,
-            execution_node_endpoint: env.execution_node_endpoint,
-            secret_key: env.secret_key,
+            blobscan_api_endpoint: env.blobscan_api_endpoint.clone(),
+            beacon_node_url: env.beacon_node_endpoint.clone(),
+            execution_node_endpoint: env.execution_node_endpoint.clone(),
+            secret_key: env.secret_key.clone(),
         }
     }
 }

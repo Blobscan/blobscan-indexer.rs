@@ -1,5 +1,8 @@
 use anyhow::{anyhow, Result};
+use args::Args;
+use clap::Parser;
 use env::Environment;
+use indexer::Indexer;
 use utils::telemetry::{get_subscriber, init_subscriber};
 
 mod args;
@@ -10,6 +13,38 @@ mod indexer;
 mod slot_processor;
 mod synchronizer;
 mod utils;
+
+pub fn print_banner(args: &Args, env: &Environment) {
+    println!("____  _       _                         ");
+    println!("| __ )| | ___ | |__  ___  ___ __ _ _ __  ");
+    println!("|  _ \\| |/ _ \\| '_ \\/ __|/ __/ _` | '_ \\ ");
+    println!("| |_) | | (_) | |_) \\__ \\ (_| (_| | | | |");
+    println!("|____/|_|\\___/|_.__/|___/\\___\\__,_|_| |_|\n");
+    println!("Blobscan indexer (EIP-4844 blob indexer) - blobscan.com");
+    println!("=======================================================");
+
+    if let Some(num_threads) = args.num_threads {
+        println!("Number of threads: {}", num_threads);
+    } else {
+        println!("Number of threads: auto");
+    }
+
+    if let Some(slots_per_save) = args.slots_per_save {
+        println!("Slot chunk size: {}", slots_per_save);
+    } else {
+        println!("Slot chunk size: auto");
+    }
+
+    println!("Blobscan API endpoint: {}", env.blobscan_api_endpoint);
+    println!("CL endpoint: {}", env.beacon_node_endpoint);
+    println!("EL endpoint: {}", env.execution_node_endpoint);
+
+    if let Some(sentry_dsn) = env.sentry_dsn.clone() {
+        println!("Sentry DSN: {}", sentry_dsn);
+    }
+
+    println!("\n");
+}
 
 async fn run() -> Result<()> {
     dotenv::dotenv().ok();
@@ -33,7 +68,13 @@ async fn run() -> Result<()> {
     let subscriber = get_subscriber("blobscan_indexer".into(), "info".into(), std::io::stdout);
     init_subscriber(subscriber);
 
-    indexer::run(env).await
+    let args = Args::parse();
+
+    print_banner(&args, &env);
+
+    let indexer = Indexer::try_new(&env, &args)?;
+
+    indexer.run(args.from_slot).await
 }
 
 #[tokio::main]
