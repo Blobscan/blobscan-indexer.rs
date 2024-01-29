@@ -68,7 +68,7 @@ pub struct IndexRequest {
 }
 
 #[derive(Serialize, Debug)]
-pub struct ReorgBlockRequest {
+pub struct ReorgedSlotRequest {
     pub slot: u32,
     pub depth: u32,
 }

@@ -1,12 +1,13 @@
 use anyhow::Result;
-use futures::StreamExt;
+use futures::{future::join_all, StreamExt};
 use reqwest_eventsource::Event;
 use tokio::task::JoinHandle;
-use tracing::{debug, error};
+use tracing::{debug, error, Instrument};
 
 use crate::{
     clients::beacon::types::{ChainReorgResponse, Topic},
     context::Context,
+    slots_processor::slot_processor::SlotProcessor,
 };
 
 pub struct ChainReorgHandler {
@@ -54,6 +55,31 @@ impl ChainReorgHandler {
                         blobscan_client
                             .handle_reorg(new_head_slot, reorg_depth)
                             .await?;
+
+                        // reprocess reorganized slots
+                        let slot_processor = SlotProcessor::new(thread_context.clone());
+
+                        let mut futures = Vec::new();
+
+                        for slot in new_head_slot..new_head_slot + reorg_depth {
+                            let slot_span = tracing::trace_span!("slot_processor");
+
+                            futures.push(slot_processor.process_slot(slot).instrument(slot_span));
+                        }
+
+                        let results = join_all(futures).await;
+
+                        for result in results {
+                            if let Err(error) = result {
+                                error!(
+                                    target = "chain_reorg_handler",
+                                    ?error,
+                                    "Failed to process reorg slot"
+                                );
+
+                                return Err(error.into());
+                            }
+                        }
                     }
                     Err(e) => {
                         error!(

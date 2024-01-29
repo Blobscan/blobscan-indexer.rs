@@ -10,7 +10,7 @@ use self::{
 use crate::context::Context;
 
 mod error;
-mod slot_processor;
+pub mod slot_processor;
 
 pub struct SlotsProcessor {
     context: Context,
