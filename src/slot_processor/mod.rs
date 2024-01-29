@@ -9,7 +9,7 @@ use tracing::{debug, info, warn};
 use crate::{
     clients::blobscan::types::{Blob, Block, Transaction},
     context::Context,
-    utils::exp_backoff::get_exp_backoff_config,
+    utils::exp_backoff::build_exp_backoff_config,
 };
 
 use self::error::SlotProcessorError;
@@ -28,7 +28,7 @@ impl SlotProcessor {
     }
 
     pub async fn process_slot(&self, slot: u32) -> Result<(), SlotProcessorError> {
-        let backoff_config = get_exp_backoff_config();
+        let backoff_config = build_exp_backoff_config();
 
         retry_notify(
             backoff_config,

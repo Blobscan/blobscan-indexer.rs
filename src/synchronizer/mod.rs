@@ -7,7 +7,7 @@ use tokio::task::JoinHandle;
 use tracing::{debug, debug_span, error, info, warn, Instrument};
 
 use crate::{
-    context::Context, slot_processor::SlotProcessor, utils::exp_backoff::get_exp_backoff_config,
+    context::Context, slot_processor::SlotProcessor, utils::exp_backoff::build_exp_backoff_config,
 };
 
 use self::{config::Config, error::{MultipleSlotsChunkErrors, SynchronizerError, SynchronizerThreadError}};
@@ -179,7 +179,7 @@ impl Synchronizer {
                         .await?;
         
                     if let Err(error) = retry_notify(
-                        get_exp_backoff_config(),
+                        build_exp_backoff_config(),
                         || async move {
                             blobscan_client
                                 .update_slot(final_chunk_slot - 1)

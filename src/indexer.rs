@@ -10,7 +10,7 @@ use crate::{
     context::{Config as ContextConfig, Context},
     env::Environment,
     synchronizer::{config::ConfigBuilder as SynchronizerConfigBuilder, Synchronizer},
-    utils::exp_backoff::get_exp_backoff_config,
+    utils::exp_backoff::build_exp_backoff_config,
 };
 
 pub fn print_banner(args: &Args, env: &Environment) {
@@ -91,7 +91,7 @@ pub async fn run(env: Environment) -> Result<()> {
 
     loop {
         let beacon_head_result = match retry_notify(
-            get_exp_backoff_config(),
+            build_exp_backoff_config(),
             || async move {
                 beacon_client
                     .get_block(None)
