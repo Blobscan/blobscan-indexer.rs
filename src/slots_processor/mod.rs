@@ -11,18 +11,18 @@ use crate::{
     context::Context,
 };
 
-use self::error::{SlotProcessorError, SlotsProcessorError};
+use self::error::{SlotProcessingError, SlotsProcessorError};
 use self::helpers::{create_tx_hash_versioned_hashes_mapping, create_versioned_hash_blob_mapping};
 
 pub mod error;
 mod helpers;
 
-pub struct SlotProcessor {
+pub struct SlotsProcessor {
     context: Context,
 }
 
-impl SlotProcessor {
-    pub fn new(context: Context) -> SlotProcessor {
+impl SlotsProcessor {
+    pub fn new(context: Context) -> SlotsProcessor {
         Self { context }
     }
 
@@ -32,10 +32,10 @@ impl SlotProcessor {
         to_slot: u32,
     ) -> Result<(), SlotsProcessorError> {
         for current_slot in from_slot..to_slot {
-            let result = self.process_slot(current_slot).await;
+            let result = self._process_beacon_block(current_slot).await;
 
             if let Err(error) = result {
-                return Err(SlotsProcessorError::FailedSlotsRange {
+                return Err(SlotsProcessorError::FailedSlotsProcessing {
                     initial_slot: from_slot,
                     final_slot: to_slot,
                     failed_slot: current_slot,
@@ -47,7 +47,7 @@ impl SlotProcessor {
         Ok(())
     }
 
-    pub async fn process_slot(&self, slot: u32) -> Result<(), SlotProcessorError> {
+    async fn _process_beacon_block(&self, slot: u32) -> Result<(), SlotProcessingError> {
         let beacon_client = self.context.beacon_client();
         let blobscan_client = self.context.blobscan_client();
         let provider = self.context.provider();
@@ -57,12 +57,12 @@ impl SlotProcessor {
         let beacon_block = match beacon_client
             .get_block(&BlockId::Slot(slot))
             .await
-            .map_err(SlotProcessorError::ClientError)?
+            .map_err(SlotProcessingError::ClientError)?
         {
             Some(block) => block,
             None => {
                 debug!(
-                    target = "slot_processor",
+                    target = "slots_processor",
                     slot, "Skipping as there is no beacon block"
                 );
 
@@ -74,7 +74,7 @@ impl SlotProcessor {
             Some(payload) => payload,
             None => {
                 debug!(
-                    target = "slot_processor",
+                    target = "slots_processor",
                     slot, "Skipping as beacon block doesn't contain execution payload"
                 );
 
@@ -89,7 +89,7 @@ impl SlotProcessor {
 
         if !has_kzg_blob_commitments {
             debug!(
-                target = "slot_processor",
+                target = "slots_processor",
                 slot, "Skipping as beacon block doesn't contain blob kzg commitments"
             );
 
@@ -117,12 +117,12 @@ impl SlotProcessor {
         let blobs = match beacon_client
             .get_blobs(&BlockId::Slot(slot))
             .await
-            .map_err(SlotProcessorError::ClientError)?
+            .map_err(SlotProcessingError::ClientError)?
         {
             Some(blobs) => {
                 if blobs.is_empty() {
                     debug!(
-                        target = "slot_processor",
+                        target = "slots_processor",
                         slot, "Skipping as blobs sidecar is empty"
                     );
 
@@ -133,7 +133,7 @@ impl SlotProcessor {
             }
             None => {
                 debug!(
-                    target = "slot_processor",
+                    target = "slots_processor",
                     slot, "Skipping as there is no blobs sidecar"
                 );
 
@@ -175,10 +175,10 @@ impl SlotProcessor {
         blobscan_client
             .index(block_entity, transactions_entities, blob_entities)
             .await
-            .map_err(SlotProcessorError::ClientError)?;
+            .map_err(SlotProcessingError::ClientError)?;
 
         info!(
-            target = "slot_processor",
+            target = "slots_processor",
             slot,
             block = execution_block_hash.to_string(),
             transactions = format!("{:?}", tx_hashes),

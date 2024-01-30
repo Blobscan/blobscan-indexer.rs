@@ -7,10 +7,10 @@ use tracing::{debug, debug_span, error, info, Instrument};
 
 use crate::{
     context::Context,
-    slot_processor::{error::SlotsProcessorError, SlotProcessor},
+    slots_processor::{error::SlotsProcessorError, SlotsProcessor},
 };
 
-use self::error::{MultipleSlotsChunkErrors, SynchronizerError};
+use self::error::{SlotsChunksErrors, SynchronizerError};
 
 mod error;
 
@@ -124,7 +124,7 @@ impl Synchronizer {
                 slots_per_thread
             };
 
-            let slot_processor = SlotProcessor::new(self.context.clone());
+            let slots_processor = SlotsProcessor::new(self.context.clone());
             let thread_initial_slot = from_slot + i * slots_per_thread;
             let thread_final_slot = thread_initial_slot + slots_in_current_thread;
 
@@ -136,7 +136,7 @@ impl Synchronizer {
 
             let handle = tokio::spawn(
                 async move {
-                    slot_processor
+                    slots_processor
                         .process_slots(thread_initial_slot, thread_final_slot)
                         .await
                 }
@@ -176,7 +176,7 @@ impl Synchronizer {
             Err(SynchronizerError::FailedParallelSlotsProcessing {
                 initial_slot: from_slot,
                 final_slot: to_slot,
-                chunk_errors: MultipleSlotsChunkErrors(errors),
+                chunk_errors: SlotsChunksErrors(errors),
             })
         }
     }
@@ -211,9 +211,9 @@ impl Synchronizer {
                     .instrument(sync_slots_chunk_span)
                     .await?;
             } else {
-                let slot_processor = SlotProcessor::new(self.context.clone());
+                let slots_processor = SlotsProcessor::new(self.context.clone());
 
-                slot_processor
+                slots_processor
                     .process_slots(initial_chunk_slot, final_chunk_slot)
                     .instrument(sync_slots_chunk_span)
                     .await?;

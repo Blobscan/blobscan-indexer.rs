@@ -10,7 +10,7 @@ mod clients;
 mod context;
 mod env;
 mod indexer;
-mod slot_processor;
+mod slots_processor;
 mod synchronizer;
 mod utils;
 
