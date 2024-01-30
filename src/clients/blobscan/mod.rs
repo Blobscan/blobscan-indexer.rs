@@ -5,7 +5,9 @@ use crate::{clients::common::ClientResult, json_get, json_put};
 
 use self::{
     jwt_manager::{Config as JWTManagerConfig, JWTManager},
-    types::{Blob, Block, IndexRequest, SlotRequest, SlotResponse, Transaction},
+    types::{
+        Blob, Block, IndexRequest, ReorgedSlotRequest, SlotRequest, SlotResponse, Transaction,
+    },
 };
 
 mod jwt_manager;
@@ -60,10 +62,18 @@ impl BlobscanClient {
         json_put!(&self.client, url, token, &req).map(|_: Option<()>| ())
     }
 
+    pub async fn handle_reorg(&self, slot: u32, depth: u32) -> ClientResult<()> {
+        let url = self.base_url.join("reorged-slot")?;
+        let token = self.jwt_manager.get_token()?;
+        let req = ReorgedSlotRequest { slot, depth };
+
+        json_put!(&self.client, url, token, &req).map(|_: Option<()>| ())
+    }
+
     pub async fn update_slot(&self, slot: u32) -> ClientResult<()> {
+        let url = self.base_url.join("slot")?;
         let token = self.jwt_manager.get_token()?;
         let req = SlotRequest { slot };
-        let url = self.base_url.join("slot")?;
 
         json_put!(&self.client, url, token, &req).map(|_: Option<()>| ())
     }
