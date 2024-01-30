@@ -11,7 +11,7 @@ use crate::{
     context::Context,
 };
 
-use self::error::SlotProcessorError;
+use self::error::{SlotProcessorError, SlotsProcessorError};
 use self::helpers::{create_tx_hash_versioned_hashes_mapping, create_versioned_hash_blob_mapping};
 
 pub mod error;
@@ -26,6 +26,27 @@ impl SlotProcessor {
         Self { context }
     }
 
+    pub async fn process_slots(
+        &self,
+        from_slot: u32,
+        to_slot: u32,
+    ) -> Result<(), SlotsProcessorError> {
+        for current_slot in from_slot..to_slot {
+            let result = self.process_slot(current_slot).await;
+
+            if let Err(error) = result {
+                return Err(SlotsProcessorError::FailedSlotsRange {
+                    initial_slot: from_slot,
+                    final_slot: to_slot,
+                    failed_slot: current_slot,
+                    error,
+                });
+            }
+        }
+
+        Ok(())
+    }
+
     pub async fn process_slot(&self, slot: u32) -> Result<(), SlotProcessorError> {
         let beacon_client = self.context.beacon_client();
         let blobscan_client = self.context.blobscan_client();
@@ -34,7 +55,7 @@ impl SlotProcessor {
         // Fetch execution block data from a given slot and perform some checks
 
         let beacon_block = match beacon_client
-            .get_block(BlockId::Slot(slot))
+            .get_block(&BlockId::Slot(slot))
             .await
             .map_err(SlotProcessorError::ClientError)?
         {
@@ -49,7 +70,7 @@ impl SlotProcessor {
             }
         };
 
-        let execution_payload = match beacon_block.body.execution_payload {
+        let execution_payload = match beacon_block.message.body.execution_payload {
             Some(payload) => payload,
             None => {
                 debug!(
@@ -61,7 +82,7 @@ impl SlotProcessor {
             }
         };
 
-        let has_kzg_blob_commitments = match beacon_block.body.blob_kzg_commitments {
+        let has_kzg_blob_commitments = match beacon_block.message.body.blob_kzg_commitments {
             Some(commitments) => !commitments.is_empty(),
             None => false,
         };
@@ -94,7 +115,7 @@ impl SlotProcessor {
         // Fetch blobs and perform some checks
 
         let blobs = match beacon_client
-            .get_blobs(BlockId::Slot(slot))
+            .get_blobs(&BlockId::Slot(slot))
             .await
             .map_err(SlotProcessorError::ClientError)?
         {

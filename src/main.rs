@@ -72,7 +72,7 @@ async fn run() -> Result<()> {
 
     print_banner(&args, &env);
 
-    let indexer = Indexer::try_new(&env, &args)?;
+    let mut indexer = Indexer::try_new(&env, &args)?;
 
     indexer.run(args.from_slot).await
 }
