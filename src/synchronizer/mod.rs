@@ -63,22 +63,22 @@ pub struct Synchronizer {
 }
 
 impl Synchronizer {
-    pub async fn run(&self, from_slot: u32, to_slot: u32) -> Result<(), SynchronizerError> {
-        match from_slot.cmp(&to_slot) {
+    pub async fn run(&self, initial_slot: u32, final_slot: u32) -> Result<(), SynchronizerError> {
+        match initial_slot.cmp(&final_slot) {
             Ordering::Equal => {
                 return Ok(());
             }
             Ordering::Less => {
-                self._sync_slots_by_checkpoints(from_slot, to_slot).await?;
+                self._sync_slots_by_checkpoints(initial_slot, final_slot)
+                    .await?;
             }
             Ordering::Greater => {
-                let err =
-                    anyhow!("Starting slot ({from_slot}) is greater than final slot ({to_slot})");
+                let err = anyhow!("Starting slot is greater than final slot");
 
                 error!(
                     target = "synchronizer",
-                    current_slot = from_slot,
-                    latest_slot = to_slot,
+                    initial_slot,
+                    final_slot,
                     "{}",
                     err.to_string()
                 );
@@ -183,16 +183,17 @@ impl Synchronizer {
 
     async fn _sync_slots_by_checkpoints(
         &self,
-        from_slot: u32,
-        to_slot: u32,
+        initial_slot: u32,
+        final_slot: u32,
     ) -> Result<(), SynchronizerError> {
         let blobscan_client = self.context.blobscan_client();
-        let mut current_slot = from_slot;
-        let mut unprocessed_slots = to_slot - current_slot;
+
+        let mut current_slot = initial_slot;
+        let mut unprocessed_slots = final_slot - current_slot;
 
         info!(
             target = "synchronizer",
-            to_slot, from_slot, "Syncing {unprocessed_slots} slots…"
+            initial_slot, final_slot, "Syncing {unprocessed_slots} slots…"
         );
 
         while unprocessed_slots > 0 {

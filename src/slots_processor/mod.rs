@@ -5,7 +5,7 @@ use tracing::{debug, info};
 
 use crate::{
     clients::{
-        beacon::types::BlockId,
+        beacon::types::{Block as BeaconBlock, BlockId},
         blobscan::types::{Blob, Block, Transaction},
     },
     context::Context,
@@ -28,49 +28,89 @@ impl SlotsProcessor {
 
     pub async fn process_slots(
         &self,
-        from_slot: u32,
-        to_slot: u32,
+        initial_slot: u32,
+        final_slot: u32,
     ) -> Result<(), SlotsProcessorError> {
-        for current_slot in from_slot..to_slot {
-            let result = self._process_beacon_block(current_slot).await;
+        let beacon_client = self.context.beacon_client();
+        let mut last_block_root: Option<H256> = None;
+
+        for current_slot in initial_slot..final_slot {
+            let beacon_block_header = match beacon_client
+                .get_block_header(&BlockId::Slot(current_slot))
+                .await
+                .map_err(|error| SlotsProcessorError::FailedSlotsProcessing {
+                    initial_slot,
+                    final_slot,
+                    failed_slot: current_slot,
+                    error: error.into(),
+                })? {
+                Some(block_header) => block_header,
+                None => {
+                    debug!(
+                        target = "slots_processor",
+                        slot = current_slot,
+                        "Skipping as there is no beacon block header"
+                    );
+
+                    continue;
+                }
+            };
+
+            let result = self.process_slot(current_slot, last_block_root).await;
 
             if let Err(error) = result {
                 return Err(SlotsProcessorError::FailedSlotsProcessing {
-                    initial_slot: from_slot,
-                    final_slot: to_slot,
+                    initial_slot,
+                    final_slot,
                     failed_slot: current_slot,
                     error,
                 });
             }
+
+            last_block_root = Some(beacon_block_header.root);
         }
 
         Ok(())
     }
 
-    async fn _process_beacon_block(&self, slot: u32) -> Result<(), SlotProcessingError> {
+    pub async fn process_slot(
+        &self,
+        slot: u32,
+        last_block_root: Option<H256>,
+    ) -> Result<(), SlotProcessingError> {
         let beacon_client = self.context.beacon_client();
         let blobscan_client = self.context.blobscan_client();
-        let provider = self.context.provider();
-
-        // Fetch execution block data from a given slot and perform some checks
-
-        let beacon_block = match beacon_client
-            .get_block(&BlockId::Slot(slot))
-            .await
-            .map_err(SlotProcessingError::ClientError)?
-        {
+        let beacon_block = match beacon_client.get_block(&BlockId::Slot(slot)).await? {
             Some(block) => block,
             None => {
                 debug!(
                     target = "slots_processor",
-                    slot, "Skipping as there is no beacon block"
+                    slot = slot,
+                    "Skipping as there is no beacon block"
                 );
 
                 return Ok(());
             }
         };
 
-        let execution_payload = match beacon_block.message.body.execution_payload {
+        if let Some(last_block_root) = last_block_root {
+            if beacon_block.message.parent_root != last_block_root {
+                info!(target = "slots_processor", slot, "Block reorg detected");
+
+                blobscan_client.handle_reorged_slot(slot).await?;
+            }
+        }
+
+        self.process_block(beacon_block).await
+    }
+
+    async fn process_block(&self, block: BeaconBlock) -> Result<(), SlotProcessingError> {
+        let beacon_client = self.context.beacon_client();
+        let blobscan_client = self.context.blobscan_client();
+        let provider = self.context.provider();
+        let slot = block.message.slot;
+
+        let execution_payload = match block.message.body.execution_payload {
             Some(payload) => payload,
             None => {
                 debug!(
@@ -82,7 +122,7 @@ impl SlotsProcessor {
             }
         };
 
-        let has_kzg_blob_commitments = match beacon_block.message.body.blob_kzg_commitments {
+        let has_kzg_blob_commitments = match block.message.body.blob_kzg_commitments {
             Some(commitments) => !commitments.is_empty(),
             None => false,
         };

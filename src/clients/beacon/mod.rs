@@ -3,9 +3,12 @@ use backoff::ExponentialBackoff;
 use reqwest::{Client, Url};
 use reqwest_eventsource::EventSource;
 
-use crate::{clients::common::ClientResult, json_get};
+use crate::{
+    clients::{beacon::types::BlockHeaderResponse, common::ClientResult},
+    json_get,
+};
 
-use self::types::{Blob, BlobsResponse, Block, BlockId, BlockResponse, Topic};
+use self::types::{Blob, BlobsResponse, Block, BlockHeader, BlockId, BlockResponse, Topic};
 
 pub mod types;
 
@@ -39,6 +42,22 @@ impl BeaconClient {
         let url = self.base_url.join(path.as_str())?;
 
         json_get!(&self.client, url, BlockResponse, self.exp_backoff.clone()).map(|res| match res {
+            Some(r) => Some(r.data),
+            None => None,
+        })
+    }
+
+    pub async fn get_block_header(&self, slot: &BlockId) -> ClientResult<Option<BlockHeader>> {
+        let path = format!("v2/beacon/headers/{slot}");
+        let url = self.base_url.join(path.as_str())?;
+
+        json_get!(
+            &self.client,
+            url,
+            BlockHeaderResponse,
+            self.exp_backoff.clone()
+        )
+        .map(|res| match res {
             Some(r) => Some(r.data),
             None => None,
         })

@@ -70,7 +70,6 @@ pub struct IndexRequest {
 #[derive(Serialize, Debug)]
 pub struct ReorgedSlotRequest {
     pub slot: u32,
-    pub depth: u32,
 }
 
 impl fmt::Debug for Blob {

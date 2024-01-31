@@ -28,8 +28,10 @@ pub struct BlockBody {
 }
 #[derive(Deserialize, Debug)]
 pub struct BlockMessage {
-    pub slot: String,
+    #[serde(deserialize_with = "deserialize_slot")]
+    pub slot: u32,
     pub body: BlockBody,
+    pub parent_root: H256,
 }
 
 #[derive(Deserialize, Debug)]
@@ -52,6 +54,39 @@ pub struct Blob {
 #[derive(Deserialize, Debug)]
 pub struct BlobsResponse {
     pub data: Vec<Blob>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct BlockHeaderResponse {
+    pub data: BlockHeader,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct BlockHeader {
+    pub root: H256,
+    pub message: BlockHeaderMessage,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct BlockHeaderMessage {
+    #[serde(deserialize_with = "deserialize_slot")]
+    pub slot: u32,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct HeadBlockEventData {
+    #[serde(deserialize_with = "deserialize_slot")]
+    pub slot: u32,
+    pub block: H256,
+}
+
+fn deserialize_slot<'de, D>(deserializer: D) -> Result<u32, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let slot = String::deserialize(deserializer)?;
+
+    slot.parse::<u32>().map_err(serde::de::Error::custom)
 }
 
 impl fmt::Display for BlockId {
