@@ -48,7 +48,7 @@ impl BeaconClient {
     }
 
     pub async fn get_block_header(&self, slot: &BlockId) -> ClientResult<Option<BlockHeader>> {
-        let path = format!("v2/beacon/headers/{slot}");
+        let path = format!("v1/beacon/headers/{slot}");
         let url = self.base_url.join(path.as_str())?;
 
         json_get!(
