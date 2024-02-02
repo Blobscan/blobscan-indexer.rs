@@ -1,9 +1,9 @@
-use std::fmt;
+use std::{fmt, str::FromStr};
 
 use ethers::types::{Bytes, H256};
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, Clone)]
 pub enum BlockId {
     Head,
     Finalized,
@@ -99,6 +99,23 @@ impl fmt::Display for BlockId {
             BlockId::Head => write!(f, "head"),
             BlockId::Finalized => write!(f, "finalized"),
             BlockId::Slot(slot) => write!(f, "{}", slot),
+        }
+    }
+}
+
+impl FromStr for BlockId {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "head" => Ok(BlockId::Head),
+            "finalized" => Ok(BlockId::Finalized),
+            _ => match s.parse::<u32>() {
+                Ok(num) => Ok(BlockId::Slot(num)),
+                Err(_) => {
+                    Err("Invalid block ID. Expected 'head', 'finalized' or a number.".to_string())
+                }
+            },
         }
     }
 }

@@ -45,12 +45,12 @@ impl Indexer {
         })
     }
 
-    pub async fn run(&mut self, start_slot: Option<u32>) -> AnyhowResult<()> {
+    pub async fn run(&mut self, start_block_id: Option<BlockId>) -> AnyhowResult<()> {
         let beacon_client = self.context.beacon_client();
         let blobscan_client = self.context.blobscan_client();
         let mut event_source = beacon_client.subscribe_to_events(vec![Topic::Head])?;
 
-        let current_slot = match start_slot {
+        let current_block_id = match start_block_id {
             Some(start_slot) => start_slot,
             None => match blobscan_client.get_slot().await {
                 Err(error) => {
@@ -58,16 +58,16 @@ impl Indexer {
 
                     return Err(error.into());
                 }
-                Ok(res) => match res {
+                Ok(res) => BlockId::Slot(match res {
                     Some(latest_slot) => latest_slot + 1,
                     None => 0,
-                },
+                }),
             },
         };
 
         let finalized_block_header = self
             .synchronizer
-            .run(&BlockId::Slot(current_slot), &BlockId::Finalized)
+            .run(&current_block_id, &BlockId::Finalized)
             .await?;
 
         // We disable parallel processing for better handling of possible reorgs
