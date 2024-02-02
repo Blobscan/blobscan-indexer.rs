@@ -37,8 +37,8 @@ impl BeaconClient {
         })
     }
 
-    pub async fn get_block(&self, slot: &BlockId) -> ClientResult<Option<Block>> {
-        let path = format!("v2/beacon/blocks/{slot}");
+    pub async fn get_block(&self, block_id: &BlockId) -> ClientResult<Option<Block>> {
+        let path = format!("v2/beacon/blocks/{block_id}");
         let url = self.base_url.join(path.as_str())?;
 
         json_get!(&self.client, url, BlockResponse, self.exp_backoff.clone()).map(|res| match res {
@@ -47,8 +47,8 @@ impl BeaconClient {
         })
     }
 
-    pub async fn get_block_header(&self, slot: &BlockId) -> ClientResult<Option<BlockHeader>> {
-        let path = format!("v1/beacon/headers/{slot}");
+    pub async fn get_block_header(&self, block_id: &BlockId) -> ClientResult<Option<BlockHeader>> {
+        let path = format!("v1/beacon/headers/{block_id}");
         let url = self.base_url.join(path.as_str())?;
 
         json_get!(
@@ -63,8 +63,8 @@ impl BeaconClient {
         })
     }
 
-    pub async fn get_blobs(&self, slot: &BlockId) -> ClientResult<Option<Vec<Blob>>> {
-        let path = format!("v1/beacon/blob_sidecars/{slot}");
+    pub async fn get_blobs(&self, block_id: &BlockId) -> ClientResult<Option<Vec<Blob>>> {
+        let path = format!("v1/beacon/blob_sidecars/{block_id}");
         let url = self.base_url.join(path.as_str())?;
 
         json_get!(&self.client, url, BlobsResponse, self.exp_backoff.clone()).map(|res| match res {
