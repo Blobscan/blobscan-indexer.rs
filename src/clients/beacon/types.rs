@@ -64,6 +64,10 @@ pub struct BlockHeaderResponse {
 #[derive(Deserialize, Debug)]
 pub struct BlockHeader {
     pub root: H256,
+    pub header: InnerBlockHeader,
+}
+#[derive(Deserialize, Debug)]
+pub struct InnerBlockHeader {
     pub message: BlockHeaderMessage,
 }
 

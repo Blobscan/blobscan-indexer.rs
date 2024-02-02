@@ -5,9 +5,7 @@ use tracing::{debug, error};
 
 use crate::{
     args::Args,
-    clients::beacon::types::{
-        BlockHeader as BeaconBlockHeader, BlockId, HeadBlockEventData, Topic,
-    },
+    clients::beacon::types::{BlockId, HeadBlockEventData, Topic},
     context::{Config as ContextConfig, Context},
     env::Environment,
     slots_processor::SlotsProcessor,
@@ -67,17 +65,23 @@ impl Indexer {
             },
         };
 
-        let last_indexed_block_header = self
-            ._index_to_target_slot(current_slot, BlockId::Finalized)
+        let finalized_block_header = self
+            .synchronizer
+            .run(&BlockId::Slot(current_slot), &BlockId::Finalized)
             .await?;
 
         // We disable parallel processing for better handling of possible reorgs
         self.synchronizer.enable_parallel_processing(false);
 
-        let last_indexed_block_header = self
-            ._index_to_target_slot(last_indexed_block_header.message.slot, BlockId::Head)
+        let head_block_header = self
+            .synchronizer
+            .run(
+                &BlockId::Slot(finalized_block_header.header.message.slot),
+                &BlockId::Head,
+            )
             .await?;
-        let mut last_indexed_block_root = last_indexed_block_header.root;
+
+        let mut last_indexed_block_root = head_block_header.root;
         let slots_processor = SlotsProcessor::new(self.context.clone());
 
         while let Some(event) = event_source.next().await {
@@ -89,10 +93,7 @@ impl Indexer {
                     slots_processor
                         .process_slot(head_block_data.slot, Some(last_indexed_block_root))
                         .await?;
-                    self.context
-                        .blobscan_client()
-                        .update_slot(head_block_data.slot)
-                        .await?;
+                    blobscan_client.update_slot(head_block_data.slot).await?;
 
                     last_indexed_block_root = head_block_data.block;
                 }
@@ -111,42 +112,5 @@ impl Indexer {
         }
 
         Ok(())
-    }
-
-    async fn _index_to_target_slot(
-        &self,
-        initial_slot: u32,
-        target_slot: BlockId,
-    ) -> AnyhowResult<BeaconBlockHeader> {
-        let beacon_client = self.context.beacon_client();
-        let mut current_slot = initial_slot;
-
-        loop {
-            let target_block_header_result =
-                match beacon_client.get_block_header(&target_slot).await {
-                    Ok(res) => res,
-                    Err(error) => {
-                        error!(
-                            target = "indexer",
-                            ?error,
-                            "Failed to fetch beacon target block"
-                        );
-
-                        return Err(error.into());
-                    }
-                };
-
-            if let Some(target_block_header) = target_block_header_result {
-                let target_slot = target_block_header.message.slot;
-
-                if current_slot == target_slot {
-                    return Ok(target_block_header);
-                }
-
-                self.synchronizer.run(current_slot, target_slot).await?;
-
-                current_slot = target_slot;
-            }
-        }
     }
 }

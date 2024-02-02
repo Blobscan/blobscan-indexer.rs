@@ -6,6 +6,7 @@ use tokio::task::JoinHandle;
 use tracing::{debug, debug_span, error, info, Instrument};
 
 use crate::{
+    clients::beacon::types::{BlockHeader, BlockId},
     context::Context,
     slots_processor::{error::SlotsProcessorError, SlotsProcessor},
 };
@@ -63,31 +64,67 @@ pub struct Synchronizer {
 }
 
 impl Synchronizer {
-    pub async fn run(&self, initial_slot: u32, final_slot: u32) -> Result<(), SynchronizerError> {
-        match initial_slot.cmp(&final_slot) {
-            Ordering::Equal => {
-                return Ok(());
+    pub async fn run(
+        &self,
+        initial_block_id: &BlockId,
+        final_block_id: &BlockId,
+    ) -> Result<BlockHeader, SynchronizerError> {
+        let initial_block_slot = match initial_block_id {
+            BlockId::Slot(slot) => *slot,
+            _ => {
+                self._fetch_block_header(initial_block_id)
+                    .await?
+                    .header
+                    .message
+                    .slot
             }
-            Ordering::Less => {
-                self._sync_slots_by_checkpoints(initial_slot, final_slot)
-                    .await?;
+        };
+        let mut final_block_header = self._fetch_block_header(final_block_id).await?;
+        let final_block_slot = final_block_header.header.message.slot;
+
+        loop {
+            match initial_block_slot.cmp(&final_block_slot) {
+                Ordering::Equal => {
+                    return Ok(final_block_header);
+                }
+                Ordering::Less => {
+                    self._sync_slots_by_checkpoints(initial_block_slot, final_block_slot)
+                        .await?;
+                }
+                Ordering::Greater => {
+                    let err = anyhow!("Initial block slot is greater than final one");
+
+                    error!(
+                        target = "synchronizer",
+                        initial_block_slot,
+                        final_block_slot,
+                        "{}",
+                        err.to_string()
+                    );
+
+                    return Err(err.into());
+                }
             }
-            Ordering::Greater => {
-                let err = anyhow!("Starting slot is greater than final slot");
 
-                error!(
-                    target = "synchronizer",
-                    initial_slot,
-                    final_slot,
-                    "{}",
-                    err.to_string()
-                );
+            /*
+             * If provided final block ID is a slot, we can stop syncing once we reach it. Otherwise,
+             * we need to keep fetching the latest block header to check if the final block slot has been
+             * reached.
+             */
+            match final_block_id {
+                BlockId::Slot(_) => return Ok(final_block_header),
+                _ => {
+                    let latest_final_block_header =
+                        self._fetch_block_header(final_block_id).await?;
 
-                return Err(err.into());
+                    if latest_final_block_header.header.message.slot == final_block_slot {
+                        return Ok(final_block_header);
+                    }
+
+                    final_block_header = latest_final_block_header;
+                }
             }
         }
-
-        Ok(())
     }
 
     pub fn enable_parallel_processing(&mut self, enable_parallel_processing: bool) -> &mut Self {
@@ -242,5 +279,23 @@ impl Synchronizer {
         }
 
         Ok(())
+    }
+
+    async fn _fetch_block_header(
+        &self,
+        block_id: &BlockId,
+    ) -> Result<BlockHeader, SynchronizerError> {
+        let beacon_client = self.context.beacon_client();
+
+        match beacon_client.get_block_header(block_id).await? {
+            Some(block_header) => Ok(block_header),
+            None => {
+                let err = anyhow!("Block header not found for block ID {}", block_id);
+
+                error!(target = "synchronizer", "{}", err.to_string());
+
+                Err(err.into())
+            }
+        }
     }
 }
