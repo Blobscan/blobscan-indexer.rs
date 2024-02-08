@@ -5,7 +5,10 @@ use tracing::{debug, error};
 
 use crate::{
     args::Args,
-    clients::beacon::types::{BlockId, HeadBlockEventData, Topic},
+    clients::{
+        beacon::types::{BlockId, HeadBlockEventData, Topic},
+        blobscan::types::BlockchainSyncState,
+    },
     context::{Config as ContextConfig, Context},
     env::Environment,
     slots_processor::SlotsProcessor,
@@ -50,39 +53,39 @@ impl Indexer {
         let blobscan_client = self.context.blobscan_client();
         let mut event_source = beacon_client.subscribe_to_events(vec![Topic::Head])?;
 
-        let current_block_id = match start_block_id {
-            Some(start_slot) => start_slot,
-            None => match blobscan_client.get_slot().await {
-                Err(error) => {
-                    error!(target = "indexer", ?error, "Failed to fetch latest slot");
+        let sync_state = match blobscan_client.get_synced_state().await {
+            Ok(state) => state,
+            Err(error) => {
+                error!(target = "indexer", ?error, "Failed to fetch sync state");
 
-                    return Err(error.into());
-                }
-                Ok(res) => BlockId::Slot(match res {
-                    Some(latest_slot) => latest_slot + 1,
-                    None => 0,
-                }),
-            },
+                return Err(error.into());
+            }
         };
 
-        let finalized_block_header = self
-            .synchronizer
-            .run(&current_block_id, &BlockId::Finalized)
+        let current_lower_block_id = match &sync_state {
+            Some(state) => match state.last_lower_synced_slot {
+                Some(slot) => BlockId::Slot(slot - 1),
+                None => BlockId::Head,
+            },
+            None => BlockId::Head,
+        };
+        let current_upper_block_id = match &sync_state {
+            Some(state) => match state.last_upper_synced_slot {
+                Some(slot) => BlockId::Slot(slot + 1),
+                None => BlockId::Head,
+            },
+            None => BlockId::Head,
+        };
+
+        self.synchronizer
+            .run(&current_lower_block_id, &BlockId::Slot(0))
             .await?;
 
-        // We disable parallel processing for better handling of possible reorgs
-        self.synchronizer.enable_parallel_processing(false);
-
-        let head_block_header = self
-            .synchronizer
-            .run(
-                &BlockId::Slot(finalized_block_header.header.message.slot),
-                &BlockId::Head,
-            )
+        self.synchronizer
+            .run(&current_upper_block_id, &BlockId::Head)
             .await?;
 
-        let mut last_indexed_block_root = head_block_header.root;
-        let slots_processor = SlotsProcessor::new(self.context.clone());
+        let mut slots_processor = SlotsProcessor::new(self.context.clone());
 
         while let Some(event) = event_source.next().await {
             match event {
@@ -91,11 +94,14 @@ impl Indexer {
                     let head_block_data = serde_json::from_str::<HeadBlockEventData>(&event.data)?;
 
                     slots_processor
-                        .process_slot(head_block_data.slot, Some(last_indexed_block_root))
+                        .process_slot(head_block_data.slot, Some(true))
                         .await?;
-                    blobscan_client.update_slot(head_block_data.slot).await?;
-
-                    last_indexed_block_root = head_block_data.block;
+                    blobscan_client
+                        .update_sync_state(BlockchainSyncState {
+                            last_lower_synced_slot: None,
+                            last_upper_synced_slot: Some(head_block_data.slot),
+                        })
+                        .await?;
                 }
                 Err(error) => {
                     error!(

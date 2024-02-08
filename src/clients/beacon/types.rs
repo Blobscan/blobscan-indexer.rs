@@ -3,6 +3,8 @@ use std::{fmt, str::FromStr};
 use ethers::types::{Bytes, H256};
 use serde::{Deserialize, Serialize};
 
+use crate::slots_processor::BlockData;
+
 #[derive(Serialize, Debug, Clone)]
 pub enum BlockId {
     Head,
@@ -73,6 +75,7 @@ pub struct InnerBlockHeader {
 
 #[derive(Deserialize, Debug)]
 pub struct BlockHeaderMessage {
+    pub parent_root: H256,
     #[serde(deserialize_with = "deserialize_slot")]
     pub slot: u32,
 }
@@ -125,6 +128,15 @@ impl From<&Topic> for String {
         match value {
             Topic::Head => String::from("head"),
             Topic::FinalizedCheckpoint => String::from("finalized_checkpoint"),
+        }
+    }
+}
+
+impl From<HeadBlockEventData> for BlockData {
+    fn from(event_data: HeadBlockEventData) -> Self {
+        Self {
+            root: event_data.block,
+            slot: event_data.slot,
         }
     }
 }

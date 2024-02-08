@@ -1,4 +1,4 @@
-use std::{cmp::Ordering, thread};
+use std::thread;
 
 use anyhow::anyhow;
 use futures::future::join_all;
@@ -6,19 +6,26 @@ use tokio::task::JoinHandle;
 use tracing::{debug, debug_span, error, info, Instrument};
 
 use crate::{
-    clients::beacon::types::{BlockHeader, BlockId},
+    clients::{beacon::types::BlockId, blobscan::types::BlockchainSyncState},
     context::Context,
-    slots_processor::{error::SlotsProcessorError, SlotsProcessor},
+    slots_processor::{error::SlotsProcessorError, BlockData, SlotsProcessor},
 };
 
 use self::error::{SlotsChunksErrors, SynchronizerError};
 
-mod error;
+pub mod error;
 
 #[derive(Debug)]
 pub struct SynchronizerBuilder {
     num_threads: u32,
     slots_checkpoint: u32,
+}
+
+pub struct Synchronizer {
+    context: Context,
+    num_threads: u32,
+    slots_checkpoint: u32,
+    last_synced_block: Option<BlockData>,
 }
 
 impl SynchronizerBuilder {
@@ -51,98 +58,41 @@ impl SynchronizerBuilder {
             context,
             num_threads: self.num_threads,
             slots_checkpoint: self.slots_checkpoint,
-            enable_parallel_processing: self.num_threads > 1,
+            last_synced_block: None,
         }
     }
-}
-
-pub struct Synchronizer {
-    context: Context,
-    num_threads: u32,
-    slots_checkpoint: u32,
-    enable_parallel_processing: bool,
 }
 
 impl Synchronizer {
     pub async fn run(
-        &self,
+        &mut self,
         initial_block_id: &BlockId,
         final_block_id: &BlockId,
-    ) -> Result<BlockHeader, SynchronizerError> {
-        let initial_block_slot = match initial_block_id {
-            BlockId::Slot(slot) => *slot,
-            _ => {
-                self._fetch_block_header(initial_block_id)
-                    .await?
-                    .header
-                    .message
-                    .slot
-            }
-        };
-        let mut final_block_header = self._fetch_block_header(final_block_id).await?;
-        let final_block_slot = final_block_header.header.message.slot;
+    ) -> Result<(), SynchronizerError> {
+        let initial_slot = self._resolve_to_slot(initial_block_id).await?;
+        let mut final_slot = self._resolve_to_slot(final_block_id).await?;
 
         loop {
-            match initial_block_slot.cmp(&final_block_slot) {
-                Ordering::Equal => {
-                    return Ok(final_block_header);
-                }
-                Ordering::Less => {
-                    self._sync_slots_by_checkpoints(initial_block_slot, final_block_slot)
-                        .await?;
-                }
-                Ordering::Greater => {
-                    let err = anyhow!("Initial block slot is greater than final one");
+            self._sync_slots_by_checkpoints(initial_slot, final_slot)
+                .await?;
 
-                    error!(
-                        target = "synchronizer",
-                        initial_block_slot,
-                        final_block_slot,
-                        "{}",
-                        err.to_string()
-                    );
+            let latest_final_slot = self._resolve_to_slot(final_block_id).await?;
 
-                    return Err(err.into());
-                }
+            if final_slot == latest_final_slot {
+                return Ok(());
             }
 
-            /*
-             * If provided final block ID is a slot, we can stop syncing once we reach it. Otherwise,
-             * we need to keep fetching the latest block header to check if the final block slot has been
-             * reached.
-             */
-            match final_block_id {
-                BlockId::Slot(_) => return Ok(final_block_header),
-                _ => {
-                    let latest_final_block_header =
-                        self._fetch_block_header(final_block_id).await?;
-
-                    if latest_final_block_header.header.message.slot == final_block_slot {
-                        return Ok(final_block_header);
-                    }
-
-                    final_block_header = latest_final_block_header;
-                }
-            }
+            final_slot = latest_final_slot;
         }
-    }
-
-    pub fn enable_parallel_processing(&mut self, enable_parallel_processing: bool) -> &mut Self {
-        self.enable_parallel_processing = enable_parallel_processing;
-
-        self
     }
 
     async fn _sync_slots_in_parallel(
-        &self,
+        &mut self,
         from_slot: u32,
         to_slot: u32,
     ) -> Result<(), SynchronizerError> {
-        if from_slot == to_slot {
-            return Ok(());
-        }
-
-        let unprocessed_slots = to_slot - from_slot;
+        let is_reverse_sync = to_slot < from_slot;
+        let unprocessed_slots = to_slot.abs_diff(from_slot) + 1;
         let num_threads = std::cmp::min(self.num_threads, unprocessed_slots);
         let slots_per_thread = unprocessed_slots / num_threads;
         let remaining_slots = unprocessed_slots % num_threads;
@@ -152,18 +102,26 @@ impl Synchronizer {
             unprocessed_slots
         };
 
-        let mut handles: Vec<JoinHandle<Result<(), SlotsProcessorError>>> = vec![];
+        let mut handles: Vec<JoinHandle<Result<Option<BlockData>, SlotsProcessorError>>> = vec![];
 
         for i in 0..num_threads {
-            let slots_in_current_thread = if i == num_threads - 1 {
-                slots_per_thread + remaining_slots
+            let mut slots_processor = SlotsProcessor::new(self.context.clone());
+            let thread_total_slots = slots_per_thread
+                + if i == num_threads - 1 {
+                    remaining_slots
+                } else {
+                    0
+                };
+            let thread_initial_slot = if is_reverse_sync {
+                from_slot - i * slots_per_thread
             } else {
-                slots_per_thread
+                from_slot + i * slots_per_thread
             };
-
-            let slots_processor = SlotsProcessor::new(self.context.clone());
-            let thread_initial_slot = from_slot + i * slots_per_thread;
-            let thread_final_slot = thread_initial_slot + slots_in_current_thread;
+            let thread_final_slot = if is_reverse_sync {
+                thread_initial_slot - thread_total_slots + 1
+            } else {
+                thread_initial_slot + thread_total_slots - 1
+            };
 
             let synchronizer_thread_span = tracing::trace_span!(
                 "synchronizer_thread",
@@ -175,7 +133,9 @@ impl Synchronizer {
                 async move {
                     slots_processor
                         .process_slots(thread_initial_slot, thread_final_slot)
-                        .await
+                        .await?;
+
+                    Ok(slots_processor.get_last_block())
                 }
                 .instrument(synchronizer_thread_span),
             );
@@ -186,11 +146,14 @@ impl Synchronizer {
         let handle_outputs = join_all(handles).await;
 
         let mut errors = vec![];
+        let mut last_synced_block: Option<BlockData> = None;
 
         for handle in handle_outputs {
             match handle {
                 Ok(thread_result) => match thread_result {
-                    Ok(_) => (),
+                    Ok(thread_last_block) => {
+                        last_synced_block = thread_last_block;
+                    }
                     Err(error) => errors.push(error),
                 },
                 Err(error) => {
@@ -208,6 +171,8 @@ impl Synchronizer {
         }
 
         if errors.is_empty() {
+            self.last_synced_block = last_synced_block;
+
             Ok(())
         } else {
             Err(SynchronizerError::FailedParallelSlotsProcessing {
@@ -219,24 +184,30 @@ impl Synchronizer {
     }
 
     async fn _sync_slots_by_checkpoints(
-        &self,
+        &mut self,
         initial_slot: u32,
         final_slot: u32,
     ) -> Result<(), SynchronizerError> {
-        let blobscan_client = self.context.blobscan_client();
-
+        let is_reverse_sync = final_slot < initial_slot;
         let mut current_slot = initial_slot;
-        let mut unprocessed_slots = final_slot - current_slot;
+        let mut unprocessed_slots = final_slot.abs_diff(current_slot) + 1;
 
         info!(
             target = "synchronizer",
-            initial_slot, final_slot, "Syncing {unprocessed_slots} slots…"
+            reverse_sync = is_reverse_sync,
+            initial_slot,
+            final_slot,
+            "Syncing {unprocessed_slots} slots…"
         );
 
         while unprocessed_slots > 0 {
             let slots_chunk = std::cmp::min(unprocessed_slots, self.slots_checkpoint);
             let initial_chunk_slot = current_slot;
-            let final_chunk_slot = current_slot + slots_chunk;
+            let final_chunk_slot = if is_reverse_sync {
+                current_slot - slots_chunk + 1
+            } else {
+                current_slot + slots_chunk - 1
+            };
 
             let sync_slots_chunk_span = debug_span!(
                 "synchronizer",
@@ -244,25 +215,29 @@ impl Synchronizer {
                 final_slot = final_chunk_slot
             );
 
-            if self.enable_parallel_processing {
-                self._sync_slots_in_parallel(initial_chunk_slot, final_chunk_slot)
-                    .instrument(sync_slots_chunk_span)
-                    .await?;
-            } else {
-                let slots_processor = SlotsProcessor::new(self.context.clone());
+            self._sync_slots_in_parallel(initial_chunk_slot, final_chunk_slot)
+                .instrument(sync_slots_chunk_span)
+                .await?;
 
-                slots_processor
-                    .process_slots(initial_chunk_slot, final_chunk_slot)
-                    .instrument(sync_slots_chunk_span)
-                    .await?;
-            }
+            let last_slot = Some(final_chunk_slot);
+            let last_lower_synced_slot = if is_reverse_sync { last_slot } else { None };
+            let last_upper_synced_slot = if is_reverse_sync { None } else { last_slot };
 
-            if let Err(error) = blobscan_client.update_slot(final_chunk_slot - 1).await {
+            let blobscan_client = self.context.blobscan_client();
+
+            if let Err(error) = blobscan_client
+                .update_sync_state(BlockchainSyncState {
+                    last_lower_synced_slot,
+                    last_upper_synced_slot,
+                })
+                .await
+            {
                 error!(
                     target = "synchronizer",
-                    new_latest_slot = final_chunk_slot - 1,
+                    new_last_lower_synced_slot = last_lower_synced_slot,
+                    new_last_upper_synced_slot = last_upper_synced_slot,
                     ?error,
-                    "Failed to update indexer's latest slot"
+                    "Failed to update sync state after processing slots chunk"
                 );
 
                 return Err(error.into());
@@ -270,32 +245,37 @@ impl Synchronizer {
 
             debug!(
                 target = "synchronizer",
-                latest_slot = final_chunk_slot - 1,
-                "Checkpoint reached. Latest indexed slot updated"
+                new_last_lower_synced_slot = last_lower_synced_slot,
+                new_last_upper_synced_slot = last_upper_synced_slot,
+                "Checkpoint reached. Last synced slots updated"
             );
 
-            current_slot += slots_chunk;
+            current_slot = if is_reverse_sync {
+                current_slot - slots_chunk
+            } else {
+                current_slot + slots_chunk
+            };
             unprocessed_slots -= slots_chunk;
         }
 
         Ok(())
     }
 
-    async fn _fetch_block_header(
-        &self,
-        block_id: &BlockId,
-    ) -> Result<BlockHeader, SynchronizerError> {
+    async fn _resolve_to_slot(&self, block_id: &BlockId) -> Result<u32, SynchronizerError> {
         let beacon_client = self.context.beacon_client();
 
-        match beacon_client.get_block_header(block_id).await? {
-            Some(block_header) => Ok(block_header),
-            None => {
-                let err = anyhow!("Block header not found for block ID {}", block_id);
+        match block_id {
+            BlockId::Slot(slot) => Ok(*slot),
+            _ => match beacon_client.get_block_header(block_id).await? {
+                Some(block_header) => Ok(block_header.header.message.slot),
+                None => {
+                    let err = anyhow!("Slot not found for block ID {}", block_id);
 
-                error!(target = "synchronizer", "{}", err.to_string());
+                    error!(target = "synchronizer", "{}", err.to_string());
 
-                Err(err.into())
-            }
+                    Err(err.into())
+                }
+            },
         }
     }
 }

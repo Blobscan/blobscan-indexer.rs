@@ -5,7 +5,7 @@ use tracing::{debug, info};
 
 use crate::{
     clients::{
-        beacon::types::{Block as BeaconBlock, BlockId},
+        beacon::types::{BlockHeader, BlockId},
         blobscan::types::{Blob, Block, Transaction},
     },
     context::Context,
@@ -19,67 +19,85 @@ mod helpers;
 
 pub struct SlotsProcessor {
     context: Context,
+    last_block: Option<BlockData>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BlockData {
+    pub root: H256,
+    pub slot: u32,
+}
+
+impl From<BlockHeader> for BlockData {
+    fn from(block_header: BlockHeader) -> Self {
+        Self {
+            root: block_header.root.into(),
+            slot: block_header.header.message.slot,
+        }
+    }
 }
 
 impl SlotsProcessor {
     pub fn new(context: Context) -> SlotsProcessor {
-        Self { context }
+        Self {
+            context,
+            last_block: None,
+        }
     }
 
     pub async fn process_slots(
-        &self,
+        &mut self,
         initial_slot: u32,
         final_slot: u32,
     ) -> Result<(), SlotsProcessorError> {
-        let beacon_client = self.context.beacon_client();
-        let mut last_block_root: Option<H256> = None;
+        let is_reverse_processing = initial_slot > final_slot;
 
-        for current_slot in initial_slot..final_slot {
-            let beacon_block_header = match beacon_client
-                .get_block_header(&BlockId::Slot(current_slot))
-                .await
-                .map_err(|error| SlotsProcessorError::FailedSlotsProcessing {
-                    initial_slot,
-                    final_slot,
-                    failed_slot: current_slot,
-                    error: error.into(),
-                })? {
-                Some(block_header) => block_header,
-                None => {
-                    debug!(
-                        target = "slots_processor",
-                        slot = current_slot,
-                        "Skipping as there is no beacon block header"
-                    );
+        if is_reverse_processing {
+            for current_slot in (final_slot..=initial_slot).rev() {
+                let result = self.process_slot(current_slot, Some(false)).await;
 
-                    continue;
+                if let Err(error) = result {
+                    return Err(SlotsProcessorError::FailedSlotsProcessing {
+                        initial_slot,
+                        final_slot,
+                        failed_slot: current_slot,
+                        error,
+                    });
                 }
-            };
-
-            let result = self.process_slot(current_slot, last_block_root).await;
-
-            if let Err(error) = result {
-                return Err(SlotsProcessorError::FailedSlotsProcessing {
-                    initial_slot,
-                    final_slot,
-                    failed_slot: current_slot,
-                    error,
-                });
             }
+        } else {
+            for current_slot in initial_slot..=final_slot {
+                let result = self.process_slot(current_slot, Some(true)).await;
 
-            last_block_root = Some(beacon_block_header.root);
+                if let Err(error) = result {
+                    return Err(SlotsProcessorError::FailedSlotsProcessing {
+                        initial_slot,
+                        final_slot,
+                        failed_slot: current_slot,
+                        error,
+                    });
+                }
+            }
         }
 
         Ok(())
     }
 
     pub async fn process_slot(
-        &self,
+        &mut self,
         slot: u32,
-        last_block_root: Option<H256>,
+        enable_reorg_detection: Option<bool>,
     ) -> Result<(), SlotProcessingError> {
+        if let Some(enable_reorg_detection) = enable_reorg_detection {
+            if enable_reorg_detection {
+                self._detect_and_handle_reorg(slot).await?;
+            }
+        }
+
         let beacon_client = self.context.beacon_client();
         let blobscan_client = self.context.blobscan_client();
+        let provider = self.context.provider();
+
         let beacon_block = match beacon_client.get_block(&BlockId::Slot(slot)).await? {
             Some(block) => block,
             None => {
@@ -93,24 +111,7 @@ impl SlotsProcessor {
             }
         };
 
-        if let Some(last_block_root) = last_block_root {
-            if beacon_block.message.parent_root != last_block_root {
-                info!(target = "slots_processor", slot, "Block reorg detected");
-
-                blobscan_client.handle_reorged_slot(slot).await?;
-            }
-        }
-
-        self.process_block(beacon_block).await
-    }
-
-    async fn process_block(&self, block: BeaconBlock) -> Result<(), SlotProcessingError> {
-        let beacon_client = self.context.beacon_client();
-        let blobscan_client = self.context.blobscan_client();
-        let provider = self.context.provider();
-        let slot = block.message.slot;
-
-        let execution_payload = match block.message.body.execution_payload {
+        let execution_payload = match beacon_block.message.body.execution_payload {
             Some(payload) => payload,
             None => {
                 debug!(
@@ -122,7 +123,7 @@ impl SlotsProcessor {
             }
         };
 
-        let has_kzg_blob_commitments = match block.message.body.blob_kzg_commitments {
+        let has_kzg_blob_commitments = match beacon_block.message.body.blob_kzg_commitments {
             Some(commitments) => !commitments.is_empty(),
             None => false,
         };
@@ -225,6 +226,40 @@ impl SlotsProcessor {
             blobs = format!("{:?}", blob_versioned_hashes),
             "Block, transactions and blobs indexed successfully!"
         );
+
+        Ok(())
+    }
+
+    pub fn get_last_block(&self) -> Option<BlockData> {
+        self.last_block.clone()
+    }
+
+    async fn _detect_and_handle_reorg(&mut self, slot: u32) -> Result<(), SlotProcessingError> {
+        let beacon_client = self.context.beacon_client();
+        let blobscan_client = self.context.blobscan_client();
+
+        let beacon_block_header = match beacon_client.get_block_header(&BlockId::Slot(slot)).await?
+        {
+            Some(block_header) => block_header,
+            None => {
+                debug!(
+                    target = "slots_processor",
+                    slot, "Skipping as there is no beacon block header"
+                );
+
+                return Ok(());
+            }
+        };
+
+        if let Some(block) = &self.last_block {
+            if beacon_block_header.header.message.parent_root != block.root {
+                info!(target = "slots_processor", slot, "Block reorg detected");
+
+                blobscan_client.handle_reorged_slot(slot).await?;
+            }
+        }
+
+        self.last_block = Some(beacon_block_header.into());
 
         Ok(())
     }
