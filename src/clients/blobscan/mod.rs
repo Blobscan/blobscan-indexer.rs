@@ -81,7 +81,7 @@ impl BlobscanClient {
         json_put!(&self.client, url, token, &req).map(|_: Option<()>| ())
     }
 
-    pub async fn get_synced_state(&self) -> ClientResult<Option<BlockchainSyncState>> {
+    pub async fn get_sync_state(&self) -> ClientResult<Option<BlockchainSyncState>> {
         let url = self.base_url.join("blockchain-sync-state")?;
         json_get!(
             &self.client,

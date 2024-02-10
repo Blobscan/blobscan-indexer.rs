@@ -60,6 +60,7 @@ pub struct BlockchainSyncStateRequest {
 }
 
 #[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct BlockchainSyncStateResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_lower_synced_slot: Option<u32>,
@@ -68,7 +69,6 @@ pub struct BlockchainSyncStateResponse {
 }
 
 #[derive(Debug)]
-
 pub struct BlockchainSyncState {
     pub last_lower_synced_slot: Option<u32>,
     pub last_upper_synced_slot: Option<u32>,

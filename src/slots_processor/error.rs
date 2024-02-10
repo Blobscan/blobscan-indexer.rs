@@ -20,7 +20,5 @@ pub enum SlotsProcessorError {
         error: SlotProcessingError,
     },
     #[error(transparent)]
-    ClientError(#[from] crate::clients::common::ClientError),
-    #[error(transparent)]
     Other(#[from] anyhow::Error),
 }

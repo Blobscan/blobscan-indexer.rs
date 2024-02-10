@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Result as AnyhowResult};
 use args::Args;
 use clap::Parser;
 use env::Environment;
@@ -46,7 +46,7 @@ pub fn print_banner(args: &Args, env: &Environment) {
     println!("\n");
 }
 
-async fn run() -> Result<()> {
+async fn run() -> AnyhowResult<()> {
     dotenv::dotenv().ok();
     let env = match Environment::from_env() {
         Ok(env) => env,
@@ -72,9 +72,10 @@ async fn run() -> Result<()> {
 
     print_banner(&args, &env);
 
-    let mut indexer = Indexer::try_new(&env, &args)?;
-
-    indexer.run(args.from_slot).await
+    Indexer::try_new(&env, &args)?
+        .run(args.from_slot)
+        .await
+        .map_err(|err| anyhow!(err))
 }
 
 #[tokio::main]
