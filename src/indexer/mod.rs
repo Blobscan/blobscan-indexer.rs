@@ -48,10 +48,7 @@ impl Indexer {
                 .map_err(|err| anyhow!("Failed to get number of available threads: {:?}", err))?
                 .get() as u32,
         };
-        let lowest_indexed_slot = match env.lowest_indexed_slot {
-            Some(lowest_indexed_slot) => lowest_indexed_slot,
-            None => 0,
-        };
+        let lowest_indexed_slot = env.lowest_indexed_slot.unwrap_or(0);
 
         Ok(Self {
             context,
@@ -124,7 +121,7 @@ impl Indexer {
         let mut synchronizer = self._create_synchronizer();
         let lowest_indexed_slot = self.lowest_indexed_slot;
 
-        let handler = tokio::spawn(async move {
+        tokio::spawn(async move {
             let result = synchronizer
                 .run(&start_block_id, &BlockId::Slot(lowest_indexed_slot))
                 .await;
@@ -140,9 +137,7 @@ impl Indexer {
             };
 
             Ok(())
-        });
-
-        handler
+        })
     }
 
     fn _start_realtime_sync_task(
@@ -153,7 +148,7 @@ impl Indexer {
         let task_context = self.context.clone();
         let mut synchronizer = self._create_synchronizer();
 
-        let handler = tokio::spawn(async move {
+        tokio::spawn(async move {
             let result: Result<(), IndexerError> = async {
                 let blobscan_client = task_context.blobscan_client();
                 let mut event_source = task_context
@@ -203,16 +198,14 @@ impl Indexer {
                 // TODO: Find a better way to handle this error
                 tx.send(Err(IndexingTaskError::FailedIndexingTask {
                     task_name: "realtime_head_block_sync".to_string(),
-                    error: error.into(),
+                    error,
                 }))
                 .await
                 .unwrap();
             };
 
             Ok(())
-        });
-
-        handler
+        })
     }
 
     fn _create_synchronizer(&self) -> Synchronizer {

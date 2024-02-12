@@ -236,7 +236,7 @@ impl Synchronizer {
 
                 return Err(SynchronizerError::FailedSlotCheckpointSave {
                     slot: new_synced_slot,
-                    error: error.into(),
+                    error,
                 });
             }
 
@@ -273,7 +273,7 @@ impl Synchronizer {
                     Err(err.into())
                 }
                 Ok(Some(block_header)) => Ok(block_header.header.message.slot),
-                Err(error) => Err(error.into()),
+                Err(error) => Err(error),
             },
         };
 
@@ -281,7 +281,7 @@ impl Synchronizer {
             Ok(slot) => Ok(slot),
             Err(error) => Err(SynchronizerError::FailedBlockIdResolution {
                 block_id: block_id.clone(),
-                error: error.into(),
+                error,
             }),
         }
     }

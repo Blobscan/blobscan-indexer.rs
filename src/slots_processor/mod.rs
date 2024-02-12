@@ -31,7 +31,7 @@ pub struct BlockData {
 impl From<BlockHeader> for BlockData {
     fn from(block_header: BlockHeader) -> Self {
         Self {
-            root: block_header.root.into(),
+            root: block_header.root,
             slot: block_header.header.message.slot,
         }
     }

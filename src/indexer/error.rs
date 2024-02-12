@@ -29,7 +29,7 @@ impl From<IndexingTaskError> for IndexerError {
             IndexingTaskError::FailedIndexingTask {
                 task_name: _,
                 error,
-            } => error.into(),
+            } => error,
         }
     }
 }
