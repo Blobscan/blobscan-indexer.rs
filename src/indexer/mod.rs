@@ -55,7 +55,7 @@ impl Indexer {
         })
     }
 
-    pub async fn run(&mut self, start_block_id: Option<BlockId>) -> IndexerResult<()> {
+    pub async fn run(&mut self, custom_start_block_id: Option<BlockId>) -> IndexerResult<()> {
         let sync_state = match self.context.blobscan_client().get_sync_state().await {
             Ok(state) => state,
             Err(error) => {
@@ -65,19 +65,25 @@ impl Indexer {
             }
         };
 
-        let current_lower_block_id = match &sync_state {
-            Some(state) => match state.last_lower_synced_slot {
-                Some(slot) => BlockId::Slot(slot - 1),
+        let current_lower_block_id = match custom_start_block_id.clone() {
+            Some(block_id) => block_id,
+            None => match &sync_state {
+                Some(state) => match state.last_lower_synced_slot {
+                    Some(slot) => BlockId::Slot(slot - 1),
+                    None => BlockId::Head,
+                },
                 None => BlockId::Head,
             },
-            None => BlockId::Head,
         };
-        let current_upper_block_id = match &sync_state {
-            Some(state) => match state.last_upper_synced_slot {
-                Some(slot) => BlockId::Slot(slot + 1),
+        let current_upper_block_id = match custom_start_block_id {
+            Some(block_id) => block_id,
+            None => match &sync_state {
+                Some(state) => match state.last_upper_synced_slot {
+                    Some(slot) => BlockId::Slot(slot + 1),
+                    None => BlockId::Head,
+                },
                 None => BlockId::Head,
             },
-            None => BlockId::Head,
         };
 
         let (tx, mut rx) = mpsc::channel(32);
