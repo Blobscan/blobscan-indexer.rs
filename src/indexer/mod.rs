@@ -86,6 +86,13 @@ impl Indexer {
             },
         };
 
+        info!(
+            target = "indexer",
+            ?current_lower_block_id,
+            ?current_upper_block_id,
+            "Starting indexer…",
+        );
+
         let (tx, mut rx) = mpsc::channel(32);
         let tx1 = tx.clone();
 

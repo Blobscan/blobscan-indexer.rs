@@ -224,7 +224,7 @@ impl SlotsProcessor {
             block = execution_block_hash.to_string(),
             transactions = format!("{:?}", tx_hashes),
             blobs = format!("{:?}", blob_versioned_hashes),
-            "Block, transactions and blobs indexed successfully!"
+            "Block indexed successfully"
         );
 
         Ok(())

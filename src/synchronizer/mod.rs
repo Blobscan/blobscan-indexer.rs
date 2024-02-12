@@ -1,9 +1,7 @@
-use std::cmp;
-
 use anyhow::anyhow;
 use futures::future::join_all;
 use tokio::task::JoinHandle;
-use tracing::{debug, debug_span, info, Instrument};
+use tracing::{debug_span, info, Instrument};
 
 use crate::{
     clients::{beacon::types::BlockId, blobscan::types::BlockchainSyncState, common::ClientError},
@@ -186,10 +184,10 @@ impl Synchronizer {
 
         info!(
             target = "synchronizer",
-            reverse_sync = is_reverse_sync,
             initial_slot,
             final_slot,
-            "Syncing {unprocessed_slots} slots…"
+            reverse_sync = is_reverse_sync,
+            "Synchronizer started: Processing {unprocessed_slots} slots…"
         );
 
         while unprocessed_slots > 0 {
@@ -242,12 +240,14 @@ impl Synchronizer {
                 });
             }
 
-            debug!(
-                target = "synchronizer",
-                new_last_lower_synced_slot = last_lower_synced_slot,
-                new_last_upper_synced_slot = last_upper_synced_slot,
-                "Checkpoint reached. Last synced slot updated"
-            );
+            if unprocessed_slots >= self.slots_checkpoint {
+                info!(
+                    target = "synchronizer",
+                    new_last_lower_synced_slot = last_lower_synced_slot,
+                    new_last_upper_synced_slot = last_upper_synced_slot,
+                    "Checkpoint reached. Last synced slot saved…"
+                );
+            }
 
             current_slot = if is_reverse_sync {
                 current_slot - slots_chunk
