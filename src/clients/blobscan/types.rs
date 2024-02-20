@@ -36,6 +36,7 @@ pub struct Transaction {
 pub struct Blob {
     pub versioned_hash: H256,
     pub commitment: String,
+    pub proof: String,
     pub data: Bytes,
     pub tx_hash: H256,
     pub index: u32,
@@ -209,6 +210,7 @@ impl<'a> TryFrom<(&'a BeaconBlob, u32, H256)> for Blob {
             tx_hash,
             index,
             commitment: blob_data.kzg_commitment.clone(),
+            proof: blob_data.kzg_proof.clone(),
             data: blob_data.blob.clone(),
             versioned_hash: calculate_versioned_hash(&blob_data.kzg_commitment)?,
         })
@@ -223,6 +225,7 @@ impl<'a> From<(&'a BeaconBlob, &'a H256, usize, &'a H256)> for Blob {
             tx_hash: *tx_hash,
             index: index as u32,
             commitment: blob_data.kzg_commitment.clone(),
+            proof: blob_data.kzg_proof.clone(),
             data: blob_data.blob.clone(),
             versioned_hash: *versioned_hash,
         }
