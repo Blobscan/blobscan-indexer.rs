@@ -51,13 +51,27 @@ pub struct FailedSlotsChunk {
 }
 
 #[derive(Serialize, Debug)]
-pub struct SlotRequest {
-    pub slot: u32,
+#[serde(rename_all = "camelCase")]
+pub struct BlockchainSyncStateRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_lower_synced_slot: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_upper_synced_slot: Option<u32>,
 }
 
 #[derive(Deserialize, Debug)]
-pub struct SlotResponse {
-    pub slot: u32,
+#[serde(rename_all = "camelCase")]
+pub struct BlockchainSyncStateResponse {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_lower_synced_slot: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_upper_synced_slot: Option<u32>,
+}
+
+#[derive(Debug)]
+pub struct BlockchainSyncState {
+    pub last_lower_synced_slot: Option<u32>,
+    pub last_upper_synced_slot: Option<u32>,
 }
 
 #[derive(Serialize, Debug)]
@@ -65,6 +79,12 @@ pub struct IndexRequest {
     pub block: Block,
     pub transactions: Vec<Transaction>,
     pub blobs: Vec<Blob>,
+}
+
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ReorgedSlotRequest {
+    pub new_head_slot: u32,
 }
 
 impl fmt::Debug for Blob {
@@ -205,6 +225,24 @@ impl<'a> From<(&'a BeaconBlob, &'a H256, usize, &'a H256)> for Blob {
             commitment: blob_data.kzg_commitment.clone(),
             data: blob_data.blob.clone(),
             versioned_hash: *versioned_hash,
+        }
+    }
+}
+
+impl From<BlockchainSyncStateResponse> for BlockchainSyncState {
+    fn from(response: BlockchainSyncStateResponse) -> Self {
+        Self {
+            last_lower_synced_slot: response.last_lower_synced_slot,
+            last_upper_synced_slot: response.last_upper_synced_slot,
+        }
+    }
+}
+
+impl From<BlockchainSyncState> for BlockchainSyncStateRequest {
+    fn from(sync_state: BlockchainSyncState) -> Self {
+        Self {
+            last_lower_synced_slot: sync_state.last_lower_synced_slot,
+            last_upper_synced_slot: sync_state.last_upper_synced_slot,
         }
     }
 }

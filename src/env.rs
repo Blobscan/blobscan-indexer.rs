@@ -10,6 +10,7 @@ pub struct Environment {
     #[serde(default = "default_execution_node_endpoint")]
     pub execution_node_endpoint: String,
     pub secret_key: String,
+    pub lowest_indexed_slot: Option<u32>,
     pub sentry_dsn: Option<String>,
 }
 
