@@ -78,7 +78,7 @@ impl BeaconClient {
             .iter()
             .map(|topic| topic.into())
             .collect::<Vec<String>>()
-            .join("&");
+            .join(",");
         let path = format!("v1/events?topics={topics}");
         let url = self.base_url.join(&path)?;
 
