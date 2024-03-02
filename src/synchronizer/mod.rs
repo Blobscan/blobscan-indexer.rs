@@ -217,6 +217,7 @@ impl Synchronizer {
                 .context
                 .blobscan_client()
                 .update_sync_state(BlockchainSyncState {
+                    last_finalized_block: None,
                     last_lower_synced_slot,
                     last_upper_synced_slot,
                 })

@@ -10,6 +10,7 @@ pub enum BlockId {
     Head,
     Finalized,
     Slot(u32),
+    Hash(H256),
 }
 
 #[derive(Serialize, Debug)]
@@ -21,6 +22,8 @@ pub enum Topic {
 #[derive(Deserialize, Debug)]
 pub struct ExecutionPayload {
     pub block_hash: H256,
+    #[serde(deserialize_with = "deserialize_number")]
+    pub block_number: u32,
 }
 
 #[derive(Deserialize, Debug)]
@@ -30,7 +33,7 @@ pub struct BlockBody {
 }
 #[derive(Deserialize, Debug)]
 pub struct BlockMessage {
-    #[serde(deserialize_with = "deserialize_slot")]
+    #[serde(deserialize_with = "deserialize_number")]
     pub slot: u32,
     pub body: BlockBody,
     pub parent_root: H256,
@@ -76,18 +79,23 @@ pub struct InnerBlockHeader {
 #[derive(Deserialize, Debug)]
 pub struct BlockHeaderMessage {
     pub parent_root: H256,
-    #[serde(deserialize_with = "deserialize_slot")]
+    #[serde(deserialize_with = "deserialize_number")]
     pub slot: u32,
 }
 
 #[derive(Deserialize, Debug)]
 pub struct HeadBlockEventData {
-    #[serde(deserialize_with = "deserialize_slot")]
+    #[serde(deserialize_with = "deserialize_number")]
     pub slot: u32,
     pub block: H256,
 }
 
-fn deserialize_slot<'de, D>(deserializer: D) -> Result<u32, D::Error>
+#[derive(Deserialize, Debug)]
+pub struct FinalizedCheckpointEventData {
+    pub block: H256,
+}
+
+fn deserialize_number<'de, D>(deserializer: D) -> Result<u32, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
@@ -102,6 +110,7 @@ impl fmt::Display for BlockId {
             BlockId::Head => write!(f, "head"),
             BlockId::Finalized => write!(f, "finalized"),
             BlockId::Slot(slot) => write!(f, "{}", slot),
+            BlockId::Hash(hash) => write!(f, "{}", hash),
         }
     }
 }

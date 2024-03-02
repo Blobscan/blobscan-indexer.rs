@@ -12,6 +12,8 @@ pub enum IndexerError {
     SynchronizerError(#[from] SynchronizerError),
     #[error("{0}")]
     SerdeError(#[from] serde_json::Error),
+    #[error("Unexpected event \"{event}\" received")]
+    UnexpectedEvent { event: String },
 }
 
 #[derive(Debug, thiserror::Error)]
