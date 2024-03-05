@@ -99,9 +99,9 @@ fn deserialize_number<'de, D>(deserializer: D) -> Result<u32, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
-    let slot = String::deserialize(deserializer)?;
+    let value = String::deserialize(deserializer)?;
 
-    slot.parse::<u32>().map_err(serde::de::Error::custom)
+    value.parse::<u32>().map_err(serde::de::Error::custom)
 }
 
 impl fmt::Display for BlockId {
