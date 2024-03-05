@@ -53,6 +53,7 @@ pub struct BlockResponse {
 pub struct Blob {
     pub index: String,
     pub kzg_commitment: String,
+    pub kzg_proof: String,
     pub blob: Bytes,
 }
 
