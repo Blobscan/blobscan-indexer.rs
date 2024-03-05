@@ -57,6 +57,8 @@ pub struct BlockchainSyncStateRequest {
     pub last_lower_synced_slot: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_upper_synced_slot: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_finalized_block: Option<u32>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -70,6 +72,7 @@ pub struct BlockchainSyncStateResponse {
 
 #[derive(Debug)]
 pub struct BlockchainSyncState {
+    pub last_finalized_block: Option<u32>,
     pub last_lower_synced_slot: Option<u32>,
     pub last_upper_synced_slot: Option<u32>,
 }
@@ -232,6 +235,7 @@ impl<'a> From<(&'a BeaconBlob, &'a H256, usize, &'a H256)> for Blob {
 impl From<BlockchainSyncStateResponse> for BlockchainSyncState {
     fn from(response: BlockchainSyncStateResponse) -> Self {
         Self {
+            last_finalized_block: None,
             last_lower_synced_slot: response.last_lower_synced_slot,
             last_upper_synced_slot: response.last_upper_synced_slot,
         }
@@ -243,6 +247,7 @@ impl From<BlockchainSyncState> for BlockchainSyncStateRequest {
         Self {
             last_lower_synced_slot: sync_state.last_lower_synced_slot,
             last_upper_synced_slot: sync_state.last_upper_synced_slot,
+            last_finalized_block: sync_state.last_finalized_block,
         }
     }
 }

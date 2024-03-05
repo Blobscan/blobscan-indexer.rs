@@ -1,6 +1,6 @@
 use std::thread;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context as AnyhowContext};
 use futures::StreamExt;
 use reqwest_eventsource::Event;
 use tokio::{sync::mpsc, task::JoinHandle};
@@ -9,7 +9,7 @@ use tracing::{debug, error, info};
 use crate::{
     args::Args,
     clients::{
-        beacon::types::{BlockId, HeadBlockEventData, Topic},
+        beacon::types::{BlockId, FinalizedCheckpointEventData, HeadBlockEventData, Topic},
         blobscan::types::BlockchainSyncState,
     },
     context::{Config as ContextConfig, Context},
@@ -150,38 +150,77 @@ impl Indexer {
 
         tokio::spawn(async move {
             let result: Result<(), IndexerError> = async {
+                let beacon_client = task_context.beacon_client();
                 let blobscan_client = task_context.blobscan_client();
                 let mut event_source = task_context
                     .beacon_client()
-                    .subscribe_to_events(vec![Topic::Head])?;
+                    .subscribe_to_events(vec![Topic::Head, Topic::FinalizedCheckpoint])?;
                 let mut is_initial_sync_to_head = true;
 
                 while let Some(event) = event_source.next().await {
                     match event {
                         Ok(Event::Open) => {
-                            debug!(target = "indexer", "Listening for head block events…")
+                            debug!(target = "indexer", "Listening for head and finalized block events…")
                         }
                         Ok(Event::Message(event)) => {
-                            let head_block_data =
-                                serde_json::from_str::<HeadBlockEventData>(&event.data)?;
+                            match event.event.as_str() {
+                                "head" => {
+                                    let head_block_data =
+                                        serde_json::from_str::<HeadBlockEventData>(&event.data)?;
 
-                            let head_block_id = &BlockId::Slot(head_block_data.slot);
-                            let initial_block_id = if is_initial_sync_to_head {
-                                is_initial_sync_to_head = false;
-                                &start_block_id
-                            } else {
-                                head_block_id
-                            };
+                                    let head_block_id = &BlockId::Slot(head_block_data.slot);
+                                    let initial_block_id = if is_initial_sync_to_head {
+                                        is_initial_sync_to_head = false;
+                                        &start_block_id
+                                    } else {
+                                        head_block_id
+                                    };
 
-                            synchronizer.run(initial_block_id, head_block_id).await?;
+                                    synchronizer.run(initial_block_id, head_block_id).await?;
 
-                            blobscan_client
-                                .update_sync_state(BlockchainSyncState {
-                                    last_lower_synced_slot: None,
-                                    last_upper_synced_slot: Some(head_block_data.slot),
-                                })
-                                .await?;
-                        }
+                                    blobscan_client
+                                        .update_sync_state(BlockchainSyncState {
+                                            last_finalized_block: None,
+                                            last_lower_synced_slot: None,
+                                            last_upper_synced_slot: Some(head_block_data.slot),
+                                        })
+                                        .await?;
+                                }
+                                "finalized_checkpoint" => {
+                                    let finalized_checkpoint_data =
+                                        serde_json::from_str::<FinalizedCheckpointEventData>(
+                                            &event.data,
+                                        )?;
+                                    let block_hash = finalized_checkpoint_data.block;
+                                    let full_block_hash = format!("0x{:x}", block_hash);
+                                    let last_finalized_block_number = beacon_client
+                                        .get_block(&BlockId::Hash(block_hash))
+                                        .await?
+                                        .with_context(|| {
+                                            anyhow!("Finalized block with hash {full_block_hash} not found")
+                                        })?
+                                        .message.body.execution_payload
+                                        .with_context(|| {
+                                            anyhow!("Finalized block with hash {full_block_hash} has no execution payload")
+                                        })?.block_number;
+
+                                    blobscan_client
+                                        .update_sync_state(BlockchainSyncState {
+                                            last_lower_synced_slot: None,
+                                            last_upper_synced_slot: None,
+                                            last_finalized_block: Some(
+                                                last_finalized_block_number
+                                            ),
+                                        })
+                                        .await?;
+
+                                    info!(target = "indexer", "Finalized block {full_block_hash} detected and stored");
+                                },
+                                unexpected_event_id => {
+                                    return Err(IndexerError::UnexpectedEvent { event: unexpected_event_id.to_string() })
+                                }
+                            }
+                        },
                         Err(error) => {
                             event_source.close();
 

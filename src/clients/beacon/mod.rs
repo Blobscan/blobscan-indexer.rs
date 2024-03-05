@@ -38,6 +38,12 @@ impl BeaconClient {
     }
 
     pub async fn get_block(&self, block_id: &BlockId) -> ClientResult<Option<Block>> {
+        let block_id = match block_id {
+            BlockId::Hash(hash) => format!("0x{:x}", hash),
+            BlockId::Slot(slot) => slot.to_string(),
+            block_id => block_id.to_string(),
+        };
+
         let path = format!("v2/beacon/blocks/{block_id}");
         let url = self.base_url.join(path.as_str())?;
 
@@ -78,7 +84,7 @@ impl BeaconClient {
             .iter()
             .map(|topic| topic.into())
             .collect::<Vec<String>>()
-            .join("&");
+            .join(",");
         let path = format!("v1/events?topics={topics}");
         let url = self.base_url.join(&path)?;
 
