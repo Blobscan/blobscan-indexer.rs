@@ -3,6 +3,7 @@ use args::Args;
 use clap::Parser;
 use env::Environment;
 use indexer::Indexer;
+use url::Url;
 use utils::telemetry::{get_subscriber, init_subscriber};
 
 mod args;
@@ -13,6 +14,17 @@ mod indexer;
 mod slots_processor;
 mod synchronizer;
 mod utils;
+
+fn remove_credentials_from_url(url_string: &str) -> Option<String> {
+    match Url::parse(url_string) {
+        Ok(mut url) => {
+            url.set_username("******").unwrap();
+            url.set_password(None).unwrap();
+            Some(url.into_string())
+        }
+        Err(_) => None,
+    }
+}
 
 pub fn print_banner(args: &Args, env: &Environment) {
     println!("____  _       _                         ");
@@ -36,8 +48,14 @@ pub fn print_banner(args: &Args, env: &Environment) {
     }
 
     println!("Blobscan API endpoint: {}", env.blobscan_api_endpoint);
-    println!("CL endpoint: {}", env.beacon_node_endpoint);
-    println!("EL endpoint: {}", env.execution_node_endpoint);
+    println!(
+        "CL endpoint: {}",
+        remove_credentials_from_url(env.beacon_node_endpoint.as_str())
+    );
+    println!(
+        "EL endpoint: {}",
+        remove_credentials_from_url(env.execution_node_endpoint.as_str())
+    );
 
     if let Some(sentry_dsn) = env.sentry_dsn.clone() {
         println!("Sentry DSN: {}", sentry_dsn);
