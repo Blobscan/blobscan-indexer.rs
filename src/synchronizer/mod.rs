@@ -101,7 +101,8 @@ impl Synchronizer {
         let mut handles: Vec<JoinHandle<Result<Option<BlockData>, SlotsProcessorError>>> = vec![];
 
         for i in 0..num_threads {
-            let mut slots_processor = SlotsProcessor::new(self.context.clone());
+            let mut slots_processor =
+                SlotsProcessor::new(self.context.clone(), self.last_synced_block.clone());
             let thread_total_slots = slots_per_thread
                 + if i == num_threads - 1 {
                     remaining_slots

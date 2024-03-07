@@ -38,10 +38,10 @@ impl From<BlockHeader> for BlockData {
 }
 
 impl SlotsProcessor {
-    pub fn new(context: Context) -> SlotsProcessor {
+    pub fn new(context: Context, last_block: Option<BlockData>) -> SlotsProcessor {
         Self {
             context,
-            last_block: None,
+            last_block,
         }
     }
 

@@ -20,7 +20,7 @@ fn remove_credentials_from_url(url_string: &str) -> Option<String> {
         Ok(mut url) => {
             url.set_username("******").unwrap();
             url.set_password(None).unwrap();
-            Some(url.into_string())
+            Some(url.into())
         }
         Err(_) => None,
     }
@@ -49,11 +49,11 @@ pub fn print_banner(args: &Args, env: &Environment) {
 
     println!("Blobscan API endpoint: {}", env.blobscan_api_endpoint);
     println!(
-        "CL endpoint: {}",
+        "CL endpoint: {:?}",
         remove_credentials_from_url(env.beacon_node_endpoint.as_str())
     );
     println!(
-        "EL endpoint: {}",
+        "EL endpoint: {:?}",
         remove_credentials_from_url(env.execution_node_endpoint.as_str())
     );
 
