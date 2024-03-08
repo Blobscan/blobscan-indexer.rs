@@ -101,7 +101,7 @@ impl Display for NumericOrTextCode {
 impl Display for ErrorResponse {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&format!(
-            "Code: {}, Mesage: \"{}\"",
+            "Code: {}, Message: \"{}\"",
             self.code,
             self.message.as_deref().unwrap_or(""),
         ))
