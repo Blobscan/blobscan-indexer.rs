@@ -83,7 +83,7 @@ async fn run() -> AnyhowResult<()> {
         ));
     }
 
-    let subscriber = get_subscriber("blobscan_indexer".into(), "info".into(), std::io::stdout);
+    let subscriber = get_subscriber("info".into(), std::io::stdout);
     init_subscriber(subscriber);
 
     let args = Args::parse();
