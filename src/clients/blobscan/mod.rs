@@ -1,4 +1,5 @@
 use backoff::ExponentialBackoff;
+use chrono::TimeDelta;
 use reqwest::{Client, Url};
 
 use crate::{clients::common::ClientResult, json_get, json_put};
@@ -33,7 +34,7 @@ impl BlobscanClient {
         let base_url = Url::parse(&format!("{}/api/", config.base_url))?;
         let jwt_manager = JWTManager::new(JWTManagerConfig {
             secret_key: config.secret_key,
-            refresh_interval: chrono::Duration::hours(1),
+            refresh_interval: TimeDelta::try_hours(1).unwrap(),
             safety_magin: None,
         });
         let exp_backoff = config.exp_backoff;
