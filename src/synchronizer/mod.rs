@@ -1,7 +1,7 @@
 use anyhow::anyhow;
 use futures::future::join_all;
 use tokio::task::JoinHandle;
-use tracing::{debug_span, info, Instrument};
+use tracing::{debug, debug_span, info, Instrument};
 
 use crate::{
     clients::{beacon::types::BlockId, blobscan::types::BlockchainSyncState, common::ClientError},
@@ -243,7 +243,7 @@ impl Synchronizer {
             }
 
             if unprocessed_slots >= self.slots_checkpoint {
-                info!(
+                debug!(
                     target = "synchronizer",
                     new_last_lower_synced_slot = last_lower_synced_slot,
                     new_last_upper_synced_slot = last_upper_synced_slot,
