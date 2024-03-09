@@ -6,6 +6,8 @@ use indexer::Indexer;
 use url::Url;
 use utils::telemetry::{get_subscriber, init_subscriber};
 
+use crate::utils::web3::get_network_dencun_fork_slot;
+
 mod args;
 mod clients;
 mod context;
@@ -13,6 +15,7 @@ mod env;
 mod indexer;
 mod slots_processor;
 mod synchronizer;
+mod types;
 mod utils;
 
 fn remove_credentials_from_url(url_string: &str) -> Option<String> {
@@ -35,6 +38,14 @@ pub fn print_banner(args: &Args, env: &Environment) {
     println!("Blobscan indexer (EIP-4844 blob indexer) - blobscan.com");
     println!("=======================================================");
 
+    println!("Network: {:?}", env.network_name);
+    if let Some(dencun_fork_slot) = env.dencun_fork_slot {
+        println!("Dencun fork slot: {dencun_fork_slot}");
+    } else {
+        let default_dencun_fork_slot = get_network_dencun_fork_slot(&env.network_name);
+        println!("Dencun fork slot: {default_dencun_fork_slot}");
+    }
+
     if let Some(from_slot) = args.from_slot.clone() {
         println!("Start slot: {}", from_slot);
     } else {
@@ -44,7 +55,7 @@ pub fn print_banner(args: &Args, env: &Environment) {
     if let Some(num_threads) = args.num_threads {
         println!("Number of threads: {}", num_threads);
     } else {
-        println!("Number of threads: 1");
+        println!("Number of threads: auto");
     }
 
     if let Some(slots_per_save) = args.slots_per_save {
@@ -53,7 +64,6 @@ pub fn print_banner(args: &Args, env: &Environment) {
         println!("Slots checkpoint size: 1000");
     }
 
-    println!("Dencun fork slot: {}", env.dencun_fork_slot);
     println!("Blobscan API endpoint: {}", env.blobscan_api_endpoint);
     println!(
         "CL endpoint: {:?}",

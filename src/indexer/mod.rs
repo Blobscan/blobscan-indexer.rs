@@ -15,6 +15,7 @@ use crate::{
     context::{Config as ContextConfig, Context},
     env::Environment,
     synchronizer::{Synchronizer, SynchronizerBuilder},
+    utils::web3::get_network_dencun_fork_slot,
 };
 
 use self::{
@@ -49,7 +50,9 @@ impl Indexer {
                 .map_err(|err| anyhow!("Failed to get number of available threads: {:?}", err))?
                 .get() as u32,
         };
-        let dencun_fork_slot = env.dencun_fork_slot;
+        let dencun_fork_slot = env
+            .dencun_fork_slot
+            .unwrap_or(get_network_dencun_fork_slot(&env.network_name));
 
         Ok(Self {
             context,
