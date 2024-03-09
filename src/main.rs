@@ -47,6 +47,7 @@ pub fn print_banner(args: &Args, env: &Environment) {
         println!("Slot chunk size: auto");
     }
 
+    println!("Dencun fork slot: {}", env.dencun_fork_slot);
     println!("Blobscan API endpoint: {}", env.blobscan_api_endpoint);
     println!(
         "CL endpoint: {:?}",
