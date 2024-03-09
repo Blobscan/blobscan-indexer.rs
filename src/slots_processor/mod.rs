@@ -204,6 +204,7 @@ impl SlotsProcessor {
             }
         }
 
+        /*
         let tx_hashes = transactions_entities
             .iter()
             .map(|tx| tx.hash.to_string())
@@ -212,6 +213,7 @@ impl SlotsProcessor {
             .iter()
             .map(|blob| blob.versioned_hash.to_string())
             .collect::<Vec<String>>();
+         */
 
         blobscan_client
             .index(block_entity, transactions_entities, blob_entities)
@@ -220,11 +222,7 @@ impl SlotsProcessor {
 
         info!(
             target = "slots_processor",
-            slot,
-            block = execution_block_hash.to_string(),
-            transactions = format!("{:?}", tx_hashes),
-            blobs = format!("{:?}", blob_versioned_hashes),
-            "Block indexed successfully"
+            slot, "Block indexed successfully"
         );
 
         Ok(())
