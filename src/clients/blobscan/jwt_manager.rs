@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use chrono::{Duration, Utc};
+use chrono::{Duration, TimeDelta, Utc};
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error};
@@ -36,7 +36,7 @@ impl JWTManager {
             refresh_interval: config.refresh_interval,
             safety_margin: match config.safety_magin {
                 Some(safety_margin) => safety_margin,
-                None => Duration::minutes(1),
+                None => TimeDelta::try_minutes(1).unwrap(),
             },
         }
     }
