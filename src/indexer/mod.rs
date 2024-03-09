@@ -9,7 +9,9 @@ use tracing::{debug, error, info};
 use crate::{
     args::Args,
     clients::{
-        beacon::types::{BlockId, FinalizedCheckpointEventData, HeadBlockEventData, Topic},
+        beacon::types::{
+            BlockId, ChainReorgEventData, FinalizedCheckpointEventData, HeadEventData, Topic,
+        },
         blobscan::types::BlockchainSyncState,
     },
     context::{Config as ContextConfig, Context},
@@ -158,7 +160,7 @@ impl Indexer {
                 let blobscan_client = task_context.blobscan_client();
                 let mut event_source = task_context
                     .beacon_client()
-                    .subscribe_to_events(vec![Topic::Head, Topic::FinalizedCheckpoint])?;
+                    .subscribe_to_events(vec![Topic::ChainReorg, Topic::Head, Topic::FinalizedCheckpoint])?;
                 let mut is_initial_sync_to_head = true;
 
                 while let Some(event) = event_source.next().await {
@@ -168,9 +170,23 @@ impl Indexer {
                         }
                         Ok(Event::Message(event)) => {
                             match event.event.as_str() {
+                                "chain_reorg" => {
+                                    let reorg_block_data =
+                                        serde_json::from_str::<ChainReorgEventData>(&event.data)?;
+                                    
+                                    let reorged_slot = reorg_block_data.slot;
+ 
+                                    blobscan_client.handle_reorged_slot(reorged_slot).await?;
+                                    blobscan_client.update_sync_state(BlockchainSyncState {
+                                        last_finalized_block: None,
+                                        last_lower_synced_slot: None,
+                                        last_upper_synced_slot: Some(reorged_slot),
+                                    }).await?;
+
+                                },
                                 "head" => {
                                     let head_block_data =
-                                        serde_json::from_str::<HeadBlockEventData>(&event.data)?;
+                                        serde_json::from_str::<HeadEventData>(&event.data)?;
 
                                     let head_block_id = &BlockId::Slot(head_block_data.slot);
                                     let initial_block_id = if is_initial_sync_to_head {

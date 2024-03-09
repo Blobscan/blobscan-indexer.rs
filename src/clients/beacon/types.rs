@@ -14,9 +14,11 @@ pub enum BlockId {
 }
 
 #[derive(Serialize, Debug)]
+#[serde(rename_all = "snake_case")]
 pub enum Topic {
     Head,
     FinalizedCheckpoint,
+    ChainReorg,
 }
 
 #[derive(Deserialize, Debug)]
@@ -85,7 +87,15 @@ pub struct BlockHeaderMessage {
 }
 
 #[derive(Deserialize, Debug)]
-pub struct HeadBlockEventData {
+pub struct ChainReorgEventData {
+    pub old_head_block: H256,
+    pub new_head_block: H256,
+    #[serde(deserialize_with = "deserialize_number")]
+    pub slot: u32,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct HeadEventData {
     #[serde(deserialize_with = "deserialize_number")]
     pub slot: u32,
     pub block: H256,
@@ -136,14 +146,15 @@ impl FromStr for BlockId {
 impl From<&Topic> for String {
     fn from(value: &Topic) -> Self {
         match value {
+            Topic::ChainReorg => String::from("chain_reorg"),
             Topic::Head => String::from("head"),
             Topic::FinalizedCheckpoint => String::from("finalized_checkpoint"),
         }
     }
 }
 
-impl From<HeadBlockEventData> for BlockData {
-    fn from(event_data: HeadBlockEventData) -> Self {
+impl From<HeadEventData> for BlockData {
+    fn from(event_data: HeadEventData) -> Self {
         Self {
             root: event_data.block,
             slot: event_data.slot,
