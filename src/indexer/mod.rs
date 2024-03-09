@@ -27,7 +27,7 @@ pub mod types;
 
 pub struct Indexer {
     context: Context,
-    lowest_indexed_slot: u32,
+    dencun_fork_slot: u32,
     num_threads: u32,
     slots_checkpoint: Option<u32>,
 }
@@ -42,19 +42,20 @@ impl Indexer {
                 return Err(error.into());
             }
         };
+        let slots_checkpoint = args.slots_per_save;
         let num_threads = match args.num_threads {
             Some(num_threads) => num_threads,
             None => thread::available_parallelism()
                 .map_err(|err| anyhow!("Failed to get number of available threads: {:?}", err))?
                 .get() as u32,
         };
-        let lowest_indexed_slot = env.lowest_indexed_slot.unwrap_or(0);
+        let dencun_fork_slot = env.dencun_fork_slot;
 
         Ok(Self {
             context,
             num_threads,
-            slots_checkpoint: args.slots_per_save,
-            lowest_indexed_slot,
+            slots_checkpoint,
+            dencun_fork_slot,
         })
     }
 
@@ -119,11 +120,11 @@ impl Indexer {
         start_block_id: BlockId,
     ) -> JoinHandle<IndexerTaskResult> {
         let mut synchronizer = self._create_synchronizer();
-        let lowest_indexed_slot = self.lowest_indexed_slot;
+        let target_lowest_slot = self.dencun_fork_slot;
 
         tokio::spawn(async move {
             let result = synchronizer
-                .run(&start_block_id, &BlockId::Slot(lowest_indexed_slot))
+                .run(&start_block_id, &BlockId::Slot(target_lowest_slot))
                 .await;
 
             if let Err(error) = result {

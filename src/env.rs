@@ -10,7 +10,8 @@ pub struct Environment {
     #[serde(default = "default_execution_node_endpoint")]
     pub execution_node_endpoint: String,
     pub secret_key: String,
-    pub lowest_indexed_slot: Option<u32>,
+    #[serde(default = "default_dencun_fork_slot")]
+    pub dencun_fork_slot: u32,
     pub sentry_dsn: Option<String>,
 }
 
@@ -24,6 +25,10 @@ fn default_beacon_node_endpoint() -> String {
 
 fn default_execution_node_endpoint() -> String {
     "http://localhost:8545".to_string()
+}
+
+fn default_dencun_fork_slot() -> u32 {
+    0
 }
 
 impl Environment {
