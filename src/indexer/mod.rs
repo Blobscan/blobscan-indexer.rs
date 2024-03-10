@@ -1,4 +1,4 @@
-use std::thread;
+use std::{cmp, thread};
 
 use anyhow::{anyhow, Context as AnyhowContext};
 
@@ -79,9 +79,9 @@ impl Indexer {
             Some(block_id) => block_id,
             None => match &sync_state {
                 Some(state) => match state.last_lower_synced_slot {
-                    Some(slot) => BlockId::Slot(slot - 1),
+                    Some(slot) => BlockId::Slot(self._get_current_lower_slot(slot)),
                     None => match state.last_upper_synced_slot {
-                        Some(slot) => BlockId::Slot(slot - 1),
+                        Some(slot) => BlockId::Slot(self._get_current_lower_slot(slot)),
                         None => BlockId::Head,
                     },
                 },
@@ -135,6 +135,17 @@ impl Indexer {
         let target_lowest_slot = self.dencun_fork_slot;
 
         tokio::spawn(async move {
+            if let BlockId::Slot(slot) = start_block_id {
+                if slot <= target_lowest_slot {
+                    debug!(
+                        target = "indexer:historical_sync",
+                        "Skip sync. Dencun fork slot reached"
+                    );
+
+                    return Ok(());
+                }
+            }
+
             let result = synchronizer
                 .run(&start_block_id, &BlockId::Slot(target_lowest_slot))
                 .await;
@@ -313,5 +324,9 @@ impl Indexer {
         }
 
         synchronizer_builder.build(self.context.clone())
+    }
+
+    fn _get_current_lower_slot(&self, last_synced_slot: u32) -> u32 {
+        cmp::max(last_synced_slot, self.dencun_fork_slot)
     }
 }
