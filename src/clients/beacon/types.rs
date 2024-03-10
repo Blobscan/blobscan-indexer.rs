@@ -14,9 +14,11 @@ pub enum BlockId {
 }
 
 #[derive(Serialize, Debug)]
+#[serde(rename_all = "snake_case")]
 pub enum Topic {
     Head,
     FinalizedCheckpoint,
+    ChainReorg,
 }
 
 #[derive(Deserialize, Debug)]
@@ -85,7 +87,17 @@ pub struct BlockHeaderMessage {
 }
 
 #[derive(Deserialize, Debug)]
-pub struct HeadBlockEventData {
+pub struct ChainReorgEventData {
+    pub old_head_block: H256,
+    pub new_head_block: H256,
+    #[serde(deserialize_with = "deserialize_number")]
+    pub slot: u32,
+    #[serde(deserialize_with = "deserialize_number")]
+    pub depth: u32,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct HeadEventData {
     #[serde(deserialize_with = "deserialize_number")]
     pub slot: u32,
     pub block: H256,
@@ -103,6 +115,17 @@ where
     let value = String::deserialize(deserializer)?;
 
     value.parse::<u32>().map_err(serde::de::Error::custom)
+}
+
+impl BlockId {
+    pub fn to_detailed_string(&self) -> String {
+        match self {
+            BlockId::Head => String::from("head"),
+            BlockId::Finalized => String::from("finalized"),
+            BlockId::Slot(slot) => slot.to_string(),
+            BlockId::Hash(hash) => format!("0x{:x}", hash),
+        }
+    }
 }
 
 impl fmt::Display for BlockId {
@@ -126,7 +149,16 @@ impl FromStr for BlockId {
             _ => match s.parse::<u32>() {
                 Ok(num) => Ok(BlockId::Slot(num)),
                 Err(_) => {
-                    Err("Invalid block ID. Expected 'head', 'finalized' or a number.".to_string())
+                    if s.starts_with("0x") {
+                        match H256::from_str(s) {
+                            Ok(hash) => Ok(BlockId::Hash(hash)),
+                            Err(_) => Err(format!("Invalid block ID hash: {s}")),
+                        }
+                    } else {
+                        Err(
+                            format!("Invalid block ID: {s}. Expected 'head', 'finalized', a hash or a number."),
+                        )
+                    }
                 }
             },
         }
@@ -136,14 +168,15 @@ impl FromStr for BlockId {
 impl From<&Topic> for String {
     fn from(value: &Topic) -> Self {
         match value {
+            Topic::ChainReorg => String::from("chain_reorg"),
             Topic::Head => String::from("head"),
             Topic::FinalizedCheckpoint => String::from("finalized_checkpoint"),
         }
     }
 }
 
-impl From<HeadBlockEventData> for BlockData {
-    fn from(event_data: HeadBlockEventData) -> Self {
+impl From<HeadEventData> for BlockData {
+    fn from(event_data: HeadEventData) -> Self {
         Self {
             root: event_data.block,
             slot: event_data.slot,

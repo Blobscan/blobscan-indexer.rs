@@ -87,8 +87,14 @@ pub struct IndexRequest {
 
 #[derive(Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
-pub struct ReorgedSlotRequest {
-    pub new_head_slot: u32,
+pub struct ReorgedSlotsRequest {
+    pub reorged_slots: Vec<u32>,
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ReorgedSlotsResponse {
+    pub total_updated_slots: u32,
 }
 
 impl fmt::Debug for Blob {

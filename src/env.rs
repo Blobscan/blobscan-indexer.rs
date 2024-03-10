@@ -1,8 +1,12 @@
 use envy::Error::MissingValue;
 use serde::Deserialize;
 
+use crate::network::Network;
+
 #[derive(Deserialize, Debug)]
 pub struct Environment {
+    #[serde(default = "default_network")]
+    pub network_name: Network,
     #[serde(default = "default_blobscan_api_endpoint")]
     pub blobscan_api_endpoint: String,
     #[serde(default = "default_beacon_node_endpoint")]
@@ -10,9 +14,12 @@ pub struct Environment {
     #[serde(default = "default_execution_node_endpoint")]
     pub execution_node_endpoint: String,
     pub secret_key: String,
-    #[serde(default = "default_dencun_fork_slot")]
-    pub dencun_fork_slot: u32,
+    pub dencun_fork_slot: Option<u32>,
     pub sentry_dsn: Option<String>,
+}
+
+fn default_network() -> Network {
+    Network::Devnet
 }
 
 fn default_blobscan_api_endpoint() -> String {
@@ -25,10 +32,6 @@ fn default_beacon_node_endpoint() -> String {
 
 fn default_execution_node_endpoint() -> String {
     "http://localhost:8545".to_string()
-}
-
-fn default_dencun_fork_slot() -> u32 {
-    0
 }
 
 impl Environment {

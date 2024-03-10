@@ -95,7 +95,10 @@ macro_rules! json_get {
 /// Make a PUT request sending JSON.
 /// if JSON deser fails, emit a `WARN` level tracing event
 macro_rules! json_put {
-    ($client:expr, $url:expr, $auth_token:expr, $body:expr) => {{
+    ($client:expr, $url:expr, $auth_token:expr, $body:expr) => {
+        json_put!($client, $url, (), $auth_token, $body)
+    };
+    ($client:expr, $url:expr, $expected:ty, $auth_token:expr, $body:expr) => {{
         let url = $url.clone();
         let body = format!("{:?}", $body);
 
@@ -123,7 +126,7 @@ macro_rules! json_put {
             };
 
         let text = resp.text().await?;
-        let result: $crate::clients::common::ClientResponse<_> = text.parse()?;
+        let result: $crate::clients::common::ClientResponse<$expected> = text.parse()?;
 
         if result.is_err() {
             tracing::warn!(

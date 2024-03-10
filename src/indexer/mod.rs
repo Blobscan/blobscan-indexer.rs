@@ -1,15 +1,18 @@
 use std::thread;
 
 use anyhow::{anyhow, Context as AnyhowContext};
+
 use futures::StreamExt;
 use reqwest_eventsource::Event;
 use tokio::{sync::mpsc, task::JoinHandle};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use crate::{
     args::Args,
     clients::{
-        beacon::types::{BlockId, FinalizedCheckpointEventData, HeadBlockEventData, Topic},
+        beacon::types::{
+            BlockId, ChainReorgEventData, FinalizedCheckpointEventData, HeadEventData, Topic,
+        },
         blobscan::types::BlockchainSyncState,
     },
     context::{Config as ContextConfig, Context},
@@ -42,6 +45,7 @@ impl Indexer {
                 return Err(error.into());
             }
         };
+
         let slots_checkpoint = args.slots_per_save;
         let num_threads = match args.num_threads {
             Some(num_threads) => num_threads,
@@ -49,7 +53,9 @@ impl Indexer {
                 .map_err(|err| anyhow!("Failed to get number of available threads: {:?}", err))?
                 .get() as u32,
         };
-        let dencun_fork_slot = env.dencun_fork_slot;
+        let dencun_fork_slot = env
+            .dencun_fork_slot
+            .unwrap_or(env.network_name.dencun_fork_slot());
 
         Ok(Self {
             context,
@@ -74,7 +80,10 @@ impl Indexer {
             None => match &sync_state {
                 Some(state) => match state.last_lower_synced_slot {
                     Some(slot) => BlockId::Slot(slot - 1),
-                    None => BlockId::Head,
+                    None => match state.last_upper_synced_slot {
+                        Some(slot) => BlockId::Slot(slot - 1),
+                        None => BlockId::Head,
+                    },
                 },
                 None => BlockId::Head,
             },
@@ -84,7 +93,10 @@ impl Indexer {
             None => match &sync_state {
                 Some(state) => match state.last_upper_synced_slot {
                     Some(slot) => BlockId::Slot(slot + 1),
-                    None => BlockId::Head,
+                    None => match state.last_lower_synced_slot {
+                        Some(slot) => BlockId::Slot(slot + 1),
+                        None => BlockId::Head,
+                    },
                 },
                 None => BlockId::Head,
             },
@@ -146,6 +158,8 @@ impl Indexer {
         tx: mpsc::Sender<IndexerTaskResult>,
         start_block_id: BlockId,
     ) -> JoinHandle<IndexerTaskResult> {
+        let task_name = "realtime_sync".to_string();
+        let target = format!("indexer:{task_name}");
         let task_context = self.context.clone();
         let mut synchronizer = self._create_synchronizer();
 
@@ -153,21 +167,62 @@ impl Indexer {
             let result: Result<(), IndexerError> = async {
                 let beacon_client = task_context.beacon_client();
                 let blobscan_client = task_context.blobscan_client();
+                let topics = vec![
+                    Topic::ChainReorg,
+                    Topic::Head,
+                    Topic::FinalizedCheckpoint,
+                ];
                 let mut event_source = task_context
                     .beacon_client()
-                    .subscribe_to_events(vec![Topic::Head, Topic::FinalizedCheckpoint])?;
+                    .subscribe_to_events(&topics)?;
                 let mut is_initial_sync_to_head = true;
 
                 while let Some(event) = event_source.next().await {
                     match event {
                         Ok(Event::Open) => {
-                            debug!(target = "indexer", "Listening for head and finalized block events…")
+                            let events = topics
+                                .iter()
+                                .map(|topic| topic.into())
+                                .collect::<Vec<String>>()
+                                .join(", ");
+                            debug!(target, events, "Listening to beacon events…")
                         }
                         Ok(Event::Message(event)) => {
-                            match event.event.as_str() {
+                            let event_name = event.event.as_str();
+
+                            match event_name {
+                                "chain_reorg" => {
+                                    let reorg_block_data =
+                                        serde_json::from_str::<ChainReorgEventData>(&event.data)?;
+                                    let slot = reorg_block_data.slot;
+                                    let old_head_block = reorg_block_data.old_head_block;
+                                    let target_depth = reorg_block_data.depth;
+
+                                    let mut current_reorged_block = old_head_block;
+                                    let mut reorged_slots: Vec<u32> = vec![];
+
+                                    for current_depth in 1..=target_depth {
+                                        let reorged_block_head = match beacon_client.get_block_header(&BlockId::Hash(current_reorged_block)).await? {
+                                            Some(block) => block,
+                                            None => {
+                                                warn!(target, event=event_name, slot=slot, "Found {current_depth} out of {target_depth} reorged blocks only");
+                                                break
+                                            }
+                                        };
+
+                                        reorged_slots.push(reorged_block_head.header.message.slot);
+                                        current_reorged_block = reorged_block_head.header.message.parent_root;
+                                    }
+
+                                    let total_updated_slots = blobscan_client.handle_reorged_slots(&reorged_slots).await?;
+
+                                    info!(target, event=event_name, slot=slot, "Reorganization of depth {target_depth} detected. Found the following reorged slots: {:#?}. Total slots marked as reorged: {total_updated_slots}", reorged_slots);
+
+                                    panic!("Chain reorg detected");
+                                },
                                 "head" => {
                                     let head_block_data =
-                                        serde_json::from_str::<HeadBlockEventData>(&event.data)?;
+                                        serde_json::from_str::<HeadEventData>(&event.data)?;
 
                                     let head_block_id = &BlockId::Slot(head_block_data.slot);
                                     let initial_block_id = if is_initial_sync_to_head {
@@ -215,7 +270,7 @@ impl Indexer {
                                         })
                                         .await?;
 
-                                    info!(target = "indexer", "Finalized block {full_block_hash} detected and stored");
+                                    info!(target, event=event_name, execution_block=last_finalized_block_number, "New finalized block detected");
                                 },
                                 unexpected_event_id => {
                                     return Err(IndexerError::UnexpectedEvent { event: unexpected_event_id.to_string() })
@@ -237,7 +292,7 @@ impl Indexer {
             if let Err(error) = result {
                 // TODO: Find a better way to handle this error
                 tx.send(Err(IndexingTaskError::FailedIndexingTask {
-                    task_name: "realtime_head_block_sync".to_string(),
+                    task_name,
                     error,
                 }))
                 .await
