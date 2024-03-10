@@ -19,7 +19,6 @@ mod helpers;
 
 pub struct SlotsProcessor {
     context: Context,
-    last_block: Option<BlockData>,
 }
 
 #[derive(Debug, Clone)]
@@ -38,11 +37,8 @@ impl From<BlockHeader> for BlockData {
 }
 
 impl SlotsProcessor {
-    pub fn new(context: Context, last_block: Option<BlockData>) -> SlotsProcessor {
-        Self {
-            context,
-            last_block,
-        }
+    pub fn new(context: Context) -> SlotsProcessor {
+        Self { context }
     }
 
     pub async fn process_slots(
@@ -54,7 +50,7 @@ impl SlotsProcessor {
 
         if is_reverse_processing {
             for current_slot in (final_slot..=initial_slot).rev() {
-                let result = self.process_slot(current_slot, Some(false)).await;
+                let result = self.process_slot(current_slot).await;
 
                 if let Err(error) = result {
                     return Err(SlotsProcessorError::FailedSlotsProcessing {
@@ -67,7 +63,7 @@ impl SlotsProcessor {
             }
         } else {
             for current_slot in initial_slot..=final_slot {
-                let result = self.process_slot(current_slot, Some(true)).await;
+                let result = self.process_slot(current_slot).await;
 
                 if let Err(error) = result {
                     return Err(SlotsProcessorError::FailedSlotsProcessing {
@@ -83,17 +79,7 @@ impl SlotsProcessor {
         Ok(())
     }
 
-    pub async fn process_slot(
-        &mut self,
-        slot: u32,
-        enable_reorg_detection: Option<bool>,
-    ) -> Result<(), SlotProcessingError> {
-        if let Some(enable_reorg_detection) = enable_reorg_detection {
-            if enable_reorg_detection {
-                self._detect_and_handle_reorg(slot).await?;
-            }
-        }
-
+    pub async fn process_slot(&mut self, slot: u32) -> Result<(), SlotProcessingError> {
         let beacon_client = self.context.beacon_client();
         let blobscan_client = self.context.blobscan_client();
         let provider = self.context.provider();
@@ -224,40 +210,6 @@ impl SlotsProcessor {
             target = "slots_processor",
             slot, "Block indexed successfully"
         );
-
-        Ok(())
-    }
-
-    pub fn get_last_block(&self) -> Option<BlockData> {
-        self.last_block.clone()
-    }
-
-    async fn _detect_and_handle_reorg(&mut self, slot: u32) -> Result<(), SlotProcessingError> {
-        let beacon_client = self.context.beacon_client();
-        let blobscan_client = self.context.blobscan_client();
-
-        let beacon_block_header = match beacon_client.get_block_header(&BlockId::Slot(slot)).await?
-        {
-            Some(block_header) => block_header,
-            None => {
-                debug!(
-                    target = "slots_processor",
-                    slot, "Skipping as there is no beacon block header"
-                );
-
-                return Ok(());
-            }
-        };
-
-        if let Some(block) = &self.last_block {
-            if beacon_block_header.header.message.parent_root != block.root {
-                info!(target = "slots_processor", slot, "Block reorg detected");
-
-                blobscan_client.handle_reorged_slot(slot).await?;
-            }
-        }
-
-        self.last_block = Some(beacon_block_header.into());
 
         Ok(())
     }

@@ -6,7 +6,7 @@ use tracing::{debug, debug_span, info, Instrument};
 use crate::{
     clients::{beacon::types::BlockId, blobscan::types::BlockchainSyncState, common::ClientError},
     context::Context,
-    slots_processor::{error::SlotsProcessorError, BlockData, SlotsProcessor},
+    slots_processor::{error::SlotsProcessorError, SlotsProcessor},
 };
 
 use self::error::{SlotsChunksErrors, SynchronizerError};
@@ -25,7 +25,6 @@ pub struct Synchronizer {
     num_threads: u32,
     min_slots_per_thread: u32,
     slots_checkpoint: u32,
-    last_synced_block: Option<BlockData>,
 }
 
 impl Default for SynchronizerBuilder {
@@ -60,7 +59,6 @@ impl SynchronizerBuilder {
             num_threads: self.num_threads,
             min_slots_per_thread: self.min_slots_per_thread,
             slots_checkpoint: self.slots_checkpoint,
-            last_synced_block: None,
         }
     }
 }
@@ -98,11 +96,10 @@ impl Synchronizer {
         let num_threads = std::cmp::max(1, unprocessed_slots / slots_per_thread);
         let remaining_slots = unprocessed_slots % num_threads;
 
-        let mut handles: Vec<JoinHandle<Result<Option<BlockData>, SlotsProcessorError>>> = vec![];
+        let mut handles: Vec<JoinHandle<Result<(), SlotsProcessorError>>> = vec![];
 
         for i in 0..num_threads {
-            let mut slots_processor =
-                SlotsProcessor::new(self.context.clone(), self.last_synced_block.clone());
+            let mut slots_processor = SlotsProcessor::new(self.context.clone());
             let thread_total_slots = slots_per_thread
                 + if i == num_threads - 1 {
                     remaining_slots
@@ -132,7 +129,7 @@ impl Synchronizer {
                         .process_slots(thread_initial_slot, thread_final_slot)
                         .await?;
 
-                    Ok(slots_processor.get_last_block())
+                    Ok(())
                 }
                 .instrument(synchronizer_thread_span),
             );
@@ -143,14 +140,11 @@ impl Synchronizer {
         let handle_outputs = join_all(handles).await;
 
         let mut errors = vec![];
-        let mut last_synced_block: Option<BlockData> = None;
 
         for handle in handle_outputs {
             match handle {
                 Ok(thread_result) => match thread_result {
-                    Ok(thread_last_block) => {
-                        last_synced_block = thread_last_block;
-                    }
+                    Ok(()) => {}
                     Err(error) => errors.push(error),
                 },
                 Err(error) => {
@@ -162,8 +156,6 @@ impl Synchronizer {
         }
 
         if errors.is_empty() {
-            self.last_synced_block = last_synced_block;
-
             Ok(())
         } else {
             Err(SynchronizerError::FailedParallelSlotsProcessing {
