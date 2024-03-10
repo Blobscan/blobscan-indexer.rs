@@ -69,6 +69,7 @@ pub fn get_tx_versioned_hashes(tx: &Transaction) -> Result<Option<Vec<H256>>> {
 
 pub fn get_network_dencun_fork_slot(network: &Network) -> u32 {
     match network {
+        Network::Mainnet => 8626176,
         Network::Goerli => 7413760,
         Network::Sepolia => 4243456,
         Network::Holesky => 950272,
