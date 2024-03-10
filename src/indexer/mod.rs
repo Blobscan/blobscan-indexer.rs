@@ -18,7 +18,6 @@ use crate::{
     context::{Config as ContextConfig, Context},
     env::Environment,
     synchronizer::{Synchronizer, SynchronizerBuilder},
-    utils::web3::get_network_dencun_fork_slot,
 };
 
 use self::{
@@ -56,7 +55,7 @@ impl Indexer {
         };
         let dencun_fork_slot = env
             .dencun_fork_slot
-            .unwrap_or(get_network_dencun_fork_slot(&env.network_name));
+            .unwrap_or(env.network_name.dencun_fork_slot());
 
         Ok(Self {
             context,
@@ -218,6 +217,8 @@ impl Indexer {
                                     let total_updated_slots = blobscan_client.handle_reorged_slots(&reorged_slots).await?;
 
                                     info!(target, event=event_name, slot=slot, "Reorganization of depth {target_depth} detected. Found the following reorged slots: {:#?}. Total slots marked as reorged: {total_updated_slots}", reorged_slots);
+
+                                    panic!("Chain reorg detected");
                                 },
                                 "head" => {
                                     let head_block_data =

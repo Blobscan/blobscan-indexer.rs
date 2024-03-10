@@ -6,16 +6,14 @@ use indexer::Indexer;
 use url::Url;
 use utils::telemetry::{get_subscriber, init_subscriber};
 
-use crate::utils::web3::get_network_dencun_fork_slot;
-
 mod args;
 mod clients;
 mod context;
 mod env;
 mod indexer;
+mod network;
 mod slots_processor;
 mod synchronizer;
-mod types;
 mod utils;
 
 fn remove_credentials_from_url(url_string: &str) -> Option<String> {
@@ -42,8 +40,7 @@ pub fn print_banner(args: &Args, env: &Environment) {
     if let Some(dencun_fork_slot) = env.dencun_fork_slot {
         println!("Dencun fork slot: {dencun_fork_slot}");
     } else {
-        let default_dencun_fork_slot = get_network_dencun_fork_slot(&env.network_name);
-        println!("Dencun fork slot: {default_dencun_fork_slot}");
+        println!("Dencun fork slot: {}", env.network_name.dencun_fork_slot());
     }
 
     if let Some(from_slot) = args.from_slot.clone() {

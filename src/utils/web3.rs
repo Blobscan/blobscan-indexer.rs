@@ -4,8 +4,6 @@ use anyhow::{Context, Result};
 use ethers::core::k256::sha2::{Digest, Sha256};
 use ethers::{prelude::*, types::H256};
 
-use crate::types::Network;
-
 const BLOB_COMMITMENT_VERSION_KZG: u8 = 0x01;
 
 pub fn sha256(value: &str) -> Result<H256> {
@@ -64,15 +62,5 @@ pub fn get_tx_versioned_hashes(tx: &Transaction) -> Result<Option<Vec<H256>>> {
             Ok(Some(blob_versioned_hashes))
         }
         None => Ok(None),
-    }
-}
-
-pub fn get_network_dencun_fork_slot(network: &Network) -> u32 {
-    match network {
-        Network::Mainnet => 8626176,
-        Network::Goerli => 7413760,
-        Network::Sepolia => 4243456,
-        Network::Holesky => 950272,
-        _ => 0,
     }
 }
