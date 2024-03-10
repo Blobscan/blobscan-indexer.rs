@@ -228,8 +228,6 @@ impl Indexer {
                                     let total_updated_slots = blobscan_client.handle_reorged_slots(&reorged_slots).await?;
 
                                     info!(target, event=event_name, slot=slot, "Reorganization of depth {target_depth} detected. Found the following reorged slots: {:#?}. Total slots marked as reorged: {total_updated_slots}", reorged_slots);
-
-                                    panic!("Chain reorg detected");
                                 },
                                 "head" => {
                                     let head_block_data =
