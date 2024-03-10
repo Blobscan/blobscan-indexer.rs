@@ -2,13 +2,16 @@ use backoff::ExponentialBackoff;
 use chrono::TimeDelta;
 use reqwest::{Client, Url};
 
-use crate::{clients::common::ClientResult, json_get, json_put};
+use crate::{
+    clients::{blobscan::types::ReorgedSlotsResponse, common::ClientResult},
+    json_get, json_put,
+};
 
 use self::{
     jwt_manager::{Config as JWTManagerConfig, JWTManager},
     types::{
         Blob, Block, BlockchainSyncState, BlockchainSyncStateRequest, BlockchainSyncStateResponse,
-        IndexRequest, ReorgedSlotRequest, Transaction,
+        IndexRequest, ReorgedSlotsRequest, Transaction,
     },
 };
 
@@ -64,14 +67,15 @@ impl BlobscanClient {
         json_put!(&self.client, url, token, &req).map(|_: Option<()>| ())
     }
 
-    pub async fn handle_reorged_slot(&self, slot: u32) -> ClientResult<()> {
-        let url = self.base_url.join("indexer/reorged-slot")?;
+    pub async fn handle_reorged_slots(&self, slots: Vec<u32>) -> ClientResult<u32> {
+        let url = self.base_url.join("indexer/reorged-slots")?;
         let token = self.jwt_manager.get_token()?;
-        let req = ReorgedSlotRequest {
-            new_head_slot: slot,
+        let req = ReorgedSlotsRequest {
+            reorged_slots: slots,
         };
 
-        json_put!(&self.client, url, token, &req).map(|_: Option<()>| ())
+        json_put!(&self.client, url, ReorgedSlotsResponse, token, &req)
+            .map(|res: Option<ReorgedSlotsResponse>| res.unwrap().total_updated_slots)
     }
 
     pub async fn update_sync_state(&self, sync_state: BlockchainSyncState) -> ClientResult<()> {

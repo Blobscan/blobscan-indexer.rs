@@ -4,7 +4,7 @@ use anyhow::{anyhow, Context as AnyhowContext};
 use futures::StreamExt;
 use reqwest_eventsource::Event;
 use tokio::{sync::mpsc, task::JoinHandle};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use crate::{
     args::Args,
@@ -151,6 +151,8 @@ impl Indexer {
         tx: mpsc::Sender<IndexerTaskResult>,
         start_block_id: BlockId,
     ) -> JoinHandle<IndexerTaskResult> {
+        let task_name = "realtime_sync".to_string();
+        let target = format!("indexer:{task_name}");
         let task_context = self.context.clone();
         let mut synchronizer = self._create_synchronizer();
 
@@ -158,31 +160,56 @@ impl Indexer {
             let result: Result<(), IndexerError> = async {
                 let beacon_client = task_context.beacon_client();
                 let blobscan_client = task_context.blobscan_client();
+                let topics = vec![
+                    Topic::ChainReorg,
+                    Topic::Head,
+                    Topic::FinalizedCheckpoint,
+                ];
                 let mut event_source = task_context
                     .beacon_client()
-                    .subscribe_to_events(vec![Topic::ChainReorg, Topic::Head, Topic::FinalizedCheckpoint])?;
+                    .subscribe_to_events(&topics)?;
                 let mut is_initial_sync_to_head = true;
 
                 while let Some(event) = event_source.next().await {
                     match event {
                         Ok(Event::Open) => {
-                            debug!(target = "indexer", "Listening for head and finalized block events…")
+                            let events = topics
+                                .iter()
+                                .map(|topic| String::from(topic))
+                                .collect::<Vec<String>>()
+                                .join(", ");
+                            debug!(target, events, "Listening to beacon events…")
                         }
                         Ok(Event::Message(event)) => {
-                            match event.event.as_str() {
+                            let event_name = event.event.as_str();
+
+                            match event_name {
                                 "chain_reorg" => {
                                     let reorg_block_data =
                                         serde_json::from_str::<ChainReorgEventData>(&event.data)?;
-                                    
-                                    let reorged_slot = reorg_block_data.slot;
- 
-                                    blobscan_client.handle_reorged_slot(reorged_slot).await?;
-                                    blobscan_client.update_sync_state(BlockchainSyncState {
-                                        last_finalized_block: None,
-                                        last_lower_synced_slot: None,
-                                        last_upper_synced_slot: Some(reorged_slot),
-                                    }).await?;
+                                    let slot = reorg_block_data.slot;
+                                    let old_head_block = reorg_block_data.old_head_block;
+                                    let target_depth = reorg_block_data.depth;
 
+                                    let mut current_reorged_block = old_head_block;
+                                    let mut reorged_slots: Vec<u32> = vec![];
+
+                                    for current_depth in 0..target_depth {
+                                        let reorged_block_head = match beacon_client.get_block_header(&BlockId::Hash(current_reorged_block)).await? {
+                                            Some(block) => block,
+                                            None => {
+                                                warn!(target, event=event_name, slot=slot, "Found {current_depth} out of {target_depth} reorged blocks only");
+                                                break
+                                            }
+                                        };
+
+                                        reorged_slots.push(reorged_block_head.header.message.slot);
+                                        current_reorged_block = reorged_block_head.header.message.parent_root;
+                                    }
+
+                                    let total_updated_slots = blobscan_client.handle_reorged_slots(reorged_slots).await?;
+
+                                    info!(target, event=event_name, slot=slot, "Reorganization of depth {target_depth} detected. Found reorged slots: {current_reorged_block}. Total slots marked as reorged: {total_updated_slots}");
                                 },
                                 "head" => {
                                     let head_block_data =
@@ -212,6 +239,7 @@ impl Indexer {
                                             &event.data,
                                         )?;
                                     let block_hash = finalized_checkpoint_data.block;
+                                    
                                     let full_block_hash = format!("0x{:x}", block_hash);
                                     let last_finalized_block_number = beacon_client
                                         .get_block(&BlockId::Hash(block_hash))
@@ -234,7 +262,7 @@ impl Indexer {
                                         })
                                         .await?;
 
-                                    info!(target = "indexer", "Finalized block {full_block_hash} detected and stored");
+                                    info!(target, event=event_name, execution_block=last_finalized_block_number, "New finalized block detected");
                                 },
                                 unexpected_event_id => {
                                     return Err(IndexerError::UnexpectedEvent { event: unexpected_event_id.to_string() })
@@ -256,7 +284,7 @@ impl Indexer {
             if let Err(error) = result {
                 // TODO: Find a better way to handle this error
                 tx.send(Err(IndexingTaskError::FailedIndexingTask {
-                    task_name: "realtime_head_block_sync".to_string(),
+                    task_name,
                     error,
                 }))
                 .await

@@ -79,7 +79,7 @@ impl BeaconClient {
         })
     }
 
-    pub fn subscribe_to_events(&self, topics: Vec<Topic>) -> ClientResult<EventSource> {
+    pub fn subscribe_to_events(&self, topics: &Vec<Topic>) -> ClientResult<EventSource> {
         let topics = topics
             .iter()
             .map(|topic| topic.into())

@@ -92,6 +92,8 @@ pub struct ChainReorgEventData {
     pub new_head_block: H256,
     #[serde(deserialize_with = "deserialize_number")]
     pub slot: u32,
+    #[serde(deserialize_with = "deserialize_number")]
+    pub depth: u32,
 }
 
 #[derive(Deserialize, Debug)]
