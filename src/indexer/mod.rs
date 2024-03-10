@@ -1,6 +1,7 @@
 use std::thread;
 
 use anyhow::{anyhow, Context as AnyhowContext};
+
 use futures::StreamExt;
 use reqwest_eventsource::Event;
 use tokio::{sync::mpsc, task::JoinHandle};
@@ -216,7 +217,7 @@ impl Indexer {
 
                                     let total_updated_slots = blobscan_client.handle_reorged_slots(&reorged_slots).await?;
 
-                                    info!(target, event=event_name, slot=slot, "Reorganization of depth {target_depth} detected. Found reorged slots: {:#?}. Total slots marked as reorged: {total_updated_slots}", reorged_slots);
+                                    info!(target, event=event_name, slot=slot, "Reorganization of depth {target_depth} detected. Found the following reorged slots: {:#?}. Total slots marked as reorged: {total_updated_slots}", reorged_slots);
                                 },
                                 "head" => {
                                     let head_block_data =

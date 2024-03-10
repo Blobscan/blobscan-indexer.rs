@@ -47,9 +47,7 @@ pub fn print_banner(args: &Args, env: &Environment) {
     }
 
     if let Some(from_slot) = args.from_slot.clone() {
-        println!("Start slot: {}", from_slot);
-    } else {
-        println!("Start slot: 0");
+        println!("Custom start slot: {}", from_slot.to_detailed_string());
     }
 
     if let Some(num_threads) = args.num_threads {
