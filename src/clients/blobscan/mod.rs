@@ -67,11 +67,11 @@ impl BlobscanClient {
         json_put!(&self.client, url, token, &req).map(|_: Option<()>| ())
     }
 
-    pub async fn handle_reorged_slots(&self, slots: Vec<u32>) -> ClientResult<u32> {
+    pub async fn handle_reorged_slots(&self, slots: &[u32]) -> ClientResult<u32> {
         let url = self.base_url.join("indexer/reorged-slots")?;
         let token = self.jwt_manager.get_token()?;
         let req = ReorgedSlotsRequest {
-            reorged_slots: slots,
+            reorged_slots: slots.to_owned(),
         };
 
         json_put!(&self.client, url, ReorgedSlotsResponse, token, &req)

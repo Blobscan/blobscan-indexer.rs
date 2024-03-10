@@ -45,6 +45,7 @@ impl Indexer {
                 return Err(error.into());
             }
         };
+
         let slots_checkpoint = args.slots_per_save;
         let num_threads = match args.num_threads {
             Some(num_threads) => num_threads,
@@ -82,7 +83,7 @@ impl Indexer {
                     None => match state.last_upper_synced_slot {
                         Some(slot) => BlockId::Slot(slot - 1),
                         None => BlockId::Head,
-                    }
+                    },
                 },
                 None => BlockId::Head,
             },
@@ -95,7 +96,7 @@ impl Indexer {
                     None => match state.last_lower_synced_slot {
                         Some(slot) => BlockId::Slot(slot + 1),
                         None => BlockId::Head,
-                    }
+                    },
                 },
                 None => BlockId::Head,
             },
@@ -181,7 +182,7 @@ impl Indexer {
                         Ok(Event::Open) => {
                             let events = topics
                                 .iter()
-                                .map(|topic| String::from(topic))
+                                .map(|topic| topic.into())
                                 .collect::<Vec<String>>()
                                 .join(", ");
                             debug!(target, events, "Listening to beacon events…")
@@ -200,7 +201,7 @@ impl Indexer {
                                     let mut current_reorged_block = old_head_block;
                                     let mut reorged_slots: Vec<u32> = vec![];
 
-                                    for current_depth in 0..target_depth {
+                                    for current_depth in 1..=target_depth {
                                         let reorged_block_head = match beacon_client.get_block_header(&BlockId::Hash(current_reorged_block)).await? {
                                             Some(block) => block,
                                             None => {
@@ -213,9 +214,9 @@ impl Indexer {
                                         current_reorged_block = reorged_block_head.header.message.parent_root;
                                     }
 
-                                    let total_updated_slots = blobscan_client.handle_reorged_slots(reorged_slots).await?;
+                                    let total_updated_slots = blobscan_client.handle_reorged_slots(&reorged_slots).await?;
 
-                                    info!(target, event=event_name, slot=slot, "Reorganization of depth {target_depth} detected. Found reorged slots: {current_reorged_block}. Total slots marked as reorged: {total_updated_slots}");
+                                    info!(target, event=event_name, slot=slot, "Reorganization of depth {target_depth} detected. Found reorged slots: {:#?}. Total slots marked as reorged: {total_updated_slots}", reorged_slots);
                                 },
                                 "head" => {
                                     let head_block_data =
@@ -245,7 +246,6 @@ impl Indexer {
                                             &event.data,
                                         )?;
                                     let block_hash = finalized_checkpoint_data.block;
-                                    
                                     let full_block_hash = format!("0x{:x}", block_hash);
                                     let last_finalized_block_number = beacon_client
                                         .get_block(&BlockId::Hash(block_hash))
