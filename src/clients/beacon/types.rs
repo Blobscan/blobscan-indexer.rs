@@ -117,6 +117,17 @@ where
     value.parse::<u32>().map_err(serde::de::Error::custom)
 }
 
+impl BlockId {
+    pub fn to_detailed_string(&self) -> String {
+        match self {
+            BlockId::Head => String::from("head"),
+            BlockId::Finalized => String::from("finalized"),
+            BlockId::Slot(slot) => slot.to_string(),
+            BlockId::Hash(hash) => format!("0x{:x}", hash),
+        }
+    }
+}
+
 impl fmt::Display for BlockId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -138,7 +149,16 @@ impl FromStr for BlockId {
             _ => match s.parse::<u32>() {
                 Ok(num) => Ok(BlockId::Slot(num)),
                 Err(_) => {
-                    Err("Invalid block ID. Expected 'head', 'finalized' or a number.".to_string())
+                    if s.starts_with("0x") {
+                        match H256::from_str(s) {
+                            Ok(hash) => Ok(BlockId::Hash(hash)),
+                            Err(_) => Err(format!("Invalid block ID hash: {s}")),
+                        }
+                    } else {
+                        Err(
+                            format!("Invalid block ID: {s}. Expected 'head', 'finalized', a hash or a number."),
+                        )
+                    }
                 }
             },
         }
