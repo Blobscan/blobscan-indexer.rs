@@ -180,7 +180,7 @@ impl Synchronizer {
             initial_slot,
             final_slot,
             reverse_sync = is_reverse_sync,
-            "Synchronizer started: Processing {unprocessed_slots} slots…"
+            "Processing {unprocessed_slots} slots…"
         );
 
         while unprocessed_slots > 0 {
