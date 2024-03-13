@@ -34,7 +34,7 @@ pub struct Config {
 
 impl BlobscanClient {
     pub fn try_with_client(client: Client, config: Config) -> ClientResult<Self> {
-        let base_url = Url::parse(&format!("{}/api/", config.base_url))?;
+        let base_url = Url::parse(&format!("{}/", config.base_url))?;
         let jwt_manager = JWTManager::new(JWTManagerConfig {
             secret_key: config.secret_key,
             refresh_interval: TimeDelta::try_hours(1).unwrap(),
