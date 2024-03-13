@@ -1,10 +1,12 @@
 name: Continuous Integration (build, test, docker, deploy)
 
 on:
-  push:
-    branches: ["master"]
   pull_request:
     branches: ["master"]
+  push:
+    branches: ["master"]
+  tags:
+    - 'v*'
 
 env:
   CARGO_TERM_COLOR: always
@@ -77,18 +79,3 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-
-  deploy_staging:
-    if: github.ref_name == 'master'
-    name: Deploy blobscan api (staging)
-    runs-on: ubuntu-latest
-    environment: staging
-    needs: docker
-    steps:
-      - uses: appleboy/ssh-action@v0.0.7
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: deploy
-          port: ${{ secrets.SSH_PORT }}
-          key: ${{ secrets.SSH_KEY }}
-          script: ./deploy-blobscan-indexer.rs.sh
