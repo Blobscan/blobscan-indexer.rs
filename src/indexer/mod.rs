@@ -36,6 +36,18 @@ pub struct Indexer {
     disable_checkpoints: Option<bool>,
 }
 
+pub struct RunOptions {
+    pub disable_historical_sync: Option<bool>,
+}
+
+impl Default for RunOptions {
+    fn default() -> Self {
+        Self {
+            disable_historical_sync: Some(true),
+        }
+    }
+}
+
 impl Indexer {
     pub fn try_new(env: &Environment, args: &Args) -> IndexerResult<Self> {
         let context = match Context::try_new(ContextConfig::from(env)) {
@@ -69,7 +81,16 @@ impl Indexer {
         })
     }
 
-    pub async fn run(&mut self, custom_start_block_id: Option<BlockId>) -> IndexerResult<()> {
+    pub async fn run(
+        &mut self,
+        custom_start_block_id: Option<BlockId>,
+        opts: Option<RunOptions>,
+    ) -> IndexerResult<()> {
+        let opts = match opts {
+            Some(opts) => opts,
+            None => RunOptions::default(),
+        };
+
         let sync_state = match self.context.blobscan_client().get_sync_state().await {
             Ok(state) => state,
             Err(error) => {
@@ -116,7 +137,10 @@ impl Indexer {
         let (tx, mut rx) = mpsc::channel(32);
         let tx1 = tx.clone();
 
-        self._start_historical_sync_task(tx1, current_lower_block_id);
+        if opts.disable_historical_sync.is_some_and(|disable| !disable) {
+            self._start_historical_sync_task(tx1, current_lower_block_id);
+        }
+
         self._start_realtime_sync_task(tx, current_upper_block_id);
 
         while let Some(message) = rx.recv().await {

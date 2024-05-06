@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result as AnyhowResult};
 use args::Args;
 use clap::Parser;
 use env::Environment;
-use indexer::Indexer;
+use indexer::{Indexer, RunOptions};
 use url::Url;
 use utils::telemetry::{get_subscriber, init_subscriber};
 
@@ -99,11 +99,16 @@ async fn run() -> AnyhowResult<()> {
     init_subscriber(subscriber);
 
     let args = Args::parse();
+    let run_opts = args
+        .disable_historical_sync
+        .map(|disable_historical_sync| RunOptions {
+            disable_historical_sync: Some(disable_historical_sync),
+        });
 
     print_banner(&args, &env);
 
     Indexer::try_new(&env, &args)?
-        .run(args.from_slot)
+        .run(args.from_slot, run_opts)
         .await
         .map_err(|err| anyhow!(err))
 }

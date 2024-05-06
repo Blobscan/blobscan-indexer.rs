@@ -21,4 +21,8 @@ pub struct Args {
     /// Disable slot checkpoint saving
     #[arg(short, long)]
     pub disable_checkpoints: Option<bool>,
+
+    /// Disable histotircal synchronization
+    #[arg(short, long)]
+    pub disable_historical_sync: Option<bool>,
 }
