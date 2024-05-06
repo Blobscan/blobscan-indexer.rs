@@ -33,19 +33,12 @@ pub struct Indexer {
     dencun_fork_slot: u32,
     num_threads: u32,
     slots_checkpoint: Option<u32>,
-    disable_checkpoints: Option<bool>,
+    disable_sync_checkpoint_save: bool,
 }
 
+#[derive(Debug, Default)]
 pub struct RunOptions {
-    pub disable_historical_sync: Option<bool>,
-}
-
-impl Default for RunOptions {
-    fn default() -> Self {
-        Self {
-            disable_historical_sync: Some(true),
-        }
-    }
+    pub disable_sync_historical: bool,
 }
 
 impl Indexer {
@@ -66,7 +59,7 @@ impl Indexer {
                 .map_err(|err| anyhow!("Failed to get number of available threads: {:?}", err))?
                 .get() as u32,
         };
-        let disable_checkpoints = args.disable_checkpoints;
+        let disable_sync_checkpoint_save = args.disable_sync_checkpoint_save;
 
         let dencun_fork_slot = env
             .dencun_fork_slot
@@ -77,7 +70,7 @@ impl Indexer {
             num_threads,
             slots_checkpoint,
             dencun_fork_slot,
-            disable_checkpoints,
+            disable_sync_checkpoint_save,
         })
     }
 
@@ -137,7 +130,7 @@ impl Indexer {
         let (tx, mut rx) = mpsc::channel(32);
         let tx1 = tx.clone();
 
-        if opts.disable_historical_sync.is_some_and(|disable| !disable) {
+        if !opts.disable_sync_historical {
             self._start_historical_sync_task(tx1, current_lower_block_id);
         }
 
@@ -343,9 +336,7 @@ impl Indexer {
     fn _create_synchronizer(&self) -> Synchronizer {
         let mut synchronizer_builder = SynchronizerBuilder::new();
 
-        if let Some(disable_checkpoints) = self.disable_checkpoints {
-            synchronizer_builder.with_disable_checkpoints(disable_checkpoints);
-        }
+        synchronizer_builder.with_disable_checkpoint_save(self.disable_sync_checkpoint_save);
 
         synchronizer_builder.with_num_threads(self.num_threads);
 

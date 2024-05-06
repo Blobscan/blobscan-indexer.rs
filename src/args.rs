@@ -1,4 +1,4 @@
-use clap::Parser;
+use clap::{ArgAction, Parser};
 
 use crate::clients::beacon::types::BlockId;
 
@@ -18,11 +18,11 @@ pub struct Args {
     #[arg(short, long)]
     pub slots_per_save: Option<u32>,
 
-    /// Disable slot checkpoint saving
-    #[arg(short, long)]
-    pub disable_checkpoints: Option<bool>,
+    /// Disable slot checkpoint saving when syncing
+    #[arg(short = 'c', long, action = ArgAction::SetTrue)]
+    pub disable_sync_checkpoint_save: bool,
 
-    /// Disable histotircal synchronization
-    #[arg(short, long)]
-    pub disable_historical_sync: Option<bool>,
+    /// Disable historical synchronization
+    #[arg(short = 'd', long, action = ArgAction::SetTrue)]
+    pub disable_sync_historical: bool,
 }

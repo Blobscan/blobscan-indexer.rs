@@ -18,7 +18,7 @@ pub struct SynchronizerBuilder {
     num_threads: u32,
     min_slots_per_thread: u32,
     slots_checkpoint: u32,
-    disable_checkpoints: bool,
+    disable_checkpoint_save: bool,
 }
 
 pub struct Synchronizer {
@@ -26,7 +26,7 @@ pub struct Synchronizer {
     num_threads: u32,
     min_slots_per_thread: u32,
     slots_checkpoint: u32,
-    disable_checkpoints: bool,
+    disable_checkpoint_save: bool,
 }
 
 impl Default for SynchronizerBuilder {
@@ -35,7 +35,7 @@ impl Default for SynchronizerBuilder {
             num_threads: 1,
             min_slots_per_thread: 50,
             slots_checkpoint: 1000,
-            disable_checkpoints: false,
+            disable_checkpoint_save: false,
         }
     }
 }
@@ -45,8 +45,8 @@ impl SynchronizerBuilder {
         SynchronizerBuilder::default()
     }
 
-    pub fn with_disable_checkpoints(&mut self, disable_checkpoints: bool) -> &mut Self {
-        self.disable_checkpoints = disable_checkpoints;
+    pub fn with_disable_checkpoint_save(&mut self, disable_checkpoint_save: bool) -> &mut Self {
+        self.disable_checkpoint_save = disable_checkpoint_save;
 
         self
     }
@@ -68,7 +68,7 @@ impl SynchronizerBuilder {
             num_threads: self.num_threads,
             min_slots_per_thread: self.min_slots_per_thread,
             slots_checkpoint: self.slots_checkpoint,
-            disable_checkpoints: self.disable_checkpoints,
+            disable_checkpoint_save: self.disable_checkpoint_save,
         }
     }
 }
@@ -83,12 +83,8 @@ impl Synchronizer {
         let mut final_slot = self._resolve_to_slot(final_block_id).await?;
 
         loop {
-            if self.disable_checkpoints {
-                self._sync_slots(initial_slot, final_slot).await?;
-            } else {
-                self._sync_slots_by_checkpoints(initial_slot, final_slot)
-                    .await?;
-            }
+            self._sync_slots_by_checkpoints(initial_slot, final_slot)
+                .await?;
 
             let latest_final_slot = self._resolve_to_slot(final_block_id).await?;
 
@@ -220,41 +216,43 @@ impl Synchronizer {
             let last_lower_synced_slot = if is_reverse_sync { last_slot } else { None };
             let last_upper_synced_slot = if is_reverse_sync { None } else { last_slot };
 
-            if let Err(error) = self
-                .context
-                .blobscan_client()
-                .update_sync_state(BlockchainSyncState {
-                    last_finalized_block: None,
-                    last_lower_synced_slot,
-                    last_upper_synced_slot,
-                })
-                .await
-            {
-                let new_synced_slot = match last_lower_synced_slot {
-                    Some(slot) => slot,
-                    None => match last_upper_synced_slot {
+            if !self.disable_checkpoint_save {
+                if let Err(error) = self
+                    .context
+                    .blobscan_client()
+                    .update_sync_state(BlockchainSyncState {
+                        last_finalized_block: None,
+                        last_lower_synced_slot,
+                        last_upper_synced_slot,
+                    })
+                    .await
+                {
+                    let new_synced_slot = match last_lower_synced_slot {
                         Some(slot) => slot,
-                        None => {
-                            return Err(SynchronizerError::Other(anyhow!(
-                                "Failed to get new last synced slot: last_lower_synced_slot and last_upper_synced_slot are both None"
-                            )))
-                        }
-                    },
-                };
+                        None => match last_upper_synced_slot {
+                            Some(slot) => slot,
+                            None => {
+                                return Err(SynchronizerError::Other(anyhow!(
+                                    "Failed to get new last synced slot: last_lower_synced_slot and last_upper_synced_slot are both None"
+                                )))
+                            }
+                        },
+                    };
 
-                return Err(SynchronizerError::FailedSlotCheckpointSave {
-                    slot: new_synced_slot,
-                    error,
-                });
-            }
+                    return Err(SynchronizerError::FailedSlotCheckpointSave {
+                        slot: new_synced_slot,
+                        error,
+                    });
+                }
 
-            if unprocessed_slots >= self.slots_checkpoint {
-                debug!(
-                    target = "synchronizer",
-                    new_last_lower_synced_slot = last_lower_synced_slot,
-                    new_last_upper_synced_slot = last_upper_synced_slot,
-                    "Checkpoint reached. Last synced slot saved…"
-                );
+                if unprocessed_slots >= self.slots_checkpoint {
+                    debug!(
+                        target = "synchronizer",
+                        new_last_lower_synced_slot = last_lower_synced_slot,
+                        new_last_upper_synced_slot = last_upper_synced_slot,
+                        "Checkpoint reached. Last synced slot saved…"
+                    );
+                }
             }
 
             current_slot = if is_reverse_sync {

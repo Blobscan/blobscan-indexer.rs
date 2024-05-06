@@ -99,11 +99,9 @@ async fn run() -> AnyhowResult<()> {
     init_subscriber(subscriber);
 
     let args = Args::parse();
-    let run_opts = args
-        .disable_historical_sync
-        .map(|disable_historical_sync| RunOptions {
-            disable_historical_sync: Some(disable_historical_sync),
-        });
+    let run_opts = Some(RunOptions {
+        disable_sync_historical: args.disable_sync_historical,
+    });
 
     print_banner(&args, &env);
 
