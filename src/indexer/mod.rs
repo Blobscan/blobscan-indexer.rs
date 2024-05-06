@@ -33,6 +33,7 @@ pub struct Indexer {
     dencun_fork_slot: u32,
     num_threads: u32,
     slots_checkpoint: Option<u32>,
+    disable_checkpoints: Option<bool>,
 }
 
 impl Indexer {
@@ -53,6 +54,8 @@ impl Indexer {
                 .map_err(|err| anyhow!("Failed to get number of available threads: {:?}", err))?
                 .get() as u32,
         };
+        let disable_checkpoints = args.disable_checkpoints;
+
         let dencun_fork_slot = env
             .dencun_fork_slot
             .unwrap_or(env.network_name.dencun_fork_slot());
@@ -62,6 +65,7 @@ impl Indexer {
             num_threads,
             slots_checkpoint,
             dencun_fork_slot,
+            disable_checkpoints,
         })
     }
 
@@ -314,6 +318,10 @@ impl Indexer {
 
     fn _create_synchronizer(&self) -> Synchronizer {
         let mut synchronizer_builder = SynchronizerBuilder::new();
+
+        if let Some(disable_checkpoints) = self.disable_checkpoints {
+            synchronizer_builder.with_disable_checkpoints(disable_checkpoints);
+        }
 
         synchronizer_builder.with_num_threads(self.num_threads);
 

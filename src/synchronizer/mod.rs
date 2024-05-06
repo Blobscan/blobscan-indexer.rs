@@ -18,6 +18,7 @@ pub struct SynchronizerBuilder {
     num_threads: u32,
     min_slots_per_thread: u32,
     slots_checkpoint: u32,
+    disable_checkpoints: bool,
 }
 
 pub struct Synchronizer {
@@ -25,6 +26,7 @@ pub struct Synchronizer {
     num_threads: u32,
     min_slots_per_thread: u32,
     slots_checkpoint: u32,
+    disable_checkpoints: bool,
 }
 
 impl Default for SynchronizerBuilder {
@@ -33,6 +35,7 @@ impl Default for SynchronizerBuilder {
             num_threads: 1,
             min_slots_per_thread: 50,
             slots_checkpoint: 1000,
+            disable_checkpoints: false,
         }
     }
 }
@@ -40,6 +43,12 @@ impl Default for SynchronizerBuilder {
 impl SynchronizerBuilder {
     pub fn new() -> Self {
         SynchronizerBuilder::default()
+    }
+
+    pub fn with_disable_checkpoints(&mut self, disable_checkpoints: bool) -> &mut Self {
+        self.disable_checkpoints = disable_checkpoints;
+
+        self
     }
 
     pub fn with_num_threads(&mut self, num_threads: u32) -> &mut Self {
@@ -59,6 +68,7 @@ impl SynchronizerBuilder {
             num_threads: self.num_threads,
             min_slots_per_thread: self.min_slots_per_thread,
             slots_checkpoint: self.slots_checkpoint,
+            disable_checkpoints: self.disable_checkpoints,
         }
     }
 }
@@ -73,8 +83,12 @@ impl Synchronizer {
         let mut final_slot = self._resolve_to_slot(final_block_id).await?;
 
         loop {
-            self._sync_slots_by_checkpoints(initial_slot, final_slot)
-                .await?;
+            if self.disable_checkpoints {
+                self._sync_slots(initial_slot, final_slot).await?;
+            } else {
+                self._sync_slots_by_checkpoints(initial_slot, final_slot)
+                    .await?;
+            }
 
             let latest_final_slot = self._resolve_to_slot(final_block_id).await?;
 

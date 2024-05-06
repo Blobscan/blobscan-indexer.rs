@@ -17,4 +17,8 @@ pub struct Args {
     /// Amount of slots to be processed before saving latest slot in the database
     #[arg(short, long)]
     pub slots_per_save: Option<u32>,
+
+    /// Disable slot checkpoint saving
+    #[arg(short, long)]
+    pub disable_checkpoints: Option<bool>,
 }
