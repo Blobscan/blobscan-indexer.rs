@@ -33,6 +33,12 @@ pub struct Indexer {
     dencun_fork_slot: u32,
     num_threads: u32,
     slots_checkpoint: Option<u32>,
+    disable_sync_checkpoint_save: bool,
+}
+
+#[derive(Debug, Default)]
+pub struct RunOptions {
+    pub disable_sync_historical: bool,
 }
 
 impl Indexer {
@@ -53,6 +59,8 @@ impl Indexer {
                 .map_err(|err| anyhow!("Failed to get number of available threads: {:?}", err))?
                 .get() as u32,
         };
+        let disable_sync_checkpoint_save = args.disable_sync_checkpoint_save;
+
         let dencun_fork_slot = env
             .dencun_fork_slot
             .unwrap_or(env.network_name.dencun_fork_slot());
@@ -62,10 +70,20 @@ impl Indexer {
             num_threads,
             slots_checkpoint,
             dencun_fork_slot,
+            disable_sync_checkpoint_save,
         })
     }
 
-    pub async fn run(&mut self, custom_start_block_id: Option<BlockId>) -> IndexerResult<()> {
+    pub async fn run(
+        &mut self,
+        custom_start_block_id: Option<BlockId>,
+        opts: Option<RunOptions>,
+    ) -> IndexerResult<()> {
+        let opts = match opts {
+            Some(opts) => opts,
+            None => RunOptions::default(),
+        };
+
         let sync_state = match self.context.blobscan_client().get_sync_state().await {
             Ok(state) => state,
             Err(error) => {
@@ -112,7 +130,10 @@ impl Indexer {
         let (tx, mut rx) = mpsc::channel(32);
         let tx1 = tx.clone();
 
-        self._start_historical_sync_task(tx1, current_lower_block_id);
+        if !opts.disable_sync_historical {
+            self._start_historical_sync_task(tx1, current_lower_block_id);
+        }
+
         self._start_realtime_sync_task(tx, current_upper_block_id);
 
         while let Some(message) = rx.recv().await {
@@ -314,6 +335,8 @@ impl Indexer {
 
     fn _create_synchronizer(&self) -> Synchronizer {
         let mut synchronizer_builder = SynchronizerBuilder::new();
+
+        synchronizer_builder.with_disable_checkpoint_save(self.disable_sync_checkpoint_save);
 
         synchronizer_builder.with_num_threads(self.num_threads);
 

@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result as AnyhowResult};
 use args::Args;
 use clap::Parser;
 use env::Environment;
-use indexer::Indexer;
+use indexer::{Indexer, RunOptions};
 use url::Url;
 use utils::telemetry::{get_subscriber, init_subscriber};
 
@@ -59,6 +59,24 @@ pub fn print_banner(args: &Args, env: &Environment) {
         println!("Slots checkpoint size: 1000");
     }
 
+    println!(
+        "Disable sync checkpoint saving: {}",
+        if args.disable_sync_checkpoint_save {
+            "yes"
+        } else {
+            "no"
+        }
+    );
+
+    println!(
+        "Disable historical sync: {}",
+        if args.disable_sync_historical {
+            "yes"
+        } else {
+            "no"
+        }
+    );
+
     println!("Blobscan API endpoint: {}", env.blobscan_api_endpoint);
     println!(
         "CL endpoint: {:?}",
@@ -99,11 +117,14 @@ async fn run() -> AnyhowResult<()> {
     init_subscriber(subscriber);
 
     let args = Args::parse();
+    let run_opts = Some(RunOptions {
+        disable_sync_historical: args.disable_sync_historical,
+    });
 
     print_banner(&args, &env);
 
     Indexer::try_new(&env, &args)?
-        .run(args.from_slot)
+        .run(args.from_slot, run_opts)
         .await
         .map_err(|err| anyhow!(err))
 }
