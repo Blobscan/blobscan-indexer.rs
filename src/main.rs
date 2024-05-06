@@ -59,6 +59,24 @@ pub fn print_banner(args: &Args, env: &Environment) {
         println!("Slots checkpoint size: 1000");
     }
 
+    println!(
+        "Disable sync checkpoint saving: {}",
+        if args.disable_sync_checkpoint_save {
+            "yes"
+        } else {
+            "no"
+        }
+    );
+
+    println!(
+        "Disable historical sync: {}",
+        if args.disable_sync_historical {
+            "yes"
+        } else {
+            "no"
+        }
+    );
+
     println!("Blobscan API endpoint: {}", env.blobscan_api_endpoint);
     println!(
         "CL endpoint: {:?}",
