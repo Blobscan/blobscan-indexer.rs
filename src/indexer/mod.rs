@@ -38,6 +38,8 @@ pub struct Indexer {
 
 #[derive(Debug, Default)]
 pub struct RunOptions {
+    pub start_block_id: Option<BlockId>,
+    pub end_block_id: Option<BlockId>,
     pub disable_sync_historical: bool,
 }
 
@@ -74,15 +76,12 @@ impl Indexer {
         })
     }
 
-    pub async fn run(
-        &mut self,
-        custom_start_block_id: Option<BlockId>,
-        opts: Option<RunOptions>,
-    ) -> IndexerResult<()> {
+    pub async fn run(&mut self, opts: Option<RunOptions>) -> IndexerResult<()> {
         let opts = match opts {
             Some(opts) => opts,
             None => RunOptions::default(),
         };
+        let start_block_id = opts.start_block_id;
 
         let sync_state = match self.context.blobscan_client().get_sync_state().await {
             Ok(state) => state,
@@ -93,7 +92,7 @@ impl Indexer {
             }
         };
 
-        let current_lower_block_id = match custom_start_block_id.clone() {
+        let current_lower_block_id = match start_block_id.clone() {
             Some(block_id) => block_id,
             None => match &sync_state {
                 Some(state) => match state.last_lower_synced_slot {
@@ -106,7 +105,7 @@ impl Indexer {
                 None => BlockId::Head,
             },
         };
-        let current_upper_block_id = match custom_start_block_id {
+        let current_upper_block_id = match start_block_id {
             Some(block_id) => block_id,
             None => match &sync_state {
                 Some(state) => match state.last_upper_synced_slot {
@@ -130,11 +129,23 @@ impl Indexer {
         let (tx, mut rx) = mpsc::channel(32);
         let tx1 = tx.clone();
 
-        if !opts.disable_sync_historical {
-            self._start_historical_sync_task(tx1, current_lower_block_id);
+        if opts.end_block_id.is_none() {
+            self._start_realtime_sync_task(tx, current_upper_block_id);
         }
 
-        self._start_realtime_sync_task(tx, current_upper_block_id);
+        if !opts.disable_sync_historical {
+            let historical_start_block_id = current_lower_block_id;
+            let historical_end_block_id = match opts.end_block_id {
+                Some(block_id) => block_id,
+                None => BlockId::Slot(self.dencun_fork_slot),
+            };
+
+            self._start_historical_sync_task(
+                tx1,
+                historical_start_block_id,
+                historical_end_block_id,
+            );
+        }
 
         while let Some(message) = rx.recv().await {
             if let Err(error) = message {
@@ -151,25 +162,12 @@ impl Indexer {
         &self,
         tx: mpsc::Sender<IndexerTaskResult>,
         start_block_id: BlockId,
+        end_block_id: BlockId,
     ) -> JoinHandle<IndexerTaskResult> {
         let mut synchronizer = self._create_synchronizer();
-        let target_lowest_slot = self.dencun_fork_slot;
 
         tokio::spawn(async move {
-            if let BlockId::Slot(slot) = start_block_id {
-                if slot <= target_lowest_slot {
-                    debug!(
-                        target = "indexer:historical_sync",
-                        "Skip sync. Dencun fork slot reached"
-                    );
-
-                    return Ok(());
-                }
-            }
-
-            let result = synchronizer
-                .run(&start_block_id, &BlockId::Slot(target_lowest_slot))
-                .await;
+            let result = synchronizer.run(&start_block_id, &end_block_id).await;
 
             if let Err(error) = result {
                 // TODO: Find a better way to handle this error

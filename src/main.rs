@@ -47,6 +47,10 @@ pub fn print_banner(args: &Args, env: &Environment) {
         println!("Custom start slot: {}", from_slot.to_detailed_string());
     }
 
+    if let Some(to_slot) = args.to_slot.clone() {
+        println!("Custom end slot: {}", to_slot.to_detailed_string());
+    }
+
     if let Some(num_threads) = args.num_threads {
         println!("Number of threads: {}", num_threads);
     } else {
@@ -117,14 +121,17 @@ async fn run() -> AnyhowResult<()> {
     init_subscriber(subscriber);
 
     let args = Args::parse();
+
     let run_opts = Some(RunOptions {
         disable_sync_historical: args.disable_sync_historical,
+        start_block_id: args.from_slot.clone(),
+        end_block_id: args.to_slot.clone(),
     });
 
     print_banner(&args, &env);
 
     Indexer::try_new(&env, &args)?
-        .run(args.from_slot, run_opts)
+        .run(run_opts)
         .await
         .map_err(|err| anyhow!(err))
 }
