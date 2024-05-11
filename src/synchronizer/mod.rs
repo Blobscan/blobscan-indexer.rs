@@ -99,10 +99,9 @@ impl Synchronizer {
     async fn _sync_slots(&mut self, from_slot: u32, to_slot: u32) -> Result<(), SynchronizerError> {
         let is_reverse_sync = to_slot < from_slot;
         let unprocessed_slots = to_slot.abs_diff(from_slot) + 1;
-        let slots_per_thread = std::cmp::max(
-            self.min_slots_per_thread,
-            unprocessed_slots / self.num_threads,
-        );
+        let min_slots_per_thread = std::cmp::min(unprocessed_slots, self.min_slots_per_thread);
+        let slots_per_thread =
+            std::cmp::max(min_slots_per_thread, unprocessed_slots / self.num_threads);
         let num_threads = std::cmp::max(1, unprocessed_slots / slots_per_thread);
         let remaining_slots = unprocessed_slots % num_threads;
 
