@@ -10,6 +10,10 @@ pub struct Args {
     #[arg(short, long)]
     pub from_slot: Option<BlockId>,
 
+    /// Slot to stop indexing at
+    #[arg(short, long)]
+    pub to_slot: Option<BlockId>,
+
     /// Number of threads used for parallel indexing
     #[arg(short, long)]
     pub num_threads: Option<u32>,
