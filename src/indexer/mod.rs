@@ -277,14 +277,6 @@ impl Indexer {
                                     };
 
                                     synchronizer.run(initial_block_id, head_block_id).await?;
-
-                                    blobscan_client
-                                        .update_sync_state(BlockchainSyncState {
-                                            last_finalized_block: None,
-                                            last_lower_synced_slot: None,
-                                            last_upper_synced_slot: Some(head_block_data.slot),
-                                        })
-                                        .await?;
                                 }
                                 "finalized_checkpoint" => {
                                     let finalized_checkpoint_data =
