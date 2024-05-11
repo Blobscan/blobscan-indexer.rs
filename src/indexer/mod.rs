@@ -34,13 +34,7 @@ pub struct Indexer {
     num_threads: u32,
     slots_checkpoint: Option<u32>,
     disable_sync_checkpoint_save: bool,
-}
-
-#[derive(Debug, Default)]
-pub struct RunOptions {
-    pub start_block_id: Option<BlockId>,
-    pub end_block_id: Option<BlockId>,
-    pub disable_sync_historical: bool,
+    disable_sync_historical: bool,
 }
 
 impl Indexer {
@@ -62,6 +56,7 @@ impl Indexer {
                 .get() as u32,
         };
         let disable_sync_checkpoint_save = args.disable_sync_checkpoint_save;
+        let disable_sync_historical = args.disable_sync_historical;
 
         let dencun_fork_slot = env
             .dencun_fork_slot
@@ -73,16 +68,15 @@ impl Indexer {
             slots_checkpoint,
             dencun_fork_slot,
             disable_sync_checkpoint_save,
+            disable_sync_historical,
         })
     }
 
-    pub async fn run(&mut self, opts: Option<RunOptions>) -> IndexerResult<()> {
-        let opts = match opts {
-            Some(opts) => opts,
-            None => RunOptions::default(),
-        };
-        let start_block_id = opts.start_block_id;
-
+    pub async fn run(
+        &mut self,
+        start_block_id: Option<BlockId>,
+        end_block_id: Option<BlockId>,
+    ) -> IndexerResult<()> {
         let sync_state = match self.context.blobscan_client().get_sync_state().await {
             Ok(state) => state,
             Err(error) => {
@@ -130,14 +124,14 @@ impl Indexer {
         let tx1 = tx.clone();
         let mut total_tasks = 0;
 
-        if opts.end_block_id.is_none() {
+        if end_block_id.is_none() {
             self._start_realtime_sync_task(tx, current_upper_block_id);
             total_tasks += 1;
         }
 
-        if !opts.disable_sync_historical {
+        if !self.disable_sync_historical {
             let historical_start_block_id = current_lower_block_id;
-            let historical_end_block_id = match opts.end_block_id {
+            let historical_end_block_id = match end_block_id {
                 Some(block_id) => block_id,
                 None => BlockId::Slot(self.dencun_fork_slot),
             };
