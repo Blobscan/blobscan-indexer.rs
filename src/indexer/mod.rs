@@ -128,9 +128,11 @@ impl Indexer {
 
         let (tx, mut rx) = mpsc::channel(32);
         let tx1 = tx.clone();
+        let mut total_tasks = 0;
 
         if opts.end_block_id.is_none() {
             self._start_realtime_sync_task(tx, current_upper_block_id);
+            total_tasks += 1;
         }
 
         if !opts.disable_sync_historical {
@@ -145,13 +147,28 @@ impl Indexer {
                 historical_start_block_id,
                 historical_end_block_id,
             );
+
+            total_tasks += 1;
         }
 
-        while let Some(message) = rx.recv().await {
-            if let Err(error) = message {
-                error!(target = "indexer", ?error, "Indexer error occurred");
+        let mut completed_tasks = 0;
 
-                return Err(error.into());
+        while let Some(message) = rx.recv().await {
+            match message {
+                IndexerTaskResult::Done(task_name) => {
+                    info!(target = "indexer", task = task_name, "Task completed.");
+
+                    completed_tasks += 1;
+
+                    if completed_tasks == total_tasks {
+                        return Ok(());
+                    }
+                }
+                IndexerTaskResult::Error(error) => {
+                    error!(target = "indexer", ?error, "Indexer error occurred");
+
+                    return Err(error.into());
+                }
             }
         }
 
@@ -163,7 +180,8 @@ impl Indexer {
         tx: mpsc::Sender<IndexerTaskResult>,
         start_block_id: BlockId,
         end_block_id: BlockId,
-    ) -> JoinHandle<IndexerTaskResult> {
+    ) -> JoinHandle<IndexerResult<()>> {
+        let task_name = "historical_sync".to_string();
         let mut synchronizer = self._create_synchronizer();
 
         tokio::spawn(async move {
@@ -171,13 +189,17 @@ impl Indexer {
 
             if let Err(error) = result {
                 // TODO: Find a better way to handle this error
-                tx.send(Err(IndexingTaskError::FailedIndexingTask {
-                    task_name: "historical_sync".to_string(),
-                    error: error.into(),
-                }))
+                tx.send(IndexerTaskResult::Error(
+                    IndexingTaskError::FailedIndexingTask {
+                        task_name,
+                        error: error.into(),
+                    },
+                ))
                 .await
                 .unwrap();
-            };
+            } else {
+                tx.send(IndexerTaskResult::Done(task_name)).await.unwrap();
+            }
 
             Ok(())
         })
@@ -187,7 +209,7 @@ impl Indexer {
         &self,
         tx: mpsc::Sender<IndexerTaskResult>,
         start_block_id: BlockId,
-    ) -> JoinHandle<IndexerTaskResult> {
+    ) -> JoinHandle<IndexerResult<()>> {
         let task_name = "realtime_sync".to_string();
         let target = format!("indexer:{task_name}");
         let task_context = self.context.clone();
@@ -319,13 +341,14 @@ impl Indexer {
 
             if let Err(error) = result {
                 // TODO: Find a better way to handle this error
-                tx.send(Err(IndexingTaskError::FailedIndexingTask {
-                    task_name,
-                    error,
-                }))
+                tx.send(IndexerTaskResult::Error(
+                    IndexingTaskError::FailedIndexingTask { task_name, error },
+                ))
                 .await
                 .unwrap();
-            };
+            } else {
+                tx.send(IndexerTaskResult::Done(task_name)).await.unwrap();
+            }
 
             Ok(())
         })
