@@ -90,9 +90,9 @@ impl Indexer {
             Some(block_id) => block_id,
             None => match &sync_state {
                 Some(state) => match state.last_lower_synced_slot {
-                    Some(slot) => BlockId::Slot(self._get_current_lower_slot(slot)),
+                    Some(slot) => BlockId::Slot(slot - 1),
                     None => match state.last_upper_synced_slot {
-                        Some(slot) => BlockId::Slot(self._get_current_lower_slot(slot)),
+                        Some(slot) => BlockId::Slot(slot - 1),
                         None => BlockId::Head,
                     },
                 },
@@ -129,18 +129,12 @@ impl Indexer {
             total_tasks += 1;
         }
 
-        if !self.disable_sync_historical {
-            let historical_start_block_id = current_lower_block_id;
-            let historical_end_block_id = match end_block_id {
-                Some(block_id) => block_id,
-                None => BlockId::Slot(self.dencun_fork_slot),
-            };
+        let end_block_id = end_block_id.unwrap_or(BlockId::Slot(self.dencun_fork_slot - 1));
+        let historical_sync_completed =
+            matches!(end_block_id, BlockId::Slot(slot) if slot <= self.dencun_fork_slot - 1);
 
-            self._start_historical_sync_task(
-                tx1,
-                historical_start_block_id,
-                historical_end_block_id,
-            );
+        if !self.disable_sync_historical && !historical_sync_completed {
+            self._start_historical_sync_task(tx1, current_lower_block_id, end_block_id);
 
             total_tasks += 1;
         }
@@ -276,7 +270,7 @@ impl Indexer {
                                         head_block_id
                                     };
 
-                                    synchronizer.run(initial_block_id, head_block_id).await?;
+                                    synchronizer.run(initial_block_id, &BlockId::Slot(head_block_data.slot + 1)).await?;
                                 }
                                 "finalized_checkpoint" => {
                                     let finalized_checkpoint_data =
@@ -344,7 +338,6 @@ impl Indexer {
         let mut synchronizer_builder = SynchronizerBuilder::new();
 
         synchronizer_builder.with_disable_checkpoint_save(self.disable_sync_checkpoint_save);
-
         synchronizer_builder.with_num_threads(self.num_threads);
 
         if let Some(slots_checkpoint) = self.slots_checkpoint {

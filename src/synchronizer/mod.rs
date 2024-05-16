@@ -82,6 +82,10 @@ impl Synchronizer {
         let initial_slot = self._resolve_to_slot(initial_block_id).await?;
         let mut final_slot = self._resolve_to_slot(final_block_id).await?;
 
+        if initial_slot == final_slot {
+            return Ok(());
+        }
+
         loop {
             self._sync_slots_by_checkpoints(initial_slot, final_slot)
                 .await?;
@@ -98,7 +102,7 @@ impl Synchronizer {
 
     async fn _sync_slots(&mut self, from_slot: u32, to_slot: u32) -> Result<(), SynchronizerError> {
         let is_reverse_sync = to_slot < from_slot;
-        let unprocessed_slots = to_slot.abs_diff(from_slot) + 1;
+        let unprocessed_slots = to_slot.abs_diff(from_slot);
         let min_slots_per_thread = std::cmp::min(unprocessed_slots, self.min_slots_per_thread);
         let slots_per_thread =
             std::cmp::max(min_slots_per_thread, unprocessed_slots / self.num_threads);
@@ -121,9 +125,9 @@ impl Synchronizer {
                 from_slot + i * slots_per_thread
             };
             let thread_final_slot = if is_reverse_sync {
-                thread_initial_slot - thread_total_slots + 1
+                thread_initial_slot - thread_total_slots
             } else {
-                thread_initial_slot + thread_total_slots - 1
+                thread_initial_slot + thread_total_slots
             };
 
             let synchronizer_thread_span = tracing::trace_span!(
@@ -182,7 +186,7 @@ impl Synchronizer {
     ) -> Result<(), SynchronizerError> {
         let is_reverse_sync = final_slot < initial_slot;
         let mut current_slot = initial_slot;
-        let mut unprocessed_slots = final_slot.abs_diff(current_slot) + 1;
+        let mut unprocessed_slots = final_slot.abs_diff(current_slot);
 
         info!(
             target = "synchronizer",
@@ -196,9 +200,9 @@ impl Synchronizer {
             let slots_chunk = std::cmp::min(unprocessed_slots, self.slots_checkpoint);
             let initial_chunk_slot = current_slot;
             let final_chunk_slot = if is_reverse_sync {
-                current_slot - slots_chunk + 1
+                current_slot - slots_chunk
             } else {
-                current_slot + slots_chunk - 1
+                current_slot + slots_chunk
             };
 
             let sync_slots_chunk_span = debug_span!(
@@ -211,7 +215,11 @@ impl Synchronizer {
                 .instrument(sync_slots_chunk_span)
                 .await?;
 
-            let last_slot = Some(final_chunk_slot);
+            let last_slot = Some(if is_reverse_sync {
+                final_chunk_slot + 1
+            } else {
+                final_chunk_slot - 1
+            });
             let last_lower_synced_slot = if is_reverse_sync { last_slot } else { None };
             let last_upper_synced_slot = if is_reverse_sync { None } else { last_slot };
 
@@ -235,7 +243,7 @@ impl Synchronizer {
                                     "Failed to get new last synced slot: last_lower_synced_slot and last_upper_synced_slot are both None"
                                 )))
                             }
-                        },
+                        }
                     };
 
                     return Err(SynchronizerError::FailedSlotCheckpointSave {

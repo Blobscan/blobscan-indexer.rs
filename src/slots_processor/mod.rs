@@ -46,33 +46,21 @@ impl SlotsProcessor {
         initial_slot: u32,
         final_slot: u32,
     ) -> Result<(), SlotsProcessorError> {
-        let is_reverse_processing = initial_slot > final_slot;
-
-        if is_reverse_processing {
-            for current_slot in (final_slot..=initial_slot).rev() {
-                let result = self.process_slot(current_slot).await;
-
-                if let Err(error) = result {
-                    return Err(SlotsProcessorError::FailedSlotsProcessing {
-                        initial_slot,
-                        final_slot,
-                        failed_slot: current_slot,
-                        error,
-                    });
-                }
-            }
+        let is_reverse = initial_slot > final_slot;
+        let slots = if is_reverse {
+            (final_slot..initial_slot).rev().collect::<Vec<_>>()
         } else {
-            for current_slot in initial_slot..=final_slot {
-                let result = self.process_slot(current_slot).await;
+            (initial_slot..final_slot).collect::<Vec<_>>()
+        };
 
-                if let Err(error) = result {
-                    return Err(SlotsProcessorError::FailedSlotsProcessing {
-                        initial_slot,
-                        final_slot,
-                        failed_slot: current_slot,
-                        error,
-                    });
-                }
+        for current_slot in slots {
+            if let Err(error) = self.process_slot(current_slot).await {
+                return Err(SlotsProcessorError::FailedSlotsProcessing {
+                    initial_slot,
+                    final_slot,
+                    failed_slot: current_slot,
+                    error,
+                });
             }
         }
 
