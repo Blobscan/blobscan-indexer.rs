@@ -1,11 +1,11 @@
-use std::{cmp, thread};
+use std::thread;
 
 use anyhow::{anyhow, Context as AnyhowContext};
 
 use futures::StreamExt;
 use reqwest_eventsource::Event;
 use tokio::{sync::mpsc, task::JoinHandle};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, warn, Instrument};
 
 use crate::{
     args::Args,
@@ -17,12 +17,12 @@ use crate::{
     },
     context::{Config as ContextConfig, Context},
     env::Environment,
-    synchronizer::{Synchronizer, SynchronizerBuilder},
+    synchronizer::SynchronizerBuilder,
 };
 
 use self::{
-    error::{IndexerError, IndexingTaskError},
-    types::{IndexerResult, IndexerTaskResult},
+    error::IndexerError,
+    types::{IndexerResult, IndexerTaskMessage},
 };
 
 pub mod error;
@@ -30,10 +30,8 @@ pub mod types;
 
 pub struct Indexer {
     context: Context,
+    synchronizer_builder: SynchronizerBuilder,
     dencun_fork_slot: u32,
-    num_threads: u32,
-    slots_checkpoint: Option<u32>,
-    disable_sync_checkpoint_save: bool,
     disable_sync_historical: bool,
 }
 
@@ -42,7 +40,7 @@ impl Indexer {
         let context = match Context::try_new(ContextConfig::from(env)) {
             Ok(c) => c,
             Err(error) => {
-                error!(target = "indexer", ?error, "Failed to create context");
+                error!(?error, "Failed to create context");
 
                 return Err(error.into());
             }
@@ -62,12 +60,19 @@ impl Indexer {
             .dencun_fork_slot
             .unwrap_or(env.network_name.dencun_fork_slot());
 
+        let mut synchronizer_builder = SynchronizerBuilder::new();
+
+        synchronizer_builder.with_disable_checkpoint_save(disable_sync_checkpoint_save);
+        synchronizer_builder.with_num_threads(num_threads);
+
+        if let Some(slots_checkpoint) = slots_checkpoint {
+            synchronizer_builder.with_slots_checkpoint(slots_checkpoint);
+        }
+
         Ok(Self {
             context,
-            num_threads,
-            slots_checkpoint,
+            synchronizer_builder,
             dencun_fork_slot,
-            disable_sync_checkpoint_save,
             disable_sync_historical,
         })
     }
@@ -80,7 +85,7 @@ impl Indexer {
         let sync_state = match self.context.blobscan_client().get_sync_state().await {
             Ok(state) => state,
             Err(error) => {
-                error!(target = "indexer", ?error, "Failed to fetch sync state");
+                error!(?error, "Failed to fetch sync state");
 
                 return Err(error.into());
             }
@@ -114,7 +119,6 @@ impl Indexer {
         };
 
         info!(
-            target = "indexer",
             ?current_lower_block_id,
             ?current_upper_block_id,
             "Starting indexer…",
@@ -131,7 +135,7 @@ impl Indexer {
 
         let end_block_id = end_block_id.unwrap_or(BlockId::Slot(self.dencun_fork_slot - 1));
         let historical_sync_completed =
-            matches!(end_block_id, BlockId::Slot(slot) if slot <= self.dencun_fork_slot - 1);
+            matches!(end_block_id, BlockId::Slot(slot) if slot < self.dencun_fork_slot);
 
         if !self.disable_sync_historical && !historical_sync_completed {
             self._start_historical_sync_task(tx1, current_lower_block_id, end_block_id);
@@ -143,18 +147,14 @@ impl Indexer {
 
         while let Some(message) = rx.recv().await {
             match message {
-                IndexerTaskResult::Done(task_name) => {
-                    info!(target = "indexer", task = task_name, "Task completed.");
-
+                IndexerTaskMessage::Done => {
                     completed_tasks += 1;
 
                     if completed_tasks == total_tasks {
                         return Ok(());
                     }
                 }
-                IndexerTaskResult::Error(error) => {
-                    error!(target = "indexer", ?error, "Indexer error occurred");
-
+                IndexerTaskMessage::Error(error) => {
                     return Err(error.into());
                 }
             }
@@ -165,29 +165,32 @@ impl Indexer {
 
     fn _start_historical_sync_task(
         &self,
-        tx: mpsc::Sender<IndexerTaskResult>,
+        tx: mpsc::Sender<IndexerTaskMessage>,
         start_block_id: BlockId,
         end_block_id: BlockId,
     ) -> JoinHandle<IndexerResult<()>> {
-        let task_name = "historical_sync".to_string();
-        let mut synchronizer = self._create_synchronizer();
+        let mut synchronizer = self.synchronizer_builder.build(self.context.clone());
 
         tokio::spawn(async move {
-            let result = synchronizer.run(&start_block_id, &end_block_id).await;
+            let historical_syc_thread_span = tracing::info_span!("sync:historical");
 
-            if let Err(error) = result {
-                // TODO: Find a better way to handle this error
-                tx.send(IndexerTaskResult::Error(
-                    IndexingTaskError::FailedIndexingTask {
-                        task_name,
-                        error: error.into(),
-                    },
-                ))
-                .await
-                .unwrap();
-            } else {
-                tx.send(IndexerTaskResult::Done(task_name)).await.unwrap();
+            async move {
+                let result = synchronizer.run(&start_block_id, &end_block_id).await;
+
+                if let Err(error) = result {
+                    error!(?error, "An error occurred while syncing historical data");
+                    // TODO: Find a better way to handle this error
+                    tx.send(IndexerTaskMessage::Error(error.into()))
+                        .await
+                        .unwrap();
+                } else {
+                    info!("Historical sync completed successfully");
+
+                    tx.send(IndexerTaskMessage::Done).await.unwrap();
+                }
             }
+            .instrument(historical_syc_thread_span)
+            .await;
 
             Ok(())
         })
@@ -195,16 +198,17 @@ impl Indexer {
 
     fn _start_realtime_sync_task(
         &self,
-        tx: mpsc::Sender<IndexerTaskResult>,
+        tx: mpsc::Sender<IndexerTaskMessage>,
         start_block_id: BlockId,
     ) -> JoinHandle<IndexerResult<()>> {
-        let task_name = "realtime_sync".to_string();
-        let target = format!("indexer:{task_name}");
         let task_context = self.context.clone();
-        let mut synchronizer = self._create_synchronizer();
+        let mut synchronizer = self.synchronizer_builder.build(self.context.clone());
 
         tokio::spawn(async move {
+            let realtime_sync_task_span = tracing::info_span!("sync:realtime");
+
             let result: Result<(), IndexerError> = async {
+                info!("Starting realtime sync…");
                 let beacon_client = task_context.beacon_client();
                 let blobscan_client = task_context.blobscan_client();
                 let topics = vec![
@@ -225,7 +229,7 @@ impl Indexer {
                                 .map(|topic| topic.into())
                                 .collect::<Vec<String>>()
                                 .join(", ");
-                            debug!(target, events, "Listening to beacon events…")
+                            debug!(events, "Listening to beacon events…")
                         }
                         Ok(Event::Message(event)) => {
                             let event_name = event.event.as_str();
@@ -245,7 +249,7 @@ impl Indexer {
                                         let reorged_block_head = match beacon_client.get_block_header(&BlockId::Hash(current_reorged_block)).await? {
                                             Some(block) => block,
                                             None => {
-                                                warn!(target, event=event_name, slot=slot, "Found {current_depth} out of {target_depth} reorged blocks only");
+                                                warn!(event=event_name, slot=slot, "Found {current_depth} out of {target_depth} reorged blocks only");
                                                 break
                                             }
                                         };
@@ -256,7 +260,7 @@ impl Indexer {
 
                                     let total_updated_slots = blobscan_client.handle_reorged_slots(&reorged_slots).await?;
 
-                                    info!(target, event=event_name, slot=slot, "Reorganization of depth {target_depth} detected. Found the following reorged slots: {:#?}. Total slots marked as reorged: {total_updated_slots}", reorged_slots);
+                                    info!(event=event_name, slot=slot, "Reorganization of depth {target_depth} detected. Found the following reorged slots: {:#?}. Total slots marked as reorged: {total_updated_slots}", reorged_slots);
                                 },
                                 "head" => {
                                     let head_block_data =
@@ -300,7 +304,7 @@ impl Indexer {
                                         })
                                         .await?;
 
-                                    info!(target, event=event_name, execution_block=last_finalized_block_number, "New finalized block detected");
+                                    info!(event=event_name, execution_block=last_finalized_block_number, "New finalized block detected");
                                 },
                                 unexpected_event_id => {
                                     return Err(IndexerError::UnexpectedEvent { event: unexpected_event_id.to_string() })
@@ -317,37 +321,18 @@ impl Indexer {
 
                 Ok(())
             }
+            .instrument(realtime_sync_task_span)
             .await;
 
             if let Err(error) = result {
+                error!(?error, "An error occurred while syncing realtime data");
                 // TODO: Find a better way to handle this error
-                tx.send(IndexerTaskResult::Error(
-                    IndexingTaskError::FailedIndexingTask { task_name, error },
-                ))
-                .await
-                .unwrap();
+                tx.send(IndexerTaskMessage::Error(error)).await.unwrap();
             } else {
-                tx.send(IndexerTaskResult::Done(task_name)).await.unwrap();
+                tx.send(IndexerTaskMessage::Done).await.unwrap();
             }
 
             Ok(())
         })
-    }
-
-    fn _create_synchronizer(&self) -> Synchronizer {
-        let mut synchronizer_builder = SynchronizerBuilder::new();
-
-        synchronizer_builder.with_disable_checkpoint_save(self.disable_sync_checkpoint_save);
-        synchronizer_builder.with_num_threads(self.num_threads);
-
-        if let Some(slots_checkpoint) = self.slots_checkpoint {
-            synchronizer_builder.with_slots_checkpoint(slots_checkpoint);
-        }
-
-        synchronizer_builder.build(self.context.clone())
-    }
-
-    fn _get_current_lower_slot(&self, last_synced_slot: u32) -> u32 {
-        cmp::max(last_synced_slot, self.dencun_fork_slot)
     }
 }

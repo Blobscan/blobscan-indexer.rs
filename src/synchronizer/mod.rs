@@ -1,7 +1,7 @@
 use anyhow::anyhow;
 use futures::future::join_all;
 use tokio::task::JoinHandle;
-use tracing::{debug, debug_span, info, Instrument};
+use tracing::{debug, info, Instrument};
 
 use crate::{
     clients::{beacon::types::BlockId, blobscan::types::BlockchainSyncState, common::ClientError},
@@ -130,8 +130,10 @@ impl Synchronizer {
                 thread_initial_slot + thread_total_slots
             };
 
-            let synchronizer_thread_span = tracing::trace_span!(
-                "synchronizer_thread",
+            let synchronizer_thread_span = tracing::debug_span!(
+                parent:  &tracing::Span::current(),
+                "thread",
+                thread = i,
                 chunk_initial_slot = thread_initial_slot,
                 chunk_final_slot = thread_final_slot
             );
@@ -144,7 +146,8 @@ impl Synchronizer {
 
                     Ok(())
                 }
-                .instrument(synchronizer_thread_span),
+                .instrument(synchronizer_thread_span)
+                .in_current_span(),
             );
 
             handles.push(handle);
@@ -189,7 +192,6 @@ impl Synchronizer {
         let mut unprocessed_slots = final_slot.abs_diff(current_slot);
 
         info!(
-            target = "synchronizer",
             initial_slot,
             final_slot,
             reverse_sync = is_reverse_sync,
@@ -205,10 +207,11 @@ impl Synchronizer {
                 current_slot + slots_chunk
             };
 
-            let sync_slots_chunk_span = debug_span!(
-                "synchronizer",
-                initial_slot = initial_chunk_slot,
-                final_slot = final_chunk_slot
+            let sync_slots_chunk_span = tracing::debug_span!(
+                parent: &tracing::Span::current(),
+                "checkpoint",
+                checkpoint_initial_slot = initial_chunk_slot,
+                checkpoint_final_slot = final_chunk_slot
             );
 
             self._sync_slots(initial_chunk_slot, final_chunk_slot)
@@ -254,7 +257,6 @@ impl Synchronizer {
 
                 if unprocessed_slots >= self.slots_checkpoint {
                     debug!(
-                        target = "synchronizer",
                         new_last_lower_synced_slot = last_lower_synced_slot,
                         new_last_upper_synced_slot = last_upper_synced_slot,
                         "Checkpoint reached. Last synced slot saved…"

@@ -75,11 +75,7 @@ impl SlotsProcessor {
         let beacon_block = match beacon_client.get_block(&BlockId::Slot(slot)).await? {
             Some(block) => block,
             None => {
-                debug!(
-                    target = "slots_processor",
-                    slot = slot,
-                    "Skipping as there is no beacon block"
-                );
+                debug!(slot = slot, "Skipping as there is no beacon block");
 
                 return Ok(());
             }
@@ -89,8 +85,8 @@ impl SlotsProcessor {
             Some(payload) => payload,
             None => {
                 debug!(
-                    target = "slots_processor",
-                    slot, "Skipping as beacon block doesn't contain execution payload"
+                    slot,
+                    "Skipping as beacon block doesn't contain execution payload"
                 );
 
                 return Ok(());
@@ -104,8 +100,8 @@ impl SlotsProcessor {
 
         if !has_kzg_blob_commitments {
             debug!(
-                target = "slots_processor",
-                slot, "Skipping as beacon block doesn't contain blob kzg commitments"
+                slot,
+                "Skipping as beacon block doesn't contain blob kzg commitments"
             );
 
             return Ok(());
@@ -136,10 +132,7 @@ impl SlotsProcessor {
         {
             Some(blobs) => {
                 if blobs.is_empty() {
-                    debug!(
-                        target = "slots_processor",
-                        slot, "Skipping as blobs sidecar is empty"
-                    );
+                    debug!(slot, "Skipping as blobs sidecar is empty");
 
                     return Ok(());
                 } else {
@@ -147,10 +140,7 @@ impl SlotsProcessor {
                 }
             }
             None => {
-                debug!(
-                    target = "slots_processor",
-                    slot, "Skipping as there is no blobs sidecar"
-                );
+                debug!(slot, "Skipping as there is no blobs sidecar");
 
                 return Ok(());
             }
@@ -189,15 +179,14 @@ impl SlotsProcessor {
             .collect::<Vec<String>>();
          */
 
+        let block_number = block_entity.number.as_u32();
+
         blobscan_client
             .index(block_entity, transactions_entities, blob_entities)
             .await
             .map_err(SlotProcessingError::ClientError)?;
 
-        info!(
-            target = "slots_processor",
-            slot, "Block indexed successfully"
-        );
+        info!(slot, block_number, "Block indexed successfully");
 
         Ok(())
     }

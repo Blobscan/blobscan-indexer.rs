@@ -15,23 +15,3 @@ pub enum IndexerError {
     #[error("Unexpected event \"{event}\" received")]
     UnexpectedEvent { event: String },
 }
-
-#[derive(Debug, thiserror::Error)]
-pub enum IndexingTaskError {
-    #[error("Indexing task {task_name} failed: {error}")]
-    FailedIndexingTask {
-        task_name: String,
-        error: IndexerError,
-    },
-}
-
-impl From<IndexingTaskError> for IndexerError {
-    fn from(error: IndexingTaskError) -> Self {
-        match error {
-            IndexingTaskError::FailedIndexingTask {
-                task_name: _,
-                error,
-            } => error,
-        }
-    }
-}

@@ -54,7 +54,6 @@ impl JWTManager {
 
                 if now > expiration_date {
                     debug!(
-                        target = "jwt_manager",
                         expiration_date = expiration_date.to_string(),
                         "JWT expired. Refreshing token"
                     );
@@ -89,12 +88,12 @@ impl JWTManager {
 
         match encode(&header, &claims, &encoding_key) {
             Err(error) => {
-                error!(target = "jwt_manager", ?error, "Failed to create JWT");
+                error!(?error, "Failed to create JWT");
 
                 Err(error.into())
             }
             Ok(t) => {
-                debug!(target = "jwt_manager", "JWT created");
+                debug!("JWT created");
 
                 Ok((t, expiration_date))
             }

@@ -8,7 +8,7 @@ macro_rules! json_get {
     ($client:expr, $url:expr, $expected:ty, $auth_token:expr, $exp_backoff: expr) => {{
         let url = $url.clone();
 
-        tracing::debug!(method = "GET", url = url.as_str(), "Dispatching API request");
+        tracing::trace!(method = "GET", url = url.as_str(), "Dispatching API request");
 
         let mut req = $client.get($url);
 
@@ -102,7 +102,7 @@ macro_rules! json_put {
         let url = $url.clone();
         let body = format!("{:?}", $body);
 
-        tracing::debug!(method = "PUT", url = url.as_str(), body, "Dispatching API client request");
+        tracing::trace!(method = "PUT", url = url.as_str(), body, "Dispatching API client request");
 
 
         let resp = match $client
