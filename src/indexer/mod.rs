@@ -148,7 +148,7 @@ impl Indexer {
 
         let end_block_id = end_block_id.unwrap_or(BlockId::Slot(self.dencun_fork_slot - 1));
         let historical_sync_completed =
-            matches!(end_block_id, BlockId::Slot(slot) if slot < self.dencun_fork_slot);
+            matches!(current_lower_block_id, BlockId::Slot(slot) if slot < self.dencun_fork_slot);
 
         if !self.disable_sync_historical && !historical_sync_completed {
             self._start_historical_syncing_task(tx1, current_lower_block_id, end_block_id);
