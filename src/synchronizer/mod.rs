@@ -195,7 +195,7 @@ impl Synchronizer {
             initial_slot,
             final_slot,
             reverse_sync = is_reverse_sync,
-            "Processing {unprocessed_slots} slots…"
+            "Syncing {unprocessed_slots} slots…"
         );
 
         while unprocessed_slots > 0 {

@@ -64,3 +64,7 @@ pub fn get_tx_versioned_hashes(tx: &Transaction) -> Result<Option<Vec<H256>>> {
         None => Ok(None),
     }
 }
+
+pub fn get_full_hash(hash: &H256) -> String {
+    format!("0x{:x}", hash)
+}
