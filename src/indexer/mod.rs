@@ -146,7 +146,8 @@ impl Indexer {
             total_tasks += 1;
         }
 
-        let end_block_id = end_block_id.unwrap_or(BlockId::Slot(self.dencun_fork_slot - 1));
+        let default_end_block = BlockId::Slot(self.dencun_fork_slot - 1);
+        let end_block_id = end_block_id.unwrap_or(default_end_block);
         let historical_sync_completed =
             matches!(current_lower_block_id, BlockId::Slot(slot) if slot < self.dencun_fork_slot);
 
@@ -258,7 +259,6 @@ impl Indexer {
                                     let chain_reorg_span = tracing::info_span!("chain_reorg");
 
                                       let result: Result<(), ChainReorgedEventHandlingError> =  async {
-
                                         let reorg_block_data =
                                             serde_json::from_str::<ChainReorgEventData>(&event.data)?;
                                         let slot = reorg_block_data.slot;
@@ -289,6 +289,17 @@ impl Indexer {
                                     }.instrument(chain_reorg_span).await;
 
                                     if let Err(error) = result {
+                                        // If an error occurred while processing the event, try to update the latest synced slot to the last known slot before the reorg
+                                        if let Ok(reorg_block_data) = serde_json::from_str::<ChainReorgEventData>(&event.data) {
+                                            let slot = reorg_block_data.slot;
+
+                                            let _ = blobscan_client.update_sync_state(BlockchainSyncState {
+                                                last_finalized_block: None,
+                                                last_lower_synced_slot: None,
+                                                last_upper_synced_slot: Some(slot -1)
+                                            }).await;
+                                        }
+
                                         return Err(RealtimeSyncingError::BeaconEventProcessingError(error.into()));
                                     }
                                 },
