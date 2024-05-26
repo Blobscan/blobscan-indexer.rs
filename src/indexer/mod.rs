@@ -21,7 +21,7 @@ use crate::{
         ChainReorgedEventHandlingError, FinalizedBlockEventHandlingError,
         HeadBlockEventHandlingError, HistoricalSyncingError,
     },
-    synchronizer::SynchronizerBuilder,
+    synchronizer::{CheckpointType, Synchronizer, SynchronizerBuilder},
     utils::web3::get_full_hash,
 };
 
@@ -35,9 +35,12 @@ pub mod types;
 
 pub struct Indexer {
     context: Context,
-    synchronizer_builder: SynchronizerBuilder,
     dencun_fork_slot: u32,
     disable_sync_historical: bool,
+
+    checkpoint_slots: Option<u32>,
+    disabled_checkpoint: Option<CheckpointType>,
+    num_threads: u32,
 }
 
 impl Indexer {
@@ -54,7 +57,12 @@ impl Indexer {
             }
         };
 
-        let slots_checkpoint = args.slots_per_save;
+        let checkpoint_slots = args.slots_per_save;
+        let disabled_checkpoint = if args.disable_sync_checkpoint_save {
+            Some(CheckpointType::Disabled)
+        } else {
+            None
+        };
         let num_threads = match args.num_threads {
             Some(num_threads) => num_threads,
             None => thread::available_parallelism()
@@ -66,27 +74,19 @@ impl Indexer {
                 })?
                 .get() as u32,
         };
-        let disable_sync_checkpoint_save = args.disable_sync_checkpoint_save;
         let disable_sync_historical = args.disable_sync_historical;
 
         let dencun_fork_slot = env
             .dencun_fork_slot
             .unwrap_or(env.network_name.dencun_fork_slot());
 
-        let mut synchronizer_builder = SynchronizerBuilder::new();
-
-        synchronizer_builder.with_disable_checkpoint_save(disable_sync_checkpoint_save);
-        synchronizer_builder.with_num_threads(num_threads);
-
-        if let Some(slots_checkpoint) = slots_checkpoint {
-            synchronizer_builder.with_slots_checkpoint(slots_checkpoint);
-        }
-
         Ok(Self {
             context,
-            synchronizer_builder,
             dencun_fork_slot,
             disable_sync_historical,
+            checkpoint_slots,
+            disabled_checkpoint,
+            num_threads,
         })
     }
 
@@ -185,7 +185,7 @@ impl Indexer {
         start_block_id: BlockId,
         end_block_id: BlockId,
     ) -> JoinHandle<IndexerResult<()>> {
-        let mut synchronizer = self.synchronizer_builder.build(self.context.clone());
+        let mut synchronizer = self._create_synchronizer(CheckpointType::Lower);
 
         tokio::spawn(async move {
             let historical_syc_thread_span = tracing::info_span!("sync:historical");
@@ -221,7 +221,7 @@ impl Indexer {
         start_block_id: BlockId,
     ) -> JoinHandle<IndexerResult<()>> {
         let task_context = self.context.clone();
-        let mut synchronizer = self.synchronizer_builder.build(self.context.clone());
+        let mut synchronizer = self._create_synchronizer(CheckpointType::Upper);
 
         tokio::spawn(async move {
             let realtime_sync_task_span = tracing::info_span!("sync:realtime");
@@ -395,5 +395,21 @@ impl Indexer {
 
             Ok(())
         })
+    }
+
+    fn _create_synchronizer(&self, checkpoint_type: CheckpointType) -> Synchronizer {
+        let mut synchronizer_builder = SynchronizerBuilder::new();
+
+        if let Some(checkpoint_slots) = self.checkpoint_slots {
+            synchronizer_builder.with_slots_checkpoint(checkpoint_slots);
+        }
+
+        let checkpoint_type = self.disabled_checkpoint.unwrap_or(checkpoint_type);
+
+        synchronizer_builder.with_checkpoint_type(checkpoint_type);
+
+        synchronizer_builder.with_num_threads(self.num_threads);
+
+        synchronizer_builder.build(self.context.clone())
     }
 }

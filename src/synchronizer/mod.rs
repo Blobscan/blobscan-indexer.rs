@@ -18,15 +18,23 @@ pub struct SynchronizerBuilder {
     num_threads: u32,
     min_slots_per_thread: u32,
     slots_checkpoint: u32,
-    disable_checkpoint_save: bool,
+    checkpoint_type: CheckpointType,
 }
 
+#[derive(Debug)]
 pub struct Synchronizer {
     context: Context,
     num_threads: u32,
     min_slots_per_thread: u32,
     slots_checkpoint: u32,
-    disable_checkpoint_save: bool,
+    checkpoint_type: CheckpointType,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum CheckpointType {
+    Disabled,
+    Lower,
+    Upper,
 }
 
 impl Default for SynchronizerBuilder {
@@ -35,7 +43,7 @@ impl Default for SynchronizerBuilder {
             num_threads: 1,
             min_slots_per_thread: 50,
             slots_checkpoint: 1000,
-            disable_checkpoint_save: false,
+            checkpoint_type: CheckpointType::Upper,
         }
     }
 }
@@ -45,8 +53,8 @@ impl SynchronizerBuilder {
         SynchronizerBuilder::default()
     }
 
-    pub fn with_disable_checkpoint_save(&mut self, disable_checkpoint_save: bool) -> &mut Self {
-        self.disable_checkpoint_save = disable_checkpoint_save;
+    pub fn with_checkpoint_type(&mut self, checkpoint_type: CheckpointType) -> &mut Self {
+        self.checkpoint_type = checkpoint_type;
 
         self
     }
@@ -68,7 +76,7 @@ impl SynchronizerBuilder {
             num_threads: self.num_threads,
             min_slots_per_thread: self.min_slots_per_thread,
             slots_checkpoint: self.slots_checkpoint,
-            disable_checkpoint_save: self.disable_checkpoint_save,
+            checkpoint_type: self.checkpoint_type,
         }
     }
 }
@@ -223,10 +231,19 @@ impl Synchronizer {
             } else {
                 final_chunk_slot - 1
             });
-            let last_lower_synced_slot = if is_reverse_sync { last_slot } else { None };
-            let last_upper_synced_slot = if is_reverse_sync { None } else { last_slot };
 
-            if !self.disable_checkpoint_save {
+            if self.checkpoint_type != CheckpointType::Disabled {
+                let last_lower_synced_slot = if self.checkpoint_type == CheckpointType::Lower {
+                    last_slot
+                } else {
+                    None
+                };
+                let last_upper_synced_slot = if self.checkpoint_type == CheckpointType::Upper {
+                    last_slot
+                } else {
+                    None
+                };
+
                 if let Err(error) = self
                     .context
                     .blobscan_client()
