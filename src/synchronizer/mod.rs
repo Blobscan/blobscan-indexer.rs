@@ -83,22 +83,22 @@ impl SynchronizerBuilder {
 
 impl Synchronizer {
     pub async fn run(
-        &mut self,
+        &self,
         initial_block_id: &BlockId,
         final_block_id: &BlockId,
     ) -> Result<(), SynchronizerError> {
-        let initial_slot = self._resolve_to_slot(initial_block_id).await?;
-        let mut final_slot = self._resolve_to_slot(final_block_id).await?;
+        let initial_slot = self.resolve_to_slot(initial_block_id).await?;
+        let mut final_slot = self.resolve_to_slot(final_block_id).await?;
 
         if initial_slot == final_slot {
             return Ok(());
         }
 
         loop {
-            self._sync_slots_by_checkpoints(initial_slot, final_slot)
+            self.sync_slots_by_checkpoints(initial_slot, final_slot)
                 .await?;
 
-            let latest_final_slot = self._resolve_to_slot(final_block_id).await?;
+            let latest_final_slot = self.resolve_to_slot(final_block_id).await?;
 
             if final_slot == latest_final_slot {
                 return Ok(());
@@ -108,7 +108,7 @@ impl Synchronizer {
         }
     }
 
-    async fn _sync_slots(&mut self, from_slot: u32, to_slot: u32) -> Result<(), SynchronizerError> {
+    async fn sync_slots(&self, from_slot: u32, to_slot: u32) -> Result<(), SynchronizerError> {
         let is_reverse_sync = to_slot < from_slot;
         let unprocessed_slots = to_slot.abs_diff(from_slot);
         let min_slots_per_thread = std::cmp::min(unprocessed_slots, self.min_slots_per_thread);
@@ -190,8 +190,8 @@ impl Synchronizer {
         }
     }
 
-    async fn _sync_slots_by_checkpoints(
-        &mut self,
+    async fn sync_slots_by_checkpoints(
+        &self,
         initial_slot: u32,
         final_slot: u32,
     ) -> Result<(), SynchronizerError> {
@@ -222,7 +222,7 @@ impl Synchronizer {
                 checkpoint_final_slot = final_chunk_slot
             );
 
-            self._sync_slots(initial_chunk_slot, final_chunk_slot)
+            self.sync_slots(initial_chunk_slot, final_chunk_slot)
                 .instrument(sync_slots_chunk_span)
                 .await?;
 
@@ -293,7 +293,7 @@ impl Synchronizer {
         Ok(())
     }
 
-    async fn _resolve_to_slot(&self, block_id: &BlockId) -> Result<u32, SynchronizerError> {
+    async fn resolve_to_slot(&self, block_id: &BlockId) -> Result<u32, SynchronizerError> {
         let beacon_client = self.context.beacon_client();
 
         let resolved_block_id: Result<u32, ClientError> = match block_id {

@@ -2,82 +2,69 @@ use tokio::sync::mpsc::error::SendError;
 
 use crate::{clients::common::ClientError, synchronizer::error::SynchronizerError};
 
-use super::types::IndexerTaskMessage;
+use super::{
+    event_handlers::{
+        finalized_checkpoint::FinalizedCheckpointEventHandlerError, head::HeadEventHandlerError,
+    },
+    types::IndexerTaskMessage,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum IndexerError {
     #[error("failed to create indexer")]
     CreationFailure(#[source] anyhow::Error),
     #[error(transparent)]
-    SyncingTaskError(#[from] SyncingTaskError),
+    SyncingTaskError(#[from] IndexingError),
     #[error("failed to retrieve blobscan's sync state")]
     BlobscanSyncStateRetrievalError(#[source] ClientError),
-    #[error("sync task message send failure")]
+    #[error("failed to send syncing task message")]
     SyncingTaskMessageSendFailure(#[from] SendError<IndexerTaskMessage>),
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum SyncingTaskError {
-    #[error("an error ocurred while syncing historical data")]
-    HistoricalSyncingTaskError(#[from] HistoricalSyncingError),
-    #[error("an error occurred while syncing realtime data")]
-    RealtimeSyncingTaskError(#[from] RealtimeSyncingError),
+pub enum IndexingError {
+    #[error(transparent)]
+    HistoricalIndexingFailure(#[from] HistoricalIndexingError),
+    #[error(transparent)]
+    LiveIndexingError(#[from] LiveIndexingError),
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum HistoricalSyncingError {
+pub enum HistoricalIndexingError {
     #[error(transparent)]
     SynchronizerError(#[from] SynchronizerError),
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum RealtimeSyncingError {
+pub enum LiveIndexingError {
     #[error("an error ocurred while receiving beacon events")]
     BeaconEventsConnectionFailure(#[from] reqwest_eventsource::Error),
     #[error("failed to subscribe to beacon events")]
     BeaconEventsSubscriptionError(#[source] ClientError),
     #[error("unexpected event \"{0}\" received")]
     UnexpectedBeaconEvent(String),
-    #[error(transparent)]
-    BeaconEventProcessingError(#[from] BeaconEventError),
+    #[error("failed to handle beacon event")]
+    BeaconEventHandlingError(#[from] EventHandlerError),
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum BeaconEventError {
-    #[error("failed to handle \"chain_reorged\" event")]
-    ChainReorged(#[from] ChainReorgedEventHandlingError),
-    #[error("failed to handle \"head\" event")]
-    HeadBlock(#[from] HeadBlockEventHandlingError),
-    #[error("failed to handle \"finalized_checkpoint\" event")]
-    FinalizedCheckpoint(#[from] FinalizedBlockEventHandlingError),
+pub enum EventHandlerError {
+    #[error(transparent)]
+    HeadEventHandlerError(#[from] HeadEventHandlerError),
+    #[error(transparent)]
+    FinalizedCheckpointHandlerError(#[from] FinalizedCheckpointEventHandlerError),
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum FinalizedBlockEventHandlingError {
-    #[error(transparent)]
-    EventDeserializationFailure(#[from] serde_json::Error),
-    #[error("failed to retrieve finalized block {0}")]
-    BlockRetrievalError(String, #[source] ClientError),
-    #[error(transparent)]
-    Other(#[from] anyhow::Error),
-    #[error("failed to update blobscan's last finalized block")]
-    BlobscanSyncStateUpdateError(#[source] ClientError),
+impl From<HeadEventHandlerError> for LiveIndexingError {
+    fn from(err: HeadEventHandlerError) -> Self {
+        LiveIndexingError::BeaconEventHandlingError(EventHandlerError::HeadEventHandlerError(err))
+    }
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum ChainReorgedEventHandlingError {
-    #[error(transparent)]
-    EventDeserializationFailure(#[from] serde_json::Error),
-    #[error("failed to retrieve reorged block {0}")]
-    BlockRetrievalError(String, #[source] ClientError),
-    #[error("failed to handle reorged of depth {0} starting at block {1}")]
-    ReorgedHandlingFailure(u32, String, #[source] ClientError),
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum HeadBlockEventHandlingError {
-    #[error(transparent)]
-    EventDeserializationFailure(#[from] serde_json::Error),
-    #[error(transparent)]
-    SynchronizerError(#[from] SynchronizerError),
+impl From<FinalizedCheckpointEventHandlerError> for LiveIndexingError {
+    fn from(err: FinalizedCheckpointEventHandlerError) -> Self {
+        LiveIndexingError::BeaconEventHandlingError(
+            EventHandlerError::FinalizedCheckpointHandlerError(err),
+        )
+    }
 }
