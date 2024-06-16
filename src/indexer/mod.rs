@@ -14,7 +14,7 @@ use crate::{
     context::{CommonContext, Config as ContextConfig, Context},
     env::Environment,
     indexer::error::HistoricalIndexingError,
-    synchronizer::{CheckpointType, Synchronizer, SynchronizerBuilder},
+    synchronizer::{CheckpointType, CommonSynchronizer, SynchronizerBuilder},
 };
 
 use self::{
@@ -289,7 +289,7 @@ impl Indexer<HttpProvider> {
         })
     }
 
-    fn create_synchronizer(&self, checkpoint_type: CheckpointType) -> Synchronizer<HttpProvider> {
+    fn create_synchronizer(&self, checkpoint_type: CheckpointType) -> Box<dyn CommonSynchronizer> {
         let mut synchronizer_builder = SynchronizerBuilder::new();
 
         if let Some(checkpoint_slots) = self.checkpoint_slots {
@@ -302,6 +302,6 @@ impl Indexer<HttpProvider> {
 
         synchronizer_builder.with_num_threads(self.num_threads);
 
-        synchronizer_builder.build(self.context.clone())
+        Box::new(synchronizer_builder.build(self.context.clone()))
     }
 }

@@ -1,4 +1,7 @@
+use std::fmt::Debug;
+
 use anyhow::anyhow;
+use async_trait::async_trait;
 use ethers::providers::Http as HttpProvider;
 use futures::future::join_all;
 use tokio::task::JoinHandle;
@@ -13,6 +16,15 @@ use crate::{
 use self::error::{SlotsChunksErrors, SynchronizerError};
 
 pub mod error;
+
+#[async_trait]
+pub trait CommonSynchronizer: Send + Sync + Debug {
+    async fn run(
+        &self,
+        initial_block_id: &BlockId,
+        final_block_id: &BlockId,
+    ) -> Result<(), SynchronizerError>;
+}
 
 #[derive(Debug)]
 pub struct SynchronizerBuilder {
@@ -86,32 +98,6 @@ impl SynchronizerBuilder {
 }
 
 impl Synchronizer<HttpProvider> {
-    pub async fn run(
-        &self,
-        initial_block_id: &BlockId,
-        final_block_id: &BlockId,
-    ) -> Result<(), SynchronizerError> {
-        let initial_slot = self.resolve_to_slot(initial_block_id).await?;
-        let mut final_slot = self.resolve_to_slot(final_block_id).await?;
-
-        if initial_slot == final_slot {
-            return Ok(());
-        }
-
-        loop {
-            self.sync_slots_by_checkpoints(initial_slot, final_slot)
-                .await?;
-
-            let latest_final_slot = self.resolve_to_slot(final_block_id).await?;
-
-            if final_slot == latest_final_slot {
-                return Ok(());
-            }
-
-            final_slot = latest_final_slot;
-        }
-    }
-
     async fn sync_slots(&self, from_slot: u32, to_slot: u32) -> Result<(), SynchronizerError> {
         let is_reverse_sync = to_slot < from_slot;
         let unprocessed_slots = to_slot.abs_diff(from_slot);
@@ -319,6 +305,35 @@ impl Synchronizer<HttpProvider> {
                 block_id: block_id.clone(),
                 error,
             }),
+        }
+    }
+}
+
+#[async_trait]
+impl CommonSynchronizer for Synchronizer<HttpProvider> {
+    async fn run(
+        &self,
+        initial_block_id: &BlockId,
+        final_block_id: &BlockId,
+    ) -> Result<(), SynchronizerError> {
+        let initial_slot = self.resolve_to_slot(initial_block_id).await?;
+        let mut final_slot = self.resolve_to_slot(final_block_id).await?;
+
+        if initial_slot == final_slot {
+            return Ok(());
+        }
+
+        loop {
+            self.sync_slots_by_checkpoints(initial_slot, final_slot)
+                .await?;
+
+            let latest_final_slot = self.resolve_to_slot(final_block_id).await?;
+
+            if final_slot == latest_final_slot {
+                return Ok(());
+            }
+
+            final_slot = latest_final_slot;
         }
     }
 }
