@@ -1,7 +1,7 @@
 use std::thread;
 
 use anyhow::anyhow;
-
+use ethers::providers::Http as HttpProvider;
 use event_handlers::{finalized_checkpoint::FinalizedCheckpointHandler, head::HeadEventHandler};
 use futures::StreamExt;
 use reqwest_eventsource::Event;
@@ -11,7 +11,7 @@ use tracing::{debug, error, info, Instrument};
 use crate::{
     args::Args,
     clients::beacon::types::{BlockId, Topic},
-    context::{Config as ContextConfig, Context},
+    context::{CommonContext, Config as ContextConfig, Context},
     env::Environment,
     indexer::error::HistoricalIndexingError,
     synchronizer::{CheckpointType, Synchronizer, SynchronizerBuilder},
@@ -26,8 +26,8 @@ pub mod error;
 pub mod event_handlers;
 pub mod types;
 
-pub struct Indexer {
-    context: Context,
+pub struct Indexer<T> {
+    context: Box<dyn CommonContext<T>>,
     dencun_fork_slot: u32,
     disable_sync_historical: bool,
 
@@ -36,7 +36,7 @@ pub struct Indexer {
     num_threads: u32,
 }
 
-impl Indexer {
+impl Indexer<HttpProvider> {
     pub fn try_new(env: &Environment, args: &Args) -> IndexerResult<Self> {
         let context = match Context::try_new(ContextConfig::from(env)) {
             Ok(c) => c,
@@ -74,7 +74,7 @@ impl Indexer {
             .unwrap_or(env.network_name.dencun_fork_slot());
 
         Ok(Self {
-            context,
+            context: Box::new(context),
             dencun_fork_slot,
             disable_sync_historical,
             checkpoint_slots,
@@ -289,7 +289,7 @@ impl Indexer {
         })
     }
 
-    fn create_synchronizer(&self, checkpoint_type: CheckpointType) -> Synchronizer {
+    fn create_synchronizer(&self, checkpoint_type: CheckpointType) -> Synchronizer<HttpProvider> {
         let mut synchronizer_builder = SynchronizerBuilder::new();
 
         if let Some(checkpoint_slots) = self.checkpoint_slots {

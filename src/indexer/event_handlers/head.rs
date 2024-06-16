@@ -1,6 +1,6 @@
 use std::cmp;
 
-use ethers::types::H256;
+use ethers::{providers::Http as HttpProvider, types::H256};
 use tracing::info;
 
 use crate::{
@@ -9,7 +9,7 @@ use crate::{
         blobscan::types::BlockchainSyncState,
         common::ClientError,
     },
-    context::Context,
+    context::CommonContext,
     synchronizer::{error::SynchronizerError, Synchronizer},
 };
 
@@ -29,15 +29,19 @@ pub enum HeadEventHandlerError {
     BlobscanSyncStateUpdateError(#[source] ClientError),
 }
 
-pub struct HeadEventHandler {
-    context: Context,
-    synchronizer: Synchronizer,
+pub struct HeadEventHandler<T> {
+    context: Box<dyn CommonContext<T>>,
+    synchronizer: Synchronizer<T>,
     start_block_id: BlockId,
     last_block_hash: Option<H256>,
 }
 
-impl HeadEventHandler {
-    pub fn new(context: Context, synchronizer: Synchronizer, start_block_id: BlockId) -> Self {
+impl HeadEventHandler<HttpProvider> {
+    pub fn new(
+        context: Box<dyn CommonContext<HttpProvider>>,
+        synchronizer: Synchronizer<HttpProvider>,
+        start_block_id: BlockId,
+    ) -> Self {
         HeadEventHandler {
             context,
             synchronizer,

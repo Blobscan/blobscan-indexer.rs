@@ -1,3 +1,4 @@
+use ethers::providers::Http as HttpProvider;
 use tracing::info;
 
 use crate::{
@@ -6,7 +7,7 @@ use crate::{
         blobscan::types::BlockchainSyncState,
         common::ClientError,
     },
-    context::Context,
+    context::CommonContext,
     utils::web3::get_full_hash,
 };
 
@@ -22,12 +23,12 @@ pub enum FinalizedCheckpointEventHandlerError {
     BlobscanFinalizedBlockUpdateFailure(#[source] ClientError),
 }
 
-pub struct FinalizedCheckpointHandler {
-    context: Context,
+pub struct FinalizedCheckpointHandler<T> {
+    context: Box<dyn CommonContext<T>>,
 }
 
-impl FinalizedCheckpointHandler {
-    pub fn new(context: Context) -> Self {
+impl FinalizedCheckpointHandler<HttpProvider> {
+    pub fn new(context: Box<dyn CommonContext<HttpProvider>>) -> Self {
         FinalizedCheckpointHandler { context }
     }
 
