@@ -10,7 +10,7 @@ use crate::{
         common::ClientError,
     },
     context::CommonContext,
-    synchronizer::{error::SynchronizerError, Synchronizer},
+    synchronizer::{error::SynchronizerError, CommonSynchronizer},
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -31,7 +31,7 @@ pub enum HeadEventHandlerError {
 
 pub struct HeadEventHandler<T> {
     context: Box<dyn CommonContext<T>>,
-    synchronizer: Synchronizer<T>,
+    synchronizer: Box<dyn CommonSynchronizer>,
     start_block_id: BlockId,
     last_block_hash: Option<H256>,
 }
@@ -39,7 +39,7 @@ pub struct HeadEventHandler<T> {
 impl HeadEventHandler<HttpProvider> {
     pub fn new(
         context: Box<dyn CommonContext<HttpProvider>>,
-        synchronizer: Synchronizer<HttpProvider>,
+        synchronizer: Box<dyn CommonSynchronizer>,
         start_block_id: BlockId,
     ) -> Self {
         HeadEventHandler {
