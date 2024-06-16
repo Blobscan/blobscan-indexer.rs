@@ -1,11 +1,12 @@
 use anyhow::anyhow;
+use ethers::providers::Http as HttpProvider;
 use futures::future::join_all;
 use tokio::task::JoinHandle;
 use tracing::{debug, info, Instrument};
 
 use crate::{
     clients::{beacon::types::BlockId, blobscan::types::BlockchainSyncState, common::ClientError},
-    context::Context,
+    context::CommonContext,
     slots_processor::{error::SlotsProcessorError, SlotsProcessor},
 };
 
@@ -22,8 +23,8 @@ pub struct SynchronizerBuilder {
 }
 
 #[derive(Debug)]
-pub struct Synchronizer {
-    context: Context,
+pub struct Synchronizer<T> {
+    context: Box<dyn CommonContext<T>>,
     num_threads: u32,
     min_slots_per_thread: u32,
     slots_checkpoint: u32,
@@ -70,7 +71,10 @@ impl SynchronizerBuilder {
         self
     }
 
-    pub fn build(&self, context: Context) -> Synchronizer {
+    pub fn build(
+        &self,
+        context: Box<dyn CommonContext<HttpProvider>>,
+    ) -> Synchronizer<HttpProvider> {
         Synchronizer {
             context,
             num_threads: self.num_threads,
@@ -81,7 +85,7 @@ impl SynchronizerBuilder {
     }
 }
 
-impl Synchronizer {
+impl Synchronizer<HttpProvider> {
     pub async fn run(
         &self,
         initial_block_id: &BlockId,

@@ -1,6 +1,9 @@
 use anyhow::{anyhow, Context as AnyhowContext, Result};
 
-use ethers::prelude::*;
+use ethers::{
+    providers::{Http as HttpProvider, Middleware},
+    types::H256,
+};
 use tracing::{debug, info};
 
 use crate::{
@@ -8,7 +11,7 @@ use crate::{
         beacon::types::{BlockHeader, BlockId},
         blobscan::types::{Blob, Block, Transaction},
     },
-    context::Context,
+    context::CommonContext,
 };
 
 use self::error::{SlotProcessingError, SlotsProcessorError};
@@ -17,8 +20,8 @@ use self::helpers::{create_tx_hash_versioned_hashes_mapping, create_versioned_ha
 pub mod error;
 mod helpers;
 
-pub struct SlotsProcessor {
-    context: Context,
+pub struct SlotsProcessor<T> {
+    context: Box<dyn CommonContext<T>>,
 }
 
 #[derive(Debug, Clone)]
@@ -36,8 +39,8 @@ impl From<BlockHeader> for BlockData {
     }
 }
 
-impl SlotsProcessor {
-    pub fn new(context: Context) -> SlotsProcessor {
+impl SlotsProcessor<HttpProvider> {
+    pub fn new(context: Box<dyn CommonContext<HttpProvider>>) -> SlotsProcessor<HttpProvider> {
         Self { context }
     }
 

@@ -1,20 +1,24 @@
-use std::{sync::Arc, time::Duration};
+use std::{fmt::Debug, sync::Arc, time::Duration};
 
 use anyhow::Result as AnyhowResult;
 use backoff::ExponentialBackoffBuilder;
-use ethers::prelude::*;
+use dyn_clone::DynClone;
+use ethers::providers::{Http as HttpProvider, Provider};
 
 use crate::{
-    clients::beacon::{BeaconClient, Config as BeaconClientConfig},
-    clients::blobscan::{BlobscanClient, Config as BlobscanClientConfig},
+    clients::{
+        beacon::{BeaconClient, CommonBeaconClient, Config as BeaconClientConfig},
+        blobscan::{BlobscanClient, CommonBlobscanClient, Config as BlobscanClientConfig},
+    },
     env::Environment,
 };
 
-#[derive(Debug, Clone)]
-struct ContextRef {
-    pub beacon_client: BeaconClient,
-    pub blobscan_client: BlobscanClient,
-    pub provider: Provider<Http>,
+dyn_clone::clone_trait_object!(CommonContext<HttpProvider>);
+
+pub trait CommonContext<T>: Send + Sync + Debug + DynClone {
+    fn beacon_client(&self) -> &Box<dyn CommonBeaconClient>;
+    fn blobscan_client(&self) -> &Box<dyn CommonBlobscanClient>;
+    fn provider(&self) -> &Provider<T>;
 }
 
 pub struct Config {
@@ -22,6 +26,13 @@ pub struct Config {
     pub beacon_node_url: String,
     pub execution_node_endpoint: String,
     pub secret_key: String,
+}
+
+#[derive(Debug)]
+struct ContextRef {
+    pub beacon_client: Box<dyn CommonBeaconClient>,
+    pub blobscan_client: Box<dyn CommonBlobscanClient>,
+    pub provider: Provider<HttpProvider>,
 }
 
 #[derive(Debug, Clone)]
@@ -45,35 +56,37 @@ impl Context {
 
         Ok(Self {
             inner: Arc::new(ContextRef {
-                blobscan_client: BlobscanClient::try_with_client(
+                blobscan_client: Box::new(BlobscanClient::try_with_client(
                     client.clone(),
                     BlobscanClientConfig {
                         base_url: blobscan_api_endpoint,
                         secret_key,
                         exp_backoff: exp_backoff.clone(),
                     },
-                )?,
-                beacon_client: BeaconClient::try_with_client(
+                )?),
+                beacon_client: Box::new(BeaconClient::try_with_client(
                     client,
                     BeaconClientConfig {
                         base_url: beacon_node_url,
                         exp_backoff,
                     },
-                )?,
-                provider: Provider::<Http>::try_from(execution_node_endpoint)?,
+                )?),
+                provider: Provider::<HttpProvider>::try_from(execution_node_endpoint)?,
             }),
         })
     }
+}
 
-    pub fn beacon_client(&self) -> &BeaconClient {
+impl CommonContext<HttpProvider> for Context {
+    fn beacon_client(&self) -> &Box<dyn CommonBeaconClient> {
         &self.inner.beacon_client
     }
 
-    pub fn blobscan_client(&self) -> &BlobscanClient {
+    fn blobscan_client(&self) -> &Box<dyn CommonBlobscanClient> {
         &self.inner.blobscan_client
     }
 
-    pub fn provider(&self) -> &Provider<Http> {
+    fn provider(&self) -> &Provider<HttpProvider> {
         &self.inner.provider
     }
 }

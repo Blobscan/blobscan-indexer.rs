@@ -6,7 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-async-trait = "0.1.66"
+async-trait = "0.1.80"
+dyn-clone = "1.0.17"
 dotenv = "0.15.0"
 envy = "0.4.2"
 ethers = "1.0.2"
