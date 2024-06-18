@@ -35,3 +35,6 @@ anyhow = { version = "1.0.70", features = ["backtrace"] }
 thiserror = "1.0.40"
 sentry = { version = "0.31.2", features = ["debug-images"] }
 sentry-tracing = "0.31.2"
+
+[dev-dependencies]
+mockall = "0.12.1"
