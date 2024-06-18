@@ -7,6 +7,9 @@ use futures::future::join_all;
 use tokio::task::JoinHandle;
 use tracing::{debug, info, Instrument};
 
+#[cfg(test)]
+use mockall::automock;
+
 use crate::{
     clients::{beacon::types::BlockId, blobscan::types::BlockchainSyncState, common::ClientError},
     context::CommonContext,
@@ -18,6 +21,7 @@ use self::error::{SlotsChunksErrors, SynchronizerError};
 pub mod error;
 
 #[async_trait]
+#[cfg_attr(test, automock)]
 pub trait CommonSynchronizer: Send + Sync + Debug {
     async fn run(
         &self,
