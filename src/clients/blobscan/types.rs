@@ -71,7 +71,7 @@ pub struct BlockchainSyncStateResponse {
     pub last_upper_synced_slot: Option<u32>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct BlockchainSyncState {
     pub last_finalized_block: Option<u32>,
     pub last_lower_synced_slot: Option<u32>,

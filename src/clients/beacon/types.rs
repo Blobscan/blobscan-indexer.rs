@@ -3,7 +3,7 @@ use std::{fmt, str::FromStr};
 use ethers::types::{Bytes, H256};
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Debug, Clone)]
+#[derive(Serialize, Debug, Clone, PartialEq)]
 pub enum BlockId {
     Head,
     Finalized,
