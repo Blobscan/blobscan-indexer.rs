@@ -7,6 +7,9 @@ use backoff::ExponentialBackoff;
 use reqwest::{Client, Url};
 use reqwest_eventsource::EventSource;
 
+#[cfg(test)]
+use mockall::automock;
+
 use crate::{
     clients::{beacon::types::BlockHeaderResponse, common::ClientResult},
     json_get,
@@ -29,6 +32,7 @@ pub struct Config {
 }
 
 #[async_trait]
+#[cfg_attr(test, automock)]
 pub trait CommonBeaconClient: Send + Sync + Debug {
     async fn get_block(&self, block_id: &BlockId) -> ClientResult<Option<Block>>;
     async fn get_block_header(&self, block_id: &BlockId) -> ClientResult<Option<BlockHeader>>;

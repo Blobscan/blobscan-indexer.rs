@@ -5,6 +5,9 @@ use backoff::ExponentialBackoff;
 use chrono::TimeDelta;
 use reqwest::{Client, Url};
 
+#[cfg(test)]
+use mockall::automock;
+
 use crate::{
     clients::{blobscan::types::ReorgedSlotsResponse, common::ClientResult},
     json_get, json_put,
@@ -23,6 +26,7 @@ mod jwt_manager;
 pub mod types;
 
 #[async_trait]
+#[cfg_attr(test, automock)]
 pub trait CommonBlobscanClient: Send + Sync + Debug {
     fn try_with_client(client: Client, config: Config) -> ClientResult<Self>
     where
@@ -53,6 +57,7 @@ pub struct Config {
 }
 
 #[async_trait]
+
 impl CommonBlobscanClient for BlobscanClient {
     fn try_with_client(client: Client, config: Config) -> ClientResult<Self> {
         let base_url = Url::parse(&format!("{}/", config.base_url))?;
