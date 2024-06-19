@@ -345,8 +345,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_handler_on_one_depth_reorg() {
-        // 4 -> 5a
-        //      5b -> 6 -> ...
+        // Slots:
+        // 4 -> 5
+        //      6 -> 7 -> ...
         let mut mock_synchronizer = Box::new(MockCommonSynchronizer::new());
         let mut mock_beacon_client = MockCommonBeaconClient::new();
         let mut mock_blobscan_client = MockCommonBlobscanClient::new();
@@ -417,9 +418,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_handler_on_one_depth_later_reorg() {
-        // 4 -> 5a -> 6 -> ...
-        //      5b
+    async fn test_handler_on_one_depth_former_reorg() {
+        // Reorged block is reorged back to its former parent
+        // Slots:
+        // 4 -> 5 -> 7 -> ...
+        //      6
         let mut mock_synchronizer = Box::new(MockCommonSynchronizer::new());
         let mut mock_beacon_client = MockCommonBeaconClient::new();
         let mut mock_blobscan_client = MockCommonBlobscanClient::new();
@@ -701,6 +704,4 @@ mod tests {
 
         head_event
     }
-
-    // Additional tests for error handling, etc.
 }

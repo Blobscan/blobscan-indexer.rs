@@ -17,8 +17,8 @@ use crate::{
 use crate::clients::{beacon::MockCommonBeaconClient, blobscan::MockCommonBlobscanClient};
 
 pub trait CommonContext<T>: Send + Sync + Debug + DynClone {
-    fn beacon_client(&self) -> &Box<dyn CommonBeaconClient>;
-    fn blobscan_client(&self) -> &Box<dyn CommonBlobscanClient>;
+    fn beacon_client(&self) -> &dyn CommonBeaconClient;
+    fn blobscan_client(&self) -> &dyn CommonBlobscanClient;
     fn provider(&self) -> &Provider<T>;
 }
 
@@ -82,12 +82,12 @@ impl Context<HttpProvider> {
 }
 
 impl CommonContext<HttpProvider> for Context<HttpProvider> {
-    fn beacon_client(&self) -> &Box<dyn CommonBeaconClient> {
-        &self.inner.beacon_client
+    fn beacon_client(&self) -> &dyn CommonBeaconClient {
+        self.inner.beacon_client.as_ref()
     }
 
-    fn blobscan_client(&self) -> &Box<dyn CommonBlobscanClient> {
-        &self.inner.blobscan_client
+    fn blobscan_client(&self) -> &dyn CommonBlobscanClient {
+        self.inner.blobscan_client.as_ref()
     }
 
     fn provider(&self) -> &Provider<HttpProvider> {
@@ -127,12 +127,12 @@ impl Context<MockProvider> {
 
 #[cfg(test)]
 impl CommonContext<MockProvider> for Context<MockProvider> {
-    fn beacon_client(&self) -> &Box<dyn CommonBeaconClient> {
-        &self.inner.beacon_client
+    fn beacon_client(&self) -> &dyn CommonBeaconClient {
+        self.inner.beacon_client.as_ref()
     }
 
-    fn blobscan_client(&self) -> &Box<dyn CommonBlobscanClient> {
-        &self.inner.blobscan_client
+    fn blobscan_client(&self) -> &dyn CommonBlobscanClient {
+        self.inner.blobscan_client.as_ref()
     }
 
     fn provider(&self) -> &Provider<MockProvider> {

@@ -1,14 +1,11 @@
 use anyhow::{anyhow, Context as AnyhowContext, Result};
 
-use ethers::{
-    providers::{Http as HttpProvider, Middleware},
-    types::H256,
-};
+use ethers::providers::{Http as HttpProvider, Middleware};
 use tracing::{debug, info};
 
 use crate::{
     clients::{
-        beacon::types::{BlockHeader, BlockId},
+        beacon::types::BlockId,
         blobscan::types::{Blob, Block, Transaction},
     },
     context::CommonContext,
@@ -22,21 +19,6 @@ mod helpers;
 
 pub struct SlotsProcessor<T> {
     context: Box<dyn CommonContext<T>>,
-}
-
-#[derive(Debug, Clone)]
-pub struct BlockData {
-    pub root: H256,
-    pub slot: u32,
-}
-
-impl From<BlockHeader> for BlockData {
-    fn from(block_header: BlockHeader) -> Self {
-        Self {
-            root: block_header.root,
-            slot: block_header.header.message.slot,
-        }
-    }
 }
 
 impl SlotsProcessor<HttpProvider> {
