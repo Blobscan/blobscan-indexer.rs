@@ -55,7 +55,10 @@ jobs:
         with:
           images: blossomlabs/blobscan-indexer
           tags: |
+            type=ref,event=tag
             type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
 
       - name: Login to DockerHub
         if: github.event_name != 'pull_request'
