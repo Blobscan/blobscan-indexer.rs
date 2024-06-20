@@ -3,7 +3,6 @@ name: Release new version and deploy production
 on:
   push:
     tags:
-      - "v*"
 
 env:
   CARGO_TERM_COLOR: always
@@ -56,8 +55,7 @@ jobs:
         with:
           images: blossomlabs/blobscan-indexer
           tags: |
-            type=ref,event=tag
-            type=raw,value=stable
+            type=semver,pattern={{version}}
 
       - name: Login to DockerHub
         if: github.event_name != 'pull_request'
