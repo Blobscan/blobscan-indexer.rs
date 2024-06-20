@@ -3,7 +3,7 @@ version: "3.7"
 
 services:
   indexer:
-    image: blossomlabs/blobscan-indexer:master
+    image: blossomlabs/blobscan-indexer:${INDEXER_TAG}
     network_mode: host
     restart: always
     env_file:
