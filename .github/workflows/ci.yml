@@ -9,6 +9,7 @@ env:
 
 jobs:
   lint:
+    name: Linter
     runs-on: ubuntu-latest
 
     steps:
@@ -33,6 +34,7 @@ jobs:
           args: --all --all-features -- -D warnings
 
   build-test:
+    name: Run tests
     runs-on: ubuntu-latest
     needs: lint
 
