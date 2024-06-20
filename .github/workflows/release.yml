@@ -3,6 +3,7 @@ name: Release new version and deploy production
 on:
   push:
     tags:
+      - "v*"
 
 env:
   CARGO_TERM_COLOR: always
