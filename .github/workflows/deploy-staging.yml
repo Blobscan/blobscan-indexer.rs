@@ -78,6 +78,7 @@ jobs:
   deploy_staging:
     name: Deploy Blobscan indexer (staging)
     runs-on: ubuntu-latest
+    needs: docker
     environment: staging
     steps:
       - uses: appleboy/ssh-action@v0.0.7
