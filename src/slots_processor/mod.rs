@@ -5,7 +5,7 @@ use tracing::{debug, info};
 
 use crate::{
     clients::{
-        beacon::types::{BlockHeader, BlockId},
+        beacon::types::BlockId,
         blobscan::types::{Blob, Block, Transaction},
     },
     context::Context,
@@ -19,21 +19,6 @@ mod helpers;
 
 pub struct SlotsProcessor {
     context: Context,
-}
-
-#[derive(Debug, Clone)]
-pub struct BlockData {
-    pub root: H256,
-    pub slot: u32,
-}
-
-impl From<BlockHeader> for BlockData {
-    fn from(block_header: BlockHeader) -> Self {
-        Self {
-            root: block_header.root,
-            slot: block_header.header.message.slot,
-        }
-    }
 }
 
 impl SlotsProcessor {

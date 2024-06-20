@@ -3,8 +3,6 @@ use std::{fmt, str::FromStr};
 use ethers::types::{Bytes, H256};
 use serde::{Deserialize, Serialize};
 
-use crate::slots_processor::BlockData;
-
 #[derive(Serialize, Debug, Clone)]
 pub enum BlockId {
     Head,
@@ -35,10 +33,7 @@ pub struct BlockBody {
 }
 #[derive(Deserialize, Debug)]
 pub struct BlockMessage {
-    #[serde(deserialize_with = "deserialize_number")]
-    pub slot: u32,
     pub body: BlockBody,
-    pub parent_root: H256,
 }
 
 #[derive(Deserialize, Debug)]
@@ -53,7 +48,6 @@ pub struct BlockResponse {
 
 #[derive(Deserialize, Debug)]
 pub struct Blob {
-    pub index: String,
     pub kzg_commitment: String,
     pub kzg_proof: String,
     pub blob: Bytes,
@@ -89,7 +83,6 @@ pub struct BlockHeaderMessage {
 #[derive(Deserialize, Debug)]
 pub struct ChainReorgEventData {
     pub old_head_block: H256,
-    pub new_head_block: H256,
     #[serde(deserialize_with = "deserialize_number")]
     pub slot: u32,
     #[serde(deserialize_with = "deserialize_number")]
@@ -171,15 +164,6 @@ impl From<&Topic> for String {
             Topic::ChainReorg => String::from("chain_reorg"),
             Topic::Head => String::from("head"),
             Topic::FinalizedCheckpoint => String::from("finalized_checkpoint"),
-        }
-    }
-}
-
-impl From<HeadEventData> for BlockData {
-    fn from(event_data: HeadEventData) -> Self {
-        Self {
-            root: event_data.block,
-            slot: event_data.slot,
         }
     }
 }
