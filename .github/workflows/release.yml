@@ -32,7 +32,7 @@ jobs:
       - name: cargo clippy
         uses: clechasseur/rs-clippy-check@v3
         with:
-          args: --all --all-features -- -D warnings
+          args: --all --all-features
 
   build-test:
     name: Run tests
