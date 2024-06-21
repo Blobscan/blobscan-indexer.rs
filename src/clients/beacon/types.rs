@@ -3,7 +3,7 @@ use std::{fmt, str::FromStr};
 use ethers::types::{Bytes, H256};
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Debug, Clone)]
+#[derive(Serialize, Debug, Clone, PartialEq)]
 pub enum BlockId {
     Head,
     Finalized,
@@ -16,7 +16,6 @@ pub enum BlockId {
 pub enum Topic {
     Head,
     FinalizedCheckpoint,
-    ChainReorg,
 }
 
 #[derive(Deserialize, Debug)]
@@ -78,15 +77,6 @@ pub struct BlockHeaderMessage {
     pub parent_root: H256,
     #[serde(deserialize_with = "deserialize_number")]
     pub slot: u32,
-}
-
-#[derive(Deserialize, Debug)]
-pub struct ChainReorgEventData {
-    pub old_head_block: H256,
-    #[serde(deserialize_with = "deserialize_number")]
-    pub slot: u32,
-    #[serde(deserialize_with = "deserialize_number")]
-    pub depth: u32,
 }
 
 #[derive(Deserialize, Debug)]
@@ -161,7 +151,6 @@ impl FromStr for BlockId {
 impl From<&Topic> for String {
     fn from(value: &Topic) -> Self {
         match value {
-            Topic::ChainReorg => String::from("chain_reorg"),
             Topic::Head => String::from("head"),
             Topic::FinalizedCheckpoint => String::from("finalized_checkpoint"),
         }

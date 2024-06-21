@@ -1,8 +1,8 @@
-use super::error::{IndexerError, SyncingTaskError};
+use super::error::{IndexerError, IndexingError};
 
 pub type IndexerResult<T> = Result<T, IndexerError>;
 
 pub enum IndexerTaskMessage {
     Done,
-    Error(SyncingTaskError),
+    Error(IndexingError),
 }
