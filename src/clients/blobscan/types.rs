@@ -27,6 +27,7 @@ pub struct Transaction {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub to: Option<Address>,
     pub block_number: U64,
+    pub index: U64,
     pub gas_price: U256,
     pub max_fee_per_blob_gas: U256,
 }
@@ -180,6 +181,9 @@ impl<'a> TryFrom<(&'a EthersTransaction, &'a EthersBlock<EthersTransaction>)> fo
             block_number: ethers_block
                 .number
                 .with_context(|| "Missing block number field in execution block".to_string())?,
+            index: ethers_tx
+                .transaction_index
+                .with_context(|| "Missing transaction index field".to_string())?,
             hash,
             from: ethers_tx.from,
             to: ethers_tx.to,
