@@ -1,8 +1,9 @@
-name: Continuous Integration (build, test, docker, deploy)
+name: Continuous Integration
 
 on:
-  pull_request:
-    branches: ["master"]
+  pull_request_target:
+    branches:
+      - master
 
 env:
   CARGO_TERM_COLOR: always
