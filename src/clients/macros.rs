@@ -27,7 +27,7 @@ macro_rules! json_get {
                 |error, duration: std::time::Duration| {
                     let duration = duration.as_secs();
 
-                    tracing::warn!(
+                    tracing::error!(
                         method = "GET",
                         url = %url,
                         ?error,
@@ -38,7 +38,7 @@ macro_rules! json_get {
             .await {
                 Ok(resp) => resp,
                 Err(error) => {
-                    tracing::warn!(
+                    tracing::error!(
                         method = "GET",
                         url = %url,
                         ?error,
@@ -51,7 +51,7 @@ macro_rules! json_get {
         } else {
             match req.send().await {
                 Err(error) => {
-                    tracing::warn!(
+                    tracing::error!(
                         method = "GET",
                         url = %url,
                         ?error,
@@ -75,7 +75,7 @@ macro_rules! json_get {
 
         match result {
             Err(e) => {
-                tracing::warn!(
+                tracing::error!(
                     method = "GET",
                     url = %url,
                     response = text.as_str(),
@@ -112,7 +112,7 @@ macro_rules! json_put {
             .send()
             .await {
                 Err(error) => {
-                    tracing::warn!(
+                    tracing::error!(
                         method = "PUT",
                         url = %url,
                         body = body,
@@ -129,7 +129,7 @@ macro_rules! json_put {
         let result: $crate::clients::common::ClientResponse<$expected> = text.parse()?;
 
         if result.is_err() {
-            tracing::warn!(
+            tracing::error!(
                 method = "PUT",
                 url = %url,
                 body,
