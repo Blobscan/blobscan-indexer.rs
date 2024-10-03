@@ -4,6 +4,7 @@ version: "3.7"
 services:
   indexer:
     image: blossomlabs/blobscan-indexer:${INDEXER_TAG}
+    command: ["-d", "-s", "10"]
     network_mode: host
     restart: always
     env_file:
