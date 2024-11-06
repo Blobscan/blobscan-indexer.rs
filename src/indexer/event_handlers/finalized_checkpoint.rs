@@ -1,4 +1,4 @@
-use ethers::providers::Http as HttpProvider;
+use alloy::transports::Transport;
 use tracing::info;
 
 use crate::{
@@ -27,8 +27,11 @@ pub struct FinalizedCheckpointHandler<T> {
     context: Box<dyn CommonContext<T>>,
 }
 
-impl FinalizedCheckpointHandler<HttpProvider> {
-    pub fn new(context: Box<dyn CommonContext<HttpProvider>>) -> Self {
+impl<T> FinalizedCheckpointHandler<T>
+where
+    T: Transport + Send + Sync + 'static,
+{
+    pub fn new(context: Box<dyn CommonContext<T>>) -> Self {
         FinalizedCheckpointHandler { context }
     }
 

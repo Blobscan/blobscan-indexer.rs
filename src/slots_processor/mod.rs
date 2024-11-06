@@ -1,6 +1,6 @@
+use alloy::{rpc::types::BlockTransactionsKind, transports::http::ReqwestTransport};
 use anyhow::{anyhow, Context as AnyhowContext, Result};
 
-use ethers::providers::{Http as HttpProvider, Middleware};
 use tracing::{debug, info};
 
 use crate::{
@@ -21,8 +21,10 @@ pub struct SlotsProcessor<T> {
     context: Box<dyn CommonContext<T>>,
 }
 
-impl SlotsProcessor<HttpProvider> {
-    pub fn new(context: Box<dyn CommonContext<HttpProvider>>) -> SlotsProcessor<HttpProvider> {
+impl SlotsProcessor<ReqwestTransport> {
+    pub fn new(
+        context: Box<dyn CommonContext<ReqwestTransport>>,
+    ) -> SlotsProcessor<ReqwestTransport> {
         Self { context }
     }
 
@@ -97,7 +99,7 @@ impl SlotsProcessor<HttpProvider> {
         // Fetch execution block and perform some checks
 
         let execution_block = provider
-            .get_block_with_txs(execution_block_hash)
+            .get_block(execution_block_hash.into(), BlockTransactionsKind::Full)
             .await?
             .with_context(|| format!("Execution block {execution_block_hash} not found"))?;
 
@@ -134,9 +136,12 @@ impl SlotsProcessor<HttpProvider> {
         // Create entities to be indexed
 
         let block_entity = Block::try_from((&execution_block, slot))?;
-
-        let transactions_entities = execution_block
+        let block_transactions = execution_block
             .transactions
+            .as_transactions()
+            .ok_or_else(|| anyhow!("Failed to parse transactions"))?;
+
+        let transactions_entities = block_transactions
             .iter()
             .filter(|tx| tx_hash_to_versioned_hashes.contains_key(&tx.hash))
             .map(|tx| Transaction::try_from((tx, &execution_block)))
@@ -164,7 +169,7 @@ impl SlotsProcessor<HttpProvider> {
             .collect::<Vec<String>>();
          */
 
-        let block_number = block_entity.number.as_u32();
+        let block_number = block_entity.number;
 
         blobscan_client
             .index(block_entity, transactions_entities, blob_entities)

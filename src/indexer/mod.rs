@@ -1,7 +1,7 @@
 use std::thread;
 
+use alloy::transports::http::ReqwestTransport;
 use anyhow::anyhow;
-use ethers::providers::Http as HttpProvider;
 use event_handlers::{finalized_checkpoint::FinalizedCheckpointHandler, head::HeadEventHandler};
 use futures::StreamExt;
 use reqwest_eventsource::Event;
@@ -36,7 +36,7 @@ pub struct Indexer<T> {
     num_threads: u32,
 }
 
-impl Indexer<HttpProvider> {
+impl Indexer<ReqwestTransport> {
     pub fn try_new(env: &Environment, args: &Args) -> IndexerResult<Self> {
         let context = match Context::try_new(ContextConfig::from(env)) {
             Ok(c) => c,

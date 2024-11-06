@@ -1,6 +1,6 @@
 use std::{fmt, str::FromStr};
 
-use ethers::types::{Bytes, H256};
+use alloy::primitives::{Bytes, B256};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Debug, Clone, PartialEq)]
@@ -8,7 +8,7 @@ pub enum BlockId {
     Head,
     Finalized,
     Slot(u32),
-    Hash(H256),
+    Hash(B256),
 }
 
 #[derive(Serialize, Debug)]
@@ -20,7 +20,7 @@ pub enum Topic {
 
 #[derive(Deserialize, Debug)]
 pub struct ExecutionPayload {
-    pub block_hash: H256,
+    pub block_hash: B256,
     #[serde(deserialize_with = "deserialize_number")]
     pub block_number: u32,
 }
@@ -64,7 +64,7 @@ pub struct BlockHeaderResponse {
 
 #[derive(Deserialize, Debug)]
 pub struct BlockHeader {
-    pub root: H256,
+    pub root: B256,
     pub header: InnerBlockHeader,
 }
 #[derive(Deserialize, Debug)]
@@ -74,7 +74,7 @@ pub struct InnerBlockHeader {
 
 #[derive(Deserialize, Debug)]
 pub struct BlockHeaderMessage {
-    pub parent_root: H256,
+    pub parent_root: B256,
     #[serde(deserialize_with = "deserialize_number")]
     pub slot: u32,
 }
@@ -83,12 +83,12 @@ pub struct BlockHeaderMessage {
 pub struct HeadEventData {
     #[serde(deserialize_with = "deserialize_number")]
     pub slot: u32,
-    pub block: H256,
+    pub block: B256,
 }
 
 #[derive(Deserialize, Debug)]
 pub struct FinalizedCheckpointEventData {
-    pub block: H256,
+    pub block: B256,
 }
 
 fn deserialize_number<'de, D>(deserializer: D) -> Result<u32, D::Error>
@@ -133,7 +133,7 @@ impl FromStr for BlockId {
                 Ok(num) => Ok(BlockId::Slot(num)),
                 Err(_) => {
                     if s.starts_with("0x") {
-                        match H256::from_str(s) {
+                        match B256::from_str(s) {
                             Ok(hash) => Ok(BlockId::Hash(hash)),
                             Err(_) => Err(format!("Invalid block ID hash: {s}")),
                         }

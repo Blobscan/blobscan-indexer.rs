@@ -1,9 +1,9 @@
 use core::fmt;
 
+use alloy::primitives::{Address, BlockNumber, BlockTimestamp, Bytes, TxIndex, B256, U256};
+use alloy::rpc::types::{Block as ExecutionBlock, Transaction as ExecutionTransaction};
 use anyhow::{Context, Result};
-use ethers::types::{
-    Address, Block as EthersBlock, Bytes, Transaction as EthersTransaction, H256, U256, U64,
-};
+
 use serde::{Deserialize, Serialize};
 
 use crate::{clients::beacon::types::Blob as BeaconBlob, utils::web3::calculate_versioned_hash};
@@ -11,9 +11,9 @@ use crate::{clients::beacon::types::Blob as BeaconBlob, utils::web3::calculate_v
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct Block {
-    pub number: U64,
-    pub hash: H256,
-    pub timestamp: U256,
+    pub number: BlockNumber,
+    pub hash: B256,
+    pub timestamp: BlockTimestamp,
     pub slot: u32,
     pub blob_gas_used: U256,
     pub excess_blob_gas: U256,
@@ -22,12 +22,12 @@ pub struct Block {
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct Transaction {
-    pub hash: H256,
+    pub hash: B256,
     pub from: Address,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub to: Option<Address>,
-    pub block_number: U64,
-    pub index: U64,
+    pub block_number: BlockNumber,
+    pub index: TxIndex,
     pub gas_price: U256,
     pub max_fee_per_blob_gas: U256,
 }
@@ -35,11 +35,11 @@ pub struct Transaction {
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Blob {
-    pub versioned_hash: H256,
+    pub versioned_hash: B256,
     pub commitment: String,
     pub proof: String,
     pub data: Bytes,
-    pub tx_hash: H256,
+    pub tx_hash: B256,
     pub index: u32,
 }
 
@@ -118,106 +118,106 @@ impl From<(u32, u32)> for FailedSlotsChunk {
     }
 }
 
-impl<'a> TryFrom<(&'a EthersBlock<EthersTransaction>, u32)> for Block {
+impl<'a> TryFrom<(&'a ExecutionBlock<ExecutionTransaction>, u32)> for Block {
     type Error = anyhow::Error;
 
     fn try_from(
-        (ethers_block, slot): (&'a EthersBlock<EthersTransaction>, u32),
+        (execution_block, slot): (&'a ExecutionBlock<ExecutionTransaction>, u32),
     ) -> Result<Self, Self::Error> {
-        let number = ethers_block
-            .number
-            .with_context(|| "Missing block number field in execution block".to_string())?;
+        let number = execution_block.header.number;
+        let hash = execution_block.header.hash;
+        let timestamp = execution_block.header.timestamp;
+        let blob_gas_used = match execution_block.header.blob_gas_used {
+            Some(blob_gas_used) => U256::from::<u64>(blob_gas_used),
+            None => {
+                return Err(anyhow::anyhow!(
+                    "Missing `blob_gas_used` field in execution block {hash} with number {number}",
+                    hash = hash,
+                    number = number
+                ))
+            }
+        };
+        let excess_blob_gas = match execution_block.header.excess_blob_gas {
+            Some(excess_blob_gas) => U256::from::<u64>(excess_blob_gas),
+            None => {
+                return Err(anyhow::anyhow!(
+                "Missing `excess_blob_gas` field in execution block {hash} with number {number}",
+                hash = hash,
+                number = number
+            ))
+            }
+        };
 
         Ok(Self {
             number,
-            hash: ethers_block
-                .hash
-                .with_context(|| format!("Missing block hash field in execution block {number}"))?,
-            timestamp: ethers_block.timestamp,
+            hash,
+            timestamp,
             slot,
-            blob_gas_used: match ethers_block.other.get("blobGasUsed") {
-                Some(blob_gas_used) => {
-                    let blob_gas_used = blob_gas_used.as_str().with_context(|| {
-                        format!("Failed to convert `blobGasUsed` field in execution block {number}")
-                    })?;
-
-                    U256::from_str_radix(blob_gas_used, 16)?
-                }
-                None => {
-                    return Err(anyhow::anyhow!(
-                        "Missing `blobGasUsed` field in execution block {number}"
-                    ))
-                }
-            },
-            excess_blob_gas: match ethers_block.other.get("excessBlobGas") {
-                Some(excess_gas_gas) => {
-                    let excess_blob_gas = excess_gas_gas.as_str().with_context(|| {
-                        format!(
-                            "Failed to convert excess blob gas field in execution block {number}"
-                        )
-                    })?;
-
-                    U256::from_str_radix(excess_blob_gas, 16)?
-                }
-                None => {
-                    return Err(anyhow::anyhow!(
-                        "Missing `excessBlobGas` field in execution block {number}"
-                    ))
-                }
-            },
+            blob_gas_used,
+            excess_blob_gas,
         })
     }
 }
 
-impl<'a> TryFrom<(&'a EthersTransaction, &'a EthersBlock<EthersTransaction>)> for Transaction {
+impl<'a>
+    TryFrom<(
+        &'a ExecutionTransaction,
+        &'a ExecutionBlock<ExecutionTransaction>,
+    )> for Transaction
+{
     type Error = anyhow::Error;
 
     fn try_from(
-        (ethers_tx, ethers_block): (&'a EthersTransaction, &'a EthersBlock<EthersTransaction>),
+        (execution_tx, execution_block): (
+            &'a ExecutionTransaction,
+            &'a ExecutionBlock<ExecutionTransaction>,
+        ),
     ) -> Result<Self, Self::Error> {
-        let hash = ethers_tx.hash;
+        let hash = execution_tx.hash;
+        let block_number = execution_block.header.number;
+        let index = execution_tx
+            .transaction_index
+            .with_context(|| format!("Missing `transaction_index` field in tx {hash}"))?;
+        let from = execution_tx.from;
+        let to = execution_tx.to;
+        let gas_price = match execution_tx.gas_price {
+            Some(gas_price) => U256::from::<u128>(gas_price),
+            None => {
+                return Err(anyhow::anyhow!(
+                    "Missing `gas_price` field in tx {hash} in block {block_number}",
+                    hash = hash,
+                    block_number = block_number
+                ))
+            }
+        };
+        let max_fee_per_blob_gas = match execution_tx.max_fee_per_blob_gas {
+            Some(max_fee_per_blob_gas) => U256::from::<u128>(max_fee_per_blob_gas),
+            None => {
+                return Err(anyhow::anyhow!(
+                    "Missing `max_fee_per_blob_gas` field in tx {hash} in block {block_number}",
+                    hash = hash,
+                    block_number = block_number
+                ))
+            }
+        };
 
         Ok(Self {
-            block_number: ethers_block
-                .number
-                .with_context(|| "Missing block number field in execution block".to_string())?,
-            index: ethers_tx
-                .transaction_index
-                .with_context(|| "Missing transaction index field".to_string())?,
+            block_number,
+            index,
             hash,
-            from: ethers_tx.from,
-            to: ethers_tx.to,
-            gas_price: ethers_tx.gas_price.with_context(|| {
-                format!("Missing gas price field in transaction {hash}", hash = hash)
-            })?,
-            max_fee_per_blob_gas: match ethers_tx.other.get("maxFeePerBlobGas") {
-                Some(max_fee_per_blob_gas) => {
-                    let max_fee_per_blob_gas =
-                        max_fee_per_blob_gas.as_str().with_context(|| {
-                            format!(
-                                "Failed to convert `maxFeePerBlobGas` field in transaction {hash}",
-                                hash = hash
-                            )
-                        })?;
-
-                    U256::from_str_radix(max_fee_per_blob_gas, 16)?
-                }
-                None => {
-                    return Err(anyhow::anyhow!(
-                        "Missing `maxFeePerBlobGas` field in transaction {hash}",
-                        hash = hash
-                    ))
-                }
-            },
+            from,
+            to,
+            gas_price,
+            max_fee_per_blob_gas,
         })
     }
 }
 
-impl<'a> TryFrom<(&'a BeaconBlob, u32, H256)> for Blob {
+impl<'a> TryFrom<(&'a BeaconBlob, u32, B256)> for Blob {
     type Error = anyhow::Error;
 
     fn try_from(
-        (blob_data, index, tx_hash): (&'a BeaconBlob, u32, H256),
+        (blob_data, index, tx_hash): (&'a BeaconBlob, u32, B256),
     ) -> Result<Self, Self::Error> {
         Ok(Self {
             tx_hash,
@@ -230,9 +230,9 @@ impl<'a> TryFrom<(&'a BeaconBlob, u32, H256)> for Blob {
     }
 }
 
-impl<'a> From<(&'a BeaconBlob, &'a H256, usize, &'a H256)> for Blob {
+impl<'a> From<(&'a BeaconBlob, &'a B256, usize, &'a B256)> for Blob {
     fn from(
-        (blob_data, versioned_hash, index, tx_hash): (&'a BeaconBlob, &'a H256, usize, &'a H256),
+        (blob_data, versioned_hash, index, tx_hash): (&'a BeaconBlob, &'a B256, usize, &'a B256),
     ) -> Self {
         Self {
             tx_hash: *tx_hash,

@@ -3,7 +3,7 @@ pub enum SlotProcessingError {
     #[error(transparent)]
     ClientError(#[from] crate::clients::common::ClientError),
     #[error(transparent)]
-    Provider(#[from] ethers::providers::ProviderError),
+    Provider(#[from] alloy::transports::TransportError),
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }

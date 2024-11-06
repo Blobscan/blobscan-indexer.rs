@@ -1,9 +1,12 @@
-use std::{fmt::Debug, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
+use alloy::{
+    providers::{Provider, ProviderBuilder},
+    transports::http::ReqwestTransport,
+};
 use anyhow::Result as AnyhowResult;
 use backoff::ExponentialBackoffBuilder;
 use dyn_clone::DynClone;
-use ethers::providers::{Http as HttpProvider, MockProvider, Provider};
 
 use crate::{
     clients::{
@@ -13,17 +16,17 @@ use crate::{
     env::Environment,
 };
 
-#[cfg(test)]
-use crate::clients::{beacon::MockCommonBeaconClient, blobscan::MockCommonBlobscanClient};
+// #[cfg(test)]
+// use crate::clients::{beacon::MockCommonBeaconClient, blobscan::MockCommonBlobscanClient};
 
-pub trait CommonContext<T>: Send + Sync + Debug + DynClone {
+pub trait CommonContext<T>: Send + Sync + DynClone {
     fn beacon_client(&self) -> &dyn CommonBeaconClient;
     fn blobscan_client(&self) -> &dyn CommonBlobscanClient;
-    fn provider(&self) -> &Provider<T>;
+    fn provider(&self) -> &dyn Provider<T>;
 }
 
-dyn_clone::clone_trait_object!(CommonContext<HttpProvider>);
-dyn_clone::clone_trait_object!(CommonContext<MockProvider>);
+dyn_clone::clone_trait_object!(CommonContext<ReqwestTransport>);
+// dyn_clone::clone_trait_object!(CommonContext<MockProvider>);
 
 pub struct Config {
     pub blobscan_api_endpoint: String,
@@ -32,19 +35,18 @@ pub struct Config {
     pub secret_key: String,
 }
 
-#[derive(Debug)]
 struct ContextRef<T> {
     pub beacon_client: Box<dyn CommonBeaconClient>,
     pub blobscan_client: Box<dyn CommonBlobscanClient>,
-    pub provider: Provider<T>,
+    pub provider: Box<dyn Provider<T>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Context<T> {
     inner: Arc<ContextRef<T>>,
 }
 
-impl Context<HttpProvider> {
+impl Context<ReqwestTransport> {
     pub fn try_new(config: Config) -> AnyhowResult<Self> {
         let Config {
             blobscan_api_endpoint,
@@ -75,13 +77,16 @@ impl Context<HttpProvider> {
                         exp_backoff,
                     },
                 )?),
-                provider: Provider::<HttpProvider>::try_from(execution_node_endpoint)?,
+                // Provider::<HttpProvider>::try_from(execution_node_endpoint)?
+                provider: Box::new(
+                    ProviderBuilder::new().on_http(execution_node_endpoint.parse()?),
+                ),
             }),
         })
     }
 }
 
-impl CommonContext<HttpProvider> for Context<HttpProvider> {
+impl CommonContext<ReqwestTransport> for Context<ReqwestTransport> {
     fn beacon_client(&self) -> &dyn CommonBeaconClient {
         self.inner.beacon_client.as_ref()
     }
@@ -90,8 +95,8 @@ impl CommonContext<HttpProvider> for Context<HttpProvider> {
         self.inner.blobscan_client.as_ref()
     }
 
-    fn provider(&self) -> &Provider<HttpProvider> {
-        &self.inner.provider
+    fn provider(&self) -> &dyn Provider<ReqwestTransport> {
+        self.inner.provider.as_ref()
     }
 }
 
@@ -106,36 +111,36 @@ impl From<&Environment> for Config {
     }
 }
 
-#[cfg(test)]
-impl Context<MockProvider> {
-    pub fn new(
-        beacon_client: Option<MockCommonBeaconClient>,
-        blobscan_client: Option<MockCommonBlobscanClient>,
-        provider: Option<Provider<MockProvider>>,
-    ) -> Box<Self> {
-        Box::new(Self {
-            inner: Arc::new(ContextRef {
-                beacon_client: Box::new(beacon_client.unwrap_or(MockCommonBeaconClient::new())),
-                blobscan_client: Box::new(
-                    blobscan_client.unwrap_or(MockCommonBlobscanClient::new()),
-                ),
-                provider: provider.unwrap_or(Provider::mocked().0),
-            }),
-        })
-    }
-}
+// #[cfg(test)]
+// impl Context<MockProvider> {
+//     pub fn new(
+//         beacon_client: Option<MockCommonBeaconClient>,
+//         blobscan_client: Option<MockCommonBlobscanClient>,
+//         provider: Option<Provider<MockProvider>>,
+//     ) -> Box<Self> {
+//         Box::new(Self {
+//             inner: Arc::new(ContextRef {
+//                 beacon_client: Box::new(beacon_client.unwrap_or(MockCommonBeaconClient::new())),
+//                 blobscan_client: Box::new(
+//                     blobscan_client.unwrap_or(MockCommonBlobscanClient::new()),
+//                 ),
+//                 provider: provider.unwrap_or(Provider::mocked().0),
+//             }),
+//         })
+//     }
+// }
 
-#[cfg(test)]
-impl CommonContext<MockProvider> for Context<MockProvider> {
-    fn beacon_client(&self) -> &dyn CommonBeaconClient {
-        self.inner.beacon_client.as_ref()
-    }
+// #[cfg(test)]
+// impl CommonContext<MockProvider> for Context<MockProvider> {
+//     fn beacon_client(&self) -> &dyn CommonBeaconClient {
+//         self.inner.beacon_client.as_ref()
+//     }
 
-    fn blobscan_client(&self) -> &dyn CommonBlobscanClient {
-        self.inner.blobscan_client.as_ref()
-    }
+//     fn blobscan_client(&self) -> &dyn CommonBlobscanClient {
+//         self.inner.blobscan_client.as_ref()
+//     }
 
-    fn provider(&self) -> &Provider<MockProvider> {
-        &self.inner.provider
-    }
-}
+//     fn provider(&self) -> &Provider<MockProvider> {
+//         &self.inner.provider
+//     }
+// }
