@@ -1,8 +1,8 @@
 use std::fmt::Debug;
 
+use alloy::transports::http::ReqwestTransport;
 use anyhow::anyhow;
 use async_trait::async_trait;
-use ethers::providers::Http as HttpProvider;
 use futures::future::join_all;
 use tokio::task::JoinHandle;
 use tracing::{debug, info, Instrument};
@@ -22,7 +22,7 @@ pub mod error;
 
 #[async_trait]
 #[cfg_attr(test, automock)]
-pub trait CommonSynchronizer: Send + Sync + Debug {
+pub trait CommonSynchronizer: Send + Sync {
     async fn run(
         &self,
         initial_block_id: &BlockId,
@@ -38,7 +38,6 @@ pub struct SynchronizerBuilder {
     checkpoint_type: CheckpointType,
 }
 
-#[derive(Debug)]
 pub struct Synchronizer<T> {
     context: Box<dyn CommonContext<T>>,
     num_threads: u32,
@@ -89,8 +88,8 @@ impl SynchronizerBuilder {
 
     pub fn build(
         &self,
-        context: Box<dyn CommonContext<HttpProvider>>,
-    ) -> Synchronizer<HttpProvider> {
+        context: Box<dyn CommonContext<ReqwestTransport>>,
+    ) -> Synchronizer<ReqwestTransport> {
         Synchronizer {
             context,
             num_threads: self.num_threads,
@@ -101,7 +100,7 @@ impl SynchronizerBuilder {
     }
 }
 
-impl Synchronizer<HttpProvider> {
+impl Synchronizer<ReqwestTransport> {
     async fn sync_slots(&self, from_slot: u32, to_slot: u32) -> Result<(), SynchronizerError> {
         let is_reverse_sync = to_slot < from_slot;
         let unprocessed_slots = to_slot.abs_diff(from_slot);
@@ -314,7 +313,7 @@ impl Synchronizer<HttpProvider> {
 }
 
 #[async_trait]
-impl CommonSynchronizer for Synchronizer<HttpProvider> {
+impl CommonSynchronizer for Synchronizer<ReqwestTransport> {
     async fn run(
         &self,
         initial_block_id: &BlockId,

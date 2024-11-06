@@ -1,31 +1,33 @@
 use std::collections::HashMap;
 
-use ethers::types::{Block as EthersBlock, Transaction as EthersTransaction, H256};
-
-use crate::{
-    clients::beacon::types::Blob as BeaconBlob,
-    utils::web3::{calculate_versioned_hash, get_tx_versioned_hashes},
+use crate::{clients::beacon::types::Blob as BeaconBlob, utils::web3::calculate_versioned_hash};
+use alloy::{
+    primitives::B256,
+    rpc::types::{Block, Transaction},
 };
 
 pub fn create_tx_hash_versioned_hashes_mapping(
-    block: &EthersBlock<EthersTransaction>,
-) -> Result<HashMap<H256, Vec<H256>>, anyhow::Error> {
+    block: &Block<Transaction>,
+) -> Result<HashMap<B256, Vec<B256>>, anyhow::Error> {
     let mut tx_to_versioned_hashes = HashMap::new();
 
-    for tx in &block.transactions {
-        match get_tx_versioned_hashes(tx)? {
-            Some(versioned_hashes) => {
-                tx_to_versioned_hashes.insert(tx.hash, versioned_hashes);
-            }
-            None => continue,
-        };
+    if let Some(transactions) = block.transactions.as_transactions() {
+        transactions
+            .iter()
+            .for_each(|tx| match &tx.blob_versioned_hashes {
+                Some(versioned_hashes) => {
+                    tx_to_versioned_hashes.insert(tx.hash, versioned_hashes.clone());
+                }
+                None => {}
+            });
     }
+
     Ok(tx_to_versioned_hashes)
 }
 
 pub fn create_versioned_hash_blob_mapping(
     blobs: &Vec<BeaconBlob>,
-) -> Result<HashMap<H256, &BeaconBlob>, anyhow::Error> {
+) -> Result<HashMap<B256, &BeaconBlob>, anyhow::Error> {
     let mut version_hash_to_blob = HashMap::new();
 
     for blob in blobs {
