@@ -1,11 +1,11 @@
-use std::thread;
+use std::{thread, time::Duration};
 
 use alloy::transports::http::ReqwestTransport;
 use anyhow::anyhow;
 use event_handlers::{finalized_checkpoint::FinalizedCheckpointHandler, head::HeadEventHandler};
 use futures::StreamExt;
 use reqwest_eventsource::Event;
-use tokio::{sync::mpsc, task::JoinHandle};
+use tokio::{sync::mpsc, task::JoinHandle, time::sleep};
 use tracing::{debug, error, info, Instrument};
 
 use crate::{
@@ -215,70 +215,81 @@ impl Indexer<ReqwestTransport> {
     ) -> JoinHandle<IndexerResult<()>> {
         let task_context = self.context.clone();
         let synchronizer = self.create_synchronizer(CheckpointType::Upper);
+        let realtime_sync_task_span = tracing::info_span!("indexer:live");
+
+        let mut head_event_handler =
+            HeadEventHandler::new(task_context.clone(), synchronizer, start_block_id);
+        let finalized_checkpoint_event_handler =
+            FinalizedCheckpointHandler::new(task_context.clone());
 
         tokio::spawn(async move {
-            let realtime_sync_task_span = tracing::info_span!("indexer:live");
-
             let result: Result<(), LiveIndexingError> = async {
                 let topics = vec![Topic::Head, Topic::FinalizedCheckpoint];
-                let mut event_source = task_context
-                    .beacon_client()
-                    .subscribe_to_events(&topics)
-                    .map_err(LiveIndexingError::BeaconEventsSubscriptionError)?;
                 let events = topics
                     .iter()
                     .map(|topic| topic.into())
                     .collect::<Vec<String>>()
                     .join(", ");
 
-                let mut head_event_handler =
-                    HeadEventHandler::new(task_context.clone(), synchronizer, start_block_id);
-                let finalized_checkpoint_event_handler =
-                    FinalizedCheckpointHandler::new(task_context);
+                loop {
+                    let mut event_source = task_context
+                        .beacon_client()
+                        .subscribe_to_events(&topics)
+                        .map_err(LiveIndexingError::BeaconEventsSubscriptionError)?;
 
-                info!("Subscribed to beacon events: {events}");
+                    info!("Subscribed to beacon events: {}", events);
 
-                while let Some(event) = event_source.next().await {
-                    match event {
-                        Ok(Event::Open) => {
-                            debug!("Subscription connection opened")
-                        }
-                        Ok(Event::Message(event)) => {
-                            let event_name = event.event.as_str();
+                    while let Some(event) = event_source.next().await {
+                        match event {
+                            Ok(Event::Open) => {
+                                debug!("Subscription connection opened");
+                            }
+                            Ok(Event::Message(event)) => {
+                                let event_name = event.event.as_str();
 
-                            match event_name {
-                                "head" => {
-                                    head_event_handler
-                                        .handle(event.data)
-                                        .instrument(tracing::info_span!("head_block"))
-                                        .await?;
+                                match event_name {
+                                    "head" => {
+                                        head_event_handler
+                                            .handle(event.data)
+                                            .instrument(tracing::info_span!("head_block"))
+                                            .await?;
+                                    }
+                                    "finalized_checkpoint" => {
+                                        finalized_checkpoint_event_handler
+                                            .handle(event.data)
+                                            .instrument(tracing::info_span!("finalized_checkpoint"))
+                                            .await?;
+                                    }
+                                    unexpected_event_id => {
+                                        return Err(LiveIndexingError::UnexpectedBeaconEvent(
+                                            unexpected_event_id.to_string(),
+                                        ));
+                                    }
                                 }
-                                "finalized_checkpoint" => {
-                                    finalized_checkpoint_event_handler
-                                        .handle(event.data)
-                                        .instrument(tracing::info_span!("finalized_checkpoint"))
-                                        .await?;
-                                }
-                                unexpected_event_id => {
-                                    return Err(LiveIndexingError::UnexpectedBeaconEvent(
-                                        unexpected_event_id.to_string(),
-                                    ));
+                            }
+                            Err(error) => {
+                                event_source.close();
+
+                                if let reqwest_eventsource::Error::StreamEnded = error {
+                                    info!(
+                                        "Beacon node events stream ended. Retrying subscription connection…"
+                                    );
+
+                                    sleep(Duration::from_secs(1)).await;
+
+                                    break;
+                                } else {
+                                    return Err(error.into());
                                 }
                             }
                         }
-                        Err(error) => {
-                            event_source.close();
-
-                            return Err(error.into());
-                        }
                     }
                 }
-
-                Ok(())
             }
             .instrument(realtime_sync_task_span)
             .await;
 
+            // Send final status message
             if let Err(error) = result {
                 tx.send(IndexerTaskMessage::Error(error.into())).await?;
             } else {
