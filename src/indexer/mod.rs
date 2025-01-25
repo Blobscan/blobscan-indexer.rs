@@ -1,11 +1,11 @@
-use std::{thread, time::Duration};
+use std::thread;
 
 use alloy::transports::http::ReqwestTransport;
 use anyhow::anyhow;
 use event_handlers::{finalized_checkpoint::FinalizedCheckpointHandler, head::HeadEventHandler};
 use futures::StreamExt;
 use reqwest_eventsource::Event;
-use tokio::{sync::mpsc, task::JoinHandle, time::sleep};
+use tokio::{sync::mpsc, task::JoinHandle};
 use tracing::{debug, error, info, Instrument};
 
 use crate::{
@@ -237,7 +237,7 @@ impl Indexer<ReqwestTransport> {
                         .subscribe_to_events(&topics)
                         .map_err(LiveIndexingError::BeaconEventsSubscriptionError)?;
 
-                    info!("Subscribed to beacon events: {}", events);
+                    info!("Subscribed to beacon SSE stream: {}", events);
 
                     while let Some(event) = event_source.next().await {
                         match event {
@@ -271,11 +271,7 @@ impl Indexer<ReqwestTransport> {
                                 event_source.close();
 
                                 if let reqwest_eventsource::Error::StreamEnded = error {
-                                    info!(
-                                        "Beacon node events stream ended. Retrying subscription connection…"
-                                    );
-
-                                    sleep(Duration::from_secs(1)).await;
+                                    info!("Beacon node SSE stream ended. Resubscribing to stream…");
 
                                     break;
                                 } else {
@@ -289,7 +285,6 @@ impl Indexer<ReqwestTransport> {
             .instrument(realtime_sync_task_span)
             .await;
 
-            // Send final status message
             if let Err(error) = result {
                 tx.send(IndexerTaskMessage::Error(error.into())).await?;
             } else {
