@@ -47,12 +47,12 @@ impl JWTManager {
 
         match *token_guard {
             Some(ref token) => {
-                let now = Utc::now() - self.safety_margin;
+                let now = Utc::now() + self.safety_margin;
                 let expiration_date = expr_guard.ok_or(anyhow::anyhow!(
                     "JWT expiration date not set. This should not happen"
                 ))?;
 
-                if now > expiration_date {
+                if now >= expiration_date {
                     debug!(
                         expiration_date = expiration_date.to_string(),
                         "JWT expired. Refreshing token"
