@@ -184,7 +184,7 @@ impl Indexer<ReqwestTransport> {
             let historical_syc_thread_span = tracing::info_span!("indexer:historical");
 
             let result: Result<(), IndexerError> = async move {
-                let result = synchronizer.run(&start_block_id, &end_block_id).await;
+                let result = synchronizer.run(start_block_id, end_block_id).await;
 
                 if let Err(error) = result {
                     tx.send(IndexerTaskMessage::Error(

@@ -66,12 +66,12 @@ where
             head_block_id.clone()
         };
 
-        let head_block_header = self.get_block_header(&head_block_id).await?;
+        let head_block_header = self.get_block_header(head_block_id).await?;
 
         if let Some(last_block_hash) = self.last_block_hash {
             if last_block_hash != head_block_header.parent_root {
                 let parent_block_header = self
-                    .get_block_header(&head_block_header.parent_root.into())
+                    .get_block_header(head_block_header.parent_root.into())
                     .await?;
                 let parent_block_slot = parent_block_header.slot;
                 let reorg_start_slot = parent_block_slot + 1;
@@ -91,8 +91,8 @@ where
                     // Re-index parent block as it may be mark as reorged and not indexed
                     self.synchronizer
                         .run(
-                            &BlockId::Slot(parent_block_slot),
-                            &BlockId::Slot(parent_block_slot + 1),
+                            parent_block_slot.into(),
+                            (parent_block_slot + 1).into(),
                         )
                         .await?;
 
@@ -118,7 +118,7 @@ where
         }
 
         self.synchronizer
-            .run(&initial_block_id, &BlockId::Slot(head_block_slot + 1))
+            .run(initial_block_id, (head_block_slot + 1).into())
             .await?;
 
         self.last_block_hash = Some(head_block_hash);
@@ -128,12 +128,12 @@ where
 
     async fn get_block_header(
         &self,
-        block_id: &BlockId,
+        block_id: BlockId,
     ) -> Result<BlockHeader, HeadEventHandlerError> {
         match self
             .context
             .beacon_client()
-            .get_block_header(block_id)
+            .get_block_header(block_id.clone())
             .await
             .map_err(|err| {
                 HeadEventHandlerError::BlockHeaderRetrievalError(block_id.clone(), err)

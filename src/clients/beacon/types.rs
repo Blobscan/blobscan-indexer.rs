@@ -170,6 +170,12 @@ impl From<B256> for BlockId {
     }
 }
 
+impl From<u32> for BlockId {
+    fn from(value: u32) -> Self {
+        BlockId::Slot(value)
+    }
+}
+
 impl From<BlockHeaderResponse> for BlockHeader {
     fn from(response: BlockHeaderResponse) -> Self {
         BlockHeader {

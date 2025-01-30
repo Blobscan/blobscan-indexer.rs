@@ -4,10 +4,7 @@ use anyhow::{anyhow, Context as AnyhowContext, Result};
 use tracing::{debug, info};
 
 use crate::{
-    clients::{
-        beacon::types::BlockId,
-        blobscan::types::{Blob, Block, Transaction},
-    },
+    clients::blobscan::types::{Blob, Block, Transaction},
     context::CommonContext,
 };
 
@@ -59,7 +56,7 @@ impl SlotsProcessor<ReqwestTransport> {
         let blobscan_client = self.context.blobscan_client();
         let provider = self.context.provider();
 
-        let beacon_block = match beacon_client.get_block(&BlockId::Slot(slot)).await? {
+        let beacon_block = match beacon_client.get_block(slot.into()).await? {
             Some(block) => block,
             None => {
                 debug!(slot = slot, "Skipping as there is no beacon block");
@@ -113,7 +110,7 @@ impl SlotsProcessor<ReqwestTransport> {
         // Fetch blobs and perform some checks
 
         let blobs = match beacon_client
-            .get_blobs(&BlockId::Slot(slot))
+            .get_blobs(slot.into())
             .await
             .map_err(SlotProcessingError::ClientError)?
         {

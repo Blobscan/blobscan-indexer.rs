@@ -25,8 +25,8 @@ pub mod error;
 pub trait CommonSynchronizer: Send + Sync {
     async fn run(
         &self,
-        initial_block_id: &BlockId,
-        final_block_id: &BlockId,
+        initial_block_id: BlockId,
+        final_block_id: BlockId,
     ) -> Result<(), SynchronizerError>;
 }
 
@@ -286,12 +286,12 @@ impl Synchronizer<ReqwestTransport> {
         Ok(())
     }
 
-    async fn resolve_to_slot(&self, block_id: &BlockId) -> Result<u32, SynchronizerError> {
+    async fn resolve_to_slot(&self, block_id: BlockId) -> Result<u32, SynchronizerError> {
         let beacon_client = self.context.beacon_client();
 
         let resolved_block_id: Result<u32, ClientError> = match block_id {
-            BlockId::Slot(slot) => Ok(*slot),
-            _ => match beacon_client.get_block_header(block_id).await {
+            BlockId::Slot(slot) => Ok(slot),
+            _ => match beacon_client.get_block_header(block_id.clone()).await {
                 Ok(None) => {
                     let err = anyhow!("Block ID {} not found", block_id);
 
@@ -316,11 +316,11 @@ impl Synchronizer<ReqwestTransport> {
 impl CommonSynchronizer for Synchronizer<ReqwestTransport> {
     async fn run(
         &self,
-        initial_block_id: &BlockId,
-        final_block_id: &BlockId,
+        initial_block_id: BlockId,
+        final_block_id: BlockId,
     ) -> Result<(), SynchronizerError> {
         let initial_slot = self.resolve_to_slot(initial_block_id).await?;
-        let mut final_slot = self.resolve_to_slot(final_block_id).await?;
+        let mut final_slot = self.resolve_to_slot(final_block_id.clone()).await?;
 
         if initial_slot == final_slot {
             return Ok(());
@@ -330,7 +330,7 @@ impl CommonSynchronizer for Synchronizer<ReqwestTransport> {
             self.sync_slots_by_checkpoints(initial_slot, final_slot)
                 .await?;
 
-            let latest_final_slot = self.resolve_to_slot(final_block_id).await?;
+            let latest_final_slot = self.resolve_to_slot(final_block_id.clone()).await?;
 
             if final_slot == latest_final_slot {
                 return Ok(());
