@@ -297,7 +297,7 @@ impl Synchronizer<ReqwestTransport> {
 
                     Err(err.into())
                 }
-                Ok(Some(block_header)) => Ok(block_header.header.message.slot),
+                Ok(Some(block_header)) => Ok(block_header.slot),
                 Err(error) => Err(error),
             },
         };

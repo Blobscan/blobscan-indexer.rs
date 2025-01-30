@@ -66,15 +66,14 @@ where
             head_block_id.clone()
         };
 
-        let head_block_header = self.get_block_header(&head_block_id).await?.header;
+        let head_block_header = self.get_block_header(&head_block_id).await?;
 
         if let Some(last_block_hash) = self.last_block_hash {
-            if last_block_hash != head_block_header.message.parent_root {
+            if last_block_hash != head_block_header.parent_root {
                 let parent_block_header = self
-                    .get_block_header(&BlockId::Hash(head_block_header.message.parent_root))
-                    .await?
-                    .header;
-                let parent_block_slot = parent_block_header.message.slot;
+                    .get_block_header(&head_block_header.parent_root.into())
+                    .await?;
+                let parent_block_slot = parent_block_header.slot;
                 let reorg_start_slot = parent_block_slot + 1;
                 let reorg_final_slot = head_block_slot;
                 let reorged_slots = (reorg_start_slot..reorg_final_slot).collect::<Vec<u32>>();
@@ -139,7 +138,7 @@ where
             .map_err(|err| {
                 HeadEventHandlerError::BlockHeaderRetrievalError(block_id.clone(), err)
             })? {
-            Some(block) => Ok(block),
+            Some(block) => Ok(block.into()),
             None => Err(HeadEventHandlerError::BlockHeaderNotFound(block_id.clone())),
         }
     }

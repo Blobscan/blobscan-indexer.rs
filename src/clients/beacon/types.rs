@@ -59,11 +59,18 @@ pub struct BlobsResponse {
 
 #[derive(Deserialize, Debug)]
 pub struct BlockHeaderResponse {
-    pub data: BlockHeader,
+    pub data: BlockHeaderData,
 }
 
 #[derive(Deserialize, Debug)]
 pub struct BlockHeader {
+    pub root: B256,
+    pub parent_root: B256,
+    pub slot: u32,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct BlockHeaderData {
     pub root: B256,
     pub header: InnerBlockHeader,
 }
@@ -153,6 +160,22 @@ impl From<&Topic> for String {
         match value {
             Topic::Head => String::from("head"),
             Topic::FinalizedCheckpoint => String::from("finalized_checkpoint"),
+        }
+    }
+}
+
+impl From<B256> for BlockId {
+    fn from(value: B256) -> Self {
+        BlockId::Hash(value)
+    }
+}
+
+impl From<BlockHeaderResponse> for BlockHeader {
+    fn from(response: BlockHeaderResponse) -> Self {
+        BlockHeader {
+            root: response.data.root,
+            parent_root: response.data.header.message.parent_root,
+            slot: response.data.header.message.slot,
         }
     }
 }

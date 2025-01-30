@@ -9,13 +9,14 @@ use reqwest_eventsource::EventSource;
 
 #[cfg(test)]
 use mockall::automock;
+use types::BlockHeader;
 
 use crate::{
     clients::{beacon::types::BlockHeaderResponse, common::ClientResult},
     json_get,
 };
 
-use self::types::{Blob, BlobsResponse, Block, BlockHeader, BlockId, BlockResponse, Topic};
+use self::types::{Blob, BlobsResponse, Block, BlockId, BlockResponse, Topic};
 
 pub mod types;
 
@@ -77,7 +78,7 @@ impl CommonBeaconClient for BeaconClient {
             self.exp_backoff.clone()
         )
         .map(|res| match res {
-            Some(r) => Some(r.data),
+            Some(r) => Some(r.into()),
             None => None,
         })
     }
