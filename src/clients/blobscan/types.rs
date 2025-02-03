@@ -9,6 +9,13 @@ use serde::{Deserialize, Serialize};
 use crate::{clients::beacon::types::Blob as BeaconBlob, utils::web3::calculate_versioned_hash};
 
 #[derive(Serialize, Deserialize, Debug)]
+pub struct BlobscanBlock {
+    pub hash: B256,
+    pub number: u32,
+    pub slot: u32,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct Block {
     pub number: BlockNumber,
@@ -90,6 +97,13 @@ pub struct IndexRequest {
 #[serde(rename_all = "camelCase")]
 pub struct ReorgedSlotsRequest {
     pub reorged_slots: Vec<u32>,
+}
+
+#[derive(Deserialize, Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ReorgedBlocksRequestBody {
+    pub forwarded_blocks: Vec<B256>,
+    pub rewinded_blocks: Vec<B256>,
 }
 
 #[derive(Deserialize, Debug)]

@@ -33,6 +33,9 @@ pub struct BlockBody {
 #[derive(Deserialize, Debug)]
 pub struct BlockMessage {
     pub body: BlockBody,
+    pub parent_root: B256,
+    #[serde(deserialize_with = "deserialize_number")]
+    pub slot: u32,
 }
 
 #[derive(Deserialize, Debug)]
@@ -62,7 +65,7 @@ pub struct BlockHeaderResponse {
     pub data: BlockHeaderData,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct BlockHeader {
     pub root: B256,
     pub parent_root: B256,
@@ -90,6 +93,7 @@ pub struct BlockHeaderMessage {
 pub struct HeadEventData {
     #[serde(deserialize_with = "deserialize_number")]
     pub slot: u32,
+    #[allow(dead_code)]
     pub block: B256,
 }
 

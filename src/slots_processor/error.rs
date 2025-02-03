@@ -1,9 +1,12 @@
+use crate::clients::common::ClientError;
+
 #[derive(Debug, thiserror::Error)]
 pub enum SlotProcessingError {
     #[error(transparent)]
     ClientError(#[from] crate::clients::common::ClientError),
     #[error(transparent)]
     Provider(#[from] alloy::transports::TransportError),
+
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }
@@ -19,6 +22,8 @@ pub enum SlotsProcessorError {
         failed_slot: u32,
         error: SlotProcessingError,
     },
+    #[error("Failed to handle reorged slots")]
+    ReorgedFailure(#[from] ClientError),
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }

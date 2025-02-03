@@ -1,6 +1,6 @@
 use std::thread;
 
-use alloy::transports::http::ReqwestTransport;
+use alloy::{primitives::B256, transports::http::ReqwestTransport};
 use anyhow::anyhow;
 use event_handlers::{finalized_checkpoint::FinalizedCheckpointHandler, head::HeadEventHandler};
 use futures::StreamExt;
@@ -10,7 +10,7 @@ use tracing::{debug, error, info, Instrument};
 
 use crate::{
     args::Args,
-    clients::beacon::types::{BlockId, Topic},
+    clients::beacon::types::{BlockHeader, BlockId, Topic},
     context::{CommonContext, Config as ContextConfig, Context},
     env::Environment,
     indexer::error::HistoricalIndexingError,
@@ -110,42 +110,42 @@ impl Indexer<ReqwestTransport> {
                 None => BlockId::Head,
             },
         };
-        let current_upper_block_id = match start_block_id {
-            Some(block_id) => block_id,
-            None => match &sync_state {
-                Some(state) => match state.last_upper_synced_slot {
-                    Some(slot) => BlockId::Slot(slot + 1),
-                    None => match state.last_lower_synced_slot {
-                        Some(slot) => BlockId::Slot(slot + 1),
-                        None => BlockId::Head,
-                    },
-                },
-                None => BlockId::Head,
-            },
-        };
 
-        info!(
-            ?current_lower_block_id,
-            ?current_upper_block_id,
-            "Starting indexer…",
-        );
+        let last_synced_block = sync_state
+            .map(|state| {
+                state
+                    .last_upper_synced_slot
+                    .map(|last_upper_synced_slot| BlockHeader {
+                        slot: last_upper_synced_slot,
+                        root: B256::ZERO,
+                        parent_root: B256::ZERO,
+                    })
+            })
+            .flatten();
+
+        info!("Starting indexer…",);
 
         let (tx, mut rx) = mpsc::channel(32);
         let tx1 = tx.clone();
         let mut total_tasks = 0;
 
         if end_block_id.is_none() {
-            self.start_live_indexing_task(tx, current_upper_block_id);
+            self.start_live_indexing_task(tx, last_synced_block, start_block_id);
             total_tasks += 1;
         }
 
-        let default_end_block = BlockId::Slot(self.dencun_fork_slot - 1);
-        let end_block_id = end_block_id.unwrap_or(default_end_block);
         let historical_sync_completed =
             matches!(current_lower_block_id, BlockId::Slot(slot) if slot < self.dencun_fork_slot);
 
         if !self.disable_sync_historical && !historical_sync_completed {
-            self.start_historical_indexing_task(tx1, current_lower_block_id, end_block_id);
+            let historical_sync_final_block_id =
+                end_block_id.unwrap_or(BlockId::Slot(self.dencun_fork_slot - 1));
+
+            self.start_historical_indexing_task(
+                tx1,
+                current_lower_block_id,
+                historical_sync_final_block_id,
+            );
 
             total_tasks += 1;
         }
@@ -178,13 +178,13 @@ impl Indexer<ReqwestTransport> {
         start_block_id: BlockId,
         end_block_id: BlockId,
     ) -> JoinHandle<IndexerResult<()>> {
-        let synchronizer = self.create_synchronizer(CheckpointType::Lower);
+        let mut synchronizer = self.create_synchronizer(CheckpointType::Lower, None);
 
         tokio::spawn(async move {
             let historical_syc_thread_span = tracing::info_span!("indexer:historical");
 
             let result: Result<(), IndexerError> = async move {
-                let result = synchronizer.run(start_block_id, end_block_id).await;
+                let result = synchronizer.sync_blocks(start_block_id, end_block_id).await;
 
                 if let Err(error) = result {
                     tx.send(IndexerTaskMessage::Error(
@@ -211,16 +211,13 @@ impl Indexer<ReqwestTransport> {
     fn start_live_indexing_task(
         &self,
         tx: mpsc::Sender<IndexerTaskMessage>,
-        start_block_id: BlockId,
+        last_indexed_block: Option<BlockHeader>,
+        start_block_id: Option<BlockId>,
     ) -> JoinHandle<IndexerResult<()>> {
         let task_context = self.context.clone();
-        let synchronizer = self.create_synchronizer(CheckpointType::Upper);
-        let realtime_sync_task_span = tracing::info_span!("indexer:live");
 
-        let mut head_event_handler =
-            HeadEventHandler::new(task_context.clone(), synchronizer, start_block_id);
-        let finalized_checkpoint_event_handler =
-            FinalizedCheckpointHandler::new(task_context.clone());
+        let synchronizer = self.create_synchronizer(CheckpointType::Upper, last_indexed_block);
+        let realtime_sync_task_span = tracing::info_span!("indexer:live");
 
         tokio::spawn(async move {
             let result: Result<(), LiveIndexingError> = async {
@@ -230,6 +227,10 @@ impl Indexer<ReqwestTransport> {
                     .map(|topic| topic.into())
                     .collect::<Vec<String>>()
                     .join(", ");
+
+                let mut head_event_handler = HeadEventHandler::new(synchronizer, start_block_id);
+                let finalized_checkpoint_event_handler =
+                    FinalizedCheckpointHandler::new(task_context.clone());
 
                 loop {
                     let mut event_source = task_context
@@ -295,11 +296,19 @@ impl Indexer<ReqwestTransport> {
         })
     }
 
-    fn create_synchronizer(&self, checkpoint_type: CheckpointType) -> Box<dyn CommonSynchronizer> {
+    fn create_synchronizer(
+        &self,
+        checkpoint_type: CheckpointType,
+        last_synced_block: Option<BlockHeader>,
+    ) -> Box<dyn CommonSynchronizer> {
         let mut synchronizer_builder = SynchronizerBuilder::new();
 
         if let Some(checkpoint_slots) = self.checkpoint_slots {
             synchronizer_builder.with_slots_checkpoint(checkpoint_slots);
+        }
+
+        if let Some(last_synced_block) = last_synced_block {
+            synchronizer_builder.with_last_synced_block(last_synced_block);
         }
 
         let checkpoint_type = self.disabled_checkpoint.unwrap_or(checkpoint_type);
