@@ -10,16 +10,13 @@ use reqwest::{Client, Url};
 use mockall::automock;
 use types::{BlobscanBlock, ReorgedBlocksRequestBody};
 
-use crate::{
-    clients::{blobscan::types::ReorgedSlotsResponse, common::ClientResult},
-    json_get, json_put,
-};
+use crate::{clients::common::ClientResult, json_get, json_put};
 
 use self::{
     jwt_manager::{Config as JWTManagerConfig, JWTManager},
     types::{
         Blob, Block, BlockchainSyncState, BlockchainSyncStateRequest, BlockchainSyncStateResponse,
-        IndexRequest, ReorgedSlotsRequest, Transaction,
+        IndexRequest, Transaction,
     },
 };
 
@@ -40,7 +37,6 @@ pub trait CommonBlobscanClient: Send + Sync + Debug {
         blobs: Vec<Blob>,
     ) -> ClientResult<()>;
     async fn get_block(&self, slot: u32) -> ClientResult<Option<BlobscanBlock>>;
-    async fn handle_reorged_slots(&self, slots: &[u32]) -> ClientResult<u32>;
     async fn handle_reorg(
         &self,
         rewinded_blocks: Vec<B256>,
@@ -102,20 +98,9 @@ impl CommonBlobscanClient for BlobscanClient {
     }
 
     async fn get_block(&self, slot: u32) -> ClientResult<Option<BlobscanBlock>> {
-        let url = self.base_url.join(&format!("block/{}?slot=true", slot))?;
+        let url = self.base_url.join(&format!("slots/{}", slot))?;
 
         json_get!(&self.client, url, BlobscanBlock, self.exp_backoff.clone())
-    }
-
-    async fn handle_reorged_slots(&self, slots: &[u32]) -> ClientResult<u32> {
-        let url = self.base_url.join("indexer/reorged-slots")?;
-        let token = self.jwt_manager.get_token()?;
-        let req = ReorgedSlotsRequest {
-            reorged_slots: slots.to_owned(),
-        };
-
-        json_put!(&self.client, url, ReorgedSlotsResponse, token, &req)
-            .map(|res: Option<ReorgedSlotsResponse>| res.unwrap().total_updated_slots)
     }
 
     async fn handle_reorg(

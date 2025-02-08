@@ -93,23 +93,11 @@ pub struct IndexRequest {
     pub blobs: Vec<Blob>,
 }
 
-#[derive(Serialize, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct ReorgedSlotsRequest {
-    pub reorged_slots: Vec<u32>,
-}
-
 #[derive(Deserialize, Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct ReorgedBlocksRequestBody {
     pub forwarded_blocks: Vec<B256>,
     pub rewinded_blocks: Vec<B256>,
-}
-
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct ReorgedSlotsResponse {
-    pub total_updated_slots: u32,
 }
 
 impl fmt::Debug for Blob {
