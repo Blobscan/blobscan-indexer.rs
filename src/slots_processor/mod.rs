@@ -20,6 +20,8 @@ use self::helpers::{create_tx_hash_versioned_hashes_mapping, create_versioned_ha
 pub mod error;
 mod helpers;
 
+const MAX_ALLOWED_REORG_DEPTH: u32 = 100;
+
 pub struct BlockData {
     pub root: B256,
     pub parent_root: B256,
@@ -81,17 +83,19 @@ impl SlotsProcessor<ReqwestTransport> {
             };
 
             if let Some(block_header) = block_header {
-                if let Some(prev_block_header) = last_processed_block {
-                    if prev_block_header.root != block_header.parent_root {
-                        self.process_reorg(&prev_block_header, &block_header)
-                            .await
-                            .map_err(|error| SlotsProcessorError::FailedReorgProcessing {
-                                old_slot: prev_block_header.slot,
-                                new_slot: block_header.slot,
-                                new_head_block_root: block_header.root,
-                                old_head_block_root: prev_block_header.root,
-                                error,
-                            })?;
+                if !is_reverse {
+                    if let Some(prev_block_header) = last_processed_block {
+                        if prev_block_header.root != block_header.parent_root {
+                            self.process_reorg(&prev_block_header, &block_header)
+                                .await
+                                .map_err(|error| SlotsProcessorError::FailedReorgProcessing {
+                                    old_slot: prev_block_header.slot,
+                                    new_slot: block_header.slot,
+                                    new_head_block_root: block_header.root,
+                                    old_head_block_root: prev_block_header.root,
+                                    error,
+                                })?;
+                        }
                     }
                 }
 
@@ -265,10 +269,13 @@ impl SlotsProcessor<ReqwestTransport> {
         new_head_header: &BlockHeader,
     ) -> Result<(), anyhow::Error> {
         let mut current_old_slot = old_head_header.slot;
+        let mut reorg_depth = 0;
 
         let mut rewinded_blocks: Vec<B256> = vec![];
 
-        loop {
+        while reorg_depth <= MAX_ALLOWED_REORG_DEPTH || current_old_slot > 0 {
+            reorg_depth += 1;
+
             // We iterate over blocks by slot and not block root as blobscan blocks don't
             // have parent root we can use to traverse the chain
             let old_blobscan_block = match self
@@ -281,11 +288,6 @@ impl SlotsProcessor<ReqwestTransport> {
                 None => {
                     current_old_slot -= 1;
 
-                    // TODO: use fork slot instead of 0 as a stop condition to avoid long loops
-                    if current_old_slot == 0 {
-                        return Err(anyhow!("No common block found").into());
-                    }
-
                     continue;
                 }
             };
@@ -293,11 +295,13 @@ impl SlotsProcessor<ReqwestTransport> {
             let canonical_block_path = self
                 .get_canonical_block_path(&old_blobscan_block, new_head_header.root)
                 .await?;
-            let canonical_block_path = canonical_block_path.into_iter().rev().collect::<Vec<_>>();
 
             // If a path exists, we've found the common ancient block
             // and can proceed with handling the reorg.
             if !canonical_block_path.is_empty() {
+                let canonical_block_path =
+                    canonical_block_path.into_iter().rev().collect::<Vec<_>>();
+
                 let rewinded_blocks_count = rewinded_blocks.len();
                 let forwarded_blocks_count = canonical_block_path.len();
 
@@ -337,6 +341,8 @@ impl SlotsProcessor<ReqwestTransport> {
 
             rewinded_blocks.push(old_blobscan_block.hash);
         }
+
+        Err(anyhow!("No common block found").into())
     }
 
     /// Returns the path of blocks with execution payload from the head block to the provided block.
