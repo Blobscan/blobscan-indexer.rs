@@ -3,6 +3,10 @@ use std::{fmt, str::FromStr};
 use alloy::primitives::{Bytes, B256};
 use serde::{Deserialize, Serialize};
 
+use crate::clients::common::ClientError;
+
+use super::CommonBeaconClient;
+
 #[derive(Serialize, Debug, Clone, PartialEq)]
 pub enum BlockId {
     Head,
@@ -186,6 +190,46 @@ impl From<BlockHeaderResponse> for BlockHeader {
             root: response.data.root,
             parent_root: response.data.header.message.parent_root,
             slot: response.data.header.message.slot,
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum BlockIdResolutionError {
+    #[error("Block with id '{0}' not found")]
+    BlockNotFound(BlockId),
+    #[error("Failed to resolve block id '{block_id}'")]
+    FailedBlockIdResolution {
+        block_id: BlockId,
+        #[source]
+        error: ClientError,
+    },
+}
+
+pub trait BlockIdResolution {
+    async fn resolve_to_slot(
+        &self,
+        beacon_client: &dyn CommonBeaconClient,
+    ) -> Result<u32, BlockIdResolutionError>;
+}
+
+impl BlockIdResolution for BlockId {
+    async fn resolve_to_slot(
+        &self,
+        beacon_client: &dyn CommonBeaconClient,
+    ) -> Result<u32, BlockIdResolutionError> {
+        match self {
+            BlockId::Slot(slot) => Ok(*slot),
+            _ => match beacon_client
+                .get_block_header(self.clone().into())
+                .await
+                .map_err(|err| BlockIdResolutionError::FailedBlockIdResolution {
+                    block_id: self.clone(),
+                    error: err,
+                })? {
+                Some(header) => Ok(header.slot),
+                None => Err(BlockIdResolutionError::BlockNotFound(self.clone())),
+            },
         }
     }
 }

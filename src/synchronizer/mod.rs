@@ -12,9 +12,8 @@ use mockall::automock;
 
 use crate::{
     clients::{
-        beacon::types::{BlockHeader, BlockId},
+        beacon::types::{BlockHeader, BlockId, BlockIdResolution},
         blobscan::types::BlockchainSyncState,
-        common::ClientError,
     },
     context::CommonContext,
     slots_processor::{error::SlotsProcessorError, SlotsProcessor},
@@ -318,31 +317,6 @@ impl Synchronizer<ReqwestTransport> {
         Ok(())
     }
 
-    async fn resolve_to_slot(&self, block_id: BlockId) -> Result<u32, SynchronizerError> {
-        let beacon_client = self.context.beacon_client();
-
-        let resolved_block_id: Result<u32, ClientError> = match block_id {
-            BlockId::Slot(slot) => Ok(slot),
-            _ => match beacon_client.get_block_header(block_id.clone()).await {
-                Ok(None) => {
-                    let err = anyhow!("Block ID {} not found", block_id);
-
-                    Err(err.into())
-                }
-                Ok(Some(block_header)) => Ok(block_header.slot),
-                Err(error) => Err(error),
-            },
-        };
-
-        match resolved_block_id {
-            Ok(slot) => Ok(slot),
-            Err(error) => Err(SynchronizerError::FailedBlockIdResolution {
-                block_id: block_id.clone(),
-                error,
-            }),
-        }
-    }
-
     pub fn clear_last_synced_block(&mut self) {
         self.last_synced_block = None;
     }
@@ -359,7 +333,9 @@ impl CommonSynchronizer for Synchronizer<ReqwestTransport> {
     }
 
     async fn sync_block(&mut self, block_id: BlockId) -> Result<(), SynchronizerError> {
-        let final_slot = self.resolve_to_slot(block_id.clone()).await?;
+        let final_slot = block_id
+            .resolve_to_slot(self.context.beacon_client())
+            .await?;
 
         self.process_slots_by_checkpoints(final_slot, final_slot + 1)
             .await?;
@@ -372,8 +348,12 @@ impl CommonSynchronizer for Synchronizer<ReqwestTransport> {
         initial_block_id: BlockId,
         final_block_id: BlockId,
     ) -> Result<(), SynchronizerError> {
-        let initial_slot = self.resolve_to_slot(initial_block_id).await?;
-        let mut final_slot = self.resolve_to_slot(final_block_id.clone()).await?;
+        let initial_slot = initial_block_id
+            .resolve_to_slot(self.context.beacon_client())
+            .await?;
+        let mut final_slot = final_block_id
+            .resolve_to_slot(self.context.beacon_client())
+            .await?;
 
         if initial_slot == final_slot {
             return Ok(());
@@ -383,7 +363,9 @@ impl CommonSynchronizer for Synchronizer<ReqwestTransport> {
             self.process_slots_by_checkpoints(initial_slot, final_slot)
                 .await?;
 
-            let latest_final_slot = self.resolve_to_slot(final_block_id.clone()).await?;
+            let latest_final_slot = final_block_id
+                .resolve_to_slot(self.context.beacon_client())
+                .await?;
 
             if final_slot == latest_final_slot {
                 return Ok(());

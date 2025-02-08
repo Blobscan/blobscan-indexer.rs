@@ -1,4 +1,6 @@
-use crate::{clients::beacon::types::BlockId, slots_processor::error::SlotsProcessorError};
+use crate::{
+    clients::beacon::types::BlockIdResolutionError, slots_processor::error::SlotsProcessorError,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SynchronizerError {
@@ -10,18 +12,13 @@ pub enum SynchronizerError {
         final_slot: u32,
         chunk_errors: SlotsChunksErrors,
     },
-    #[error("Failed to resolve block id {block_id} to a slot: {error}")]
-    FailedBlockIdResolution {
-        block_id: BlockId,
-        error: crate::clients::common::ClientError,
-    },
+    #[error(transparent)]
+    FailedBlockIdResolution(#[from] BlockIdResolutionError),
     #[error("Failed to save slot checkpoint for slot {slot}: {error}")]
     FailedSlotCheckpointSave {
         slot: u32,
         error: crate::clients::common::ClientError,
     },
-    #[error(transparent)]
-    FailedSlotsProcessing(#[from] SlotsProcessorError),
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }
