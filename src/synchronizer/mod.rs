@@ -202,7 +202,7 @@ impl Synchronizer<ReqwestTransport> {
             }
         }
 
-        if errors.is_empty() {
+        if !errors.is_empty() {
             return Err(SynchronizerError::FailedParallelSlotsProcessing {
                 initial_slot: from_slot,
                 final_slot: to_slot,
