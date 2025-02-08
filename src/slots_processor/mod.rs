@@ -273,7 +273,7 @@ impl SlotsProcessor<ReqwestTransport> {
 
         let mut rewinded_blocks: Vec<B256> = vec![];
 
-        while reorg_depth <= MAX_ALLOWED_REORG_DEPTH || current_old_slot > 0 {
+        while reorg_depth <= MAX_ALLOWED_REORG_DEPTH && current_old_slot > 0 {
             reorg_depth += 1;
 
             // We iterate over blocks by slot and not block root as blobscan blocks don't
