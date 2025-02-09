@@ -123,7 +123,16 @@ impl Indexer<ReqwestTransport> {
             })
             .flatten();
 
-        info!("Starting indexer…",);
+        let upper_indexed_block_id = match &last_synced_block {
+            Some(block) => block.slot.into(),
+            None => BlockId::Head,
+        };
+
+        info!(
+            lower_indexed_block_id = current_lower_block_id.to_string(),
+            upper_indexed_block_id = upper_indexed_block_id.to_string(),
+            "Starting indexer…",
+        );
 
         let (tx, mut rx) = mpsc::channel(32);
         let tx1 = tx.clone();
