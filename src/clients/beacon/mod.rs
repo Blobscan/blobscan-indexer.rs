@@ -9,13 +9,14 @@ use reqwest_eventsource::EventSource;
 
 #[cfg(test)]
 use mockall::automock;
+use types::BlockHeader;
 
 use crate::{
     clients::{beacon::types::BlockHeaderResponse, common::ClientResult},
     json_get,
 };
 
-use self::types::{Blob, BlobsResponse, Block, BlockHeader, BlockId, BlockResponse, Topic};
+use self::types::{Blob, BlobsResponse, Block, BlockId, BlockResponse, Topic};
 
 pub mod types;
 
@@ -34,9 +35,9 @@ pub struct Config {
 #[async_trait]
 #[cfg_attr(test, automock)]
 pub trait CommonBeaconClient: Send + Sync + Debug {
-    async fn get_block(&self, block_id: &BlockId) -> ClientResult<Option<Block>>;
-    async fn get_block_header(&self, block_id: &BlockId) -> ClientResult<Option<BlockHeader>>;
-    async fn get_blobs(&self, block_id: &BlockId) -> ClientResult<Option<Vec<Blob>>>;
+    async fn get_block(&self, block_id: BlockId) -> ClientResult<Option<Block>>;
+    async fn get_block_header(&self, block_id: BlockId) -> ClientResult<Option<BlockHeader>>;
+    async fn get_blobs(&self, block_id: BlockId) -> ClientResult<Option<Vec<Blob>>>;
     fn subscribe_to_events(&self, topics: &[Topic]) -> ClientResult<EventSource>;
 }
 
@@ -56,7 +57,7 @@ impl BeaconClient {
 
 #[async_trait]
 impl CommonBeaconClient for BeaconClient {
-    async fn get_block(&self, block_id: &BlockId) -> ClientResult<Option<Block>> {
+    async fn get_block(&self, block_id: BlockId) -> ClientResult<Option<Block>> {
         let path = format!("v2/beacon/blocks/{}", { block_id.to_detailed_string() });
         let url = self.base_url.join(path.as_str())?;
 
@@ -66,7 +67,7 @@ impl CommonBeaconClient for BeaconClient {
         })
     }
 
-    async fn get_block_header(&self, block_id: &BlockId) -> ClientResult<Option<BlockHeader>> {
+    async fn get_block_header(&self, block_id: BlockId) -> ClientResult<Option<BlockHeader>> {
         let path = format!("v1/beacon/headers/{}", { block_id.to_detailed_string() });
         let url = self.base_url.join(path.as_str())?;
 
@@ -77,12 +78,12 @@ impl CommonBeaconClient for BeaconClient {
             self.exp_backoff.clone()
         )
         .map(|res| match res {
-            Some(r) => Some(r.data),
+            Some(r) => Some(r.into()),
             None => None,
         })
     }
 
-    async fn get_blobs(&self, block_id: &BlockId) -> ClientResult<Option<Vec<Blob>>> {
+    async fn get_blobs(&self, block_id: BlockId) -> ClientResult<Option<Vec<Blob>>> {
         let path = format!("v1/beacon/blob_sidecars/{}", {
             block_id.to_detailed_string()
         });

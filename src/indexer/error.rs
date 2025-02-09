@@ -16,7 +16,7 @@ pub enum IndexerError {
     #[error(transparent)]
     SyncingTaskError(#[from] IndexingError),
     #[error("failed to retrieve blobscan's sync state")]
-    BlobscanSyncStateRetrievalError(#[source] ClientError),
+    BlobscanSyncStateRetrievalError(#[from] ClientError),
     #[error("failed to send syncing task message")]
     SyncingTaskMessageSendFailure(#[from] SendError<IndexerTaskMessage>),
 }

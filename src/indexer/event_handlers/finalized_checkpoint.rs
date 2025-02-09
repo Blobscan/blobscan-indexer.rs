@@ -3,8 +3,7 @@ use tracing::info;
 
 use crate::{
     clients::{
-        beacon::types::{BlockId, FinalizedCheckpointEventData},
-        blobscan::types::BlockchainSyncState,
+        beacon::types::FinalizedCheckpointEventData, blobscan::types::BlockchainSyncState,
         common::ClientError,
     },
     context::CommonContext,
@@ -46,7 +45,7 @@ where
         let last_finalized_block_number = match self
             .context
             .beacon_client()
-            .get_block(&BlockId::Hash(block_hash))
+            .get_block(block_hash.into())
             .await
             .map_err(|err| {
                 FinalizedCheckpointEventHandlerError::BlockRetrievalError(

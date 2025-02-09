@@ -3,6 +3,10 @@ use std::{fmt, str::FromStr};
 use alloy::primitives::{Bytes, B256};
 use serde::{Deserialize, Serialize};
 
+use crate::clients::common::ClientError;
+
+use super::CommonBeaconClient;
+
 #[derive(Serialize, Debug, Clone, PartialEq)]
 pub enum BlockId {
     Head,
@@ -33,6 +37,9 @@ pub struct BlockBody {
 #[derive(Deserialize, Debug)]
 pub struct BlockMessage {
     pub body: BlockBody,
+    pub parent_root: B256,
+    #[serde(deserialize_with = "deserialize_number")]
+    pub slot: u32,
 }
 
 #[derive(Deserialize, Debug)]
@@ -59,11 +66,18 @@ pub struct BlobsResponse {
 
 #[derive(Deserialize, Debug)]
 pub struct BlockHeaderResponse {
-    pub data: BlockHeader,
+    pub data: BlockHeaderData,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct BlockHeader {
+    pub root: B256,
+    pub parent_root: B256,
+    pub slot: u32,
 }
 
 #[derive(Deserialize, Debug)]
-pub struct BlockHeader {
+pub struct BlockHeaderData {
     pub root: B256,
     pub header: InnerBlockHeader,
 }
@@ -83,6 +97,7 @@ pub struct BlockHeaderMessage {
 pub struct HeadEventData {
     #[serde(deserialize_with = "deserialize_number")]
     pub slot: u32,
+    #[allow(dead_code)]
     pub block: B256,
 }
 
@@ -153,6 +168,68 @@ impl From<&Topic> for String {
         match value {
             Topic::Head => String::from("head"),
             Topic::FinalizedCheckpoint => String::from("finalized_checkpoint"),
+        }
+    }
+}
+
+impl From<B256> for BlockId {
+    fn from(value: B256) -> Self {
+        BlockId::Hash(value)
+    }
+}
+
+impl From<u32> for BlockId {
+    fn from(value: u32) -> Self {
+        BlockId::Slot(value)
+    }
+}
+
+impl From<BlockHeaderResponse> for BlockHeader {
+    fn from(response: BlockHeaderResponse) -> Self {
+        BlockHeader {
+            root: response.data.root,
+            parent_root: response.data.header.message.parent_root,
+            slot: response.data.header.message.slot,
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum BlockIdResolutionError {
+    #[error("Block with id '{0}' not found")]
+    BlockNotFound(BlockId),
+    #[error("Failed to resolve block id '{block_id}'")]
+    FailedBlockIdResolution {
+        block_id: BlockId,
+        #[source]
+        error: ClientError,
+    },
+}
+
+pub trait BlockIdResolution {
+    async fn resolve_to_slot(
+        &self,
+        beacon_client: &dyn CommonBeaconClient,
+    ) -> Result<u32, BlockIdResolutionError>;
+}
+
+impl BlockIdResolution for BlockId {
+    async fn resolve_to_slot(
+        &self,
+        beacon_client: &dyn CommonBeaconClient,
+    ) -> Result<u32, BlockIdResolutionError> {
+        match self {
+            BlockId::Slot(slot) => Ok(*slot),
+            _ => match beacon_client
+                .get_block_header(self.clone().into())
+                .await
+                .map_err(|err| BlockIdResolutionError::FailedBlockIdResolution {
+                    block_id: self.clone(),
+                    error: err,
+                })? {
+                Some(header) => Ok(header.slot),
+                None => Err(BlockIdResolutionError::BlockNotFound(self.clone())),
+            },
         }
     }
 }
