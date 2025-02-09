@@ -70,65 +70,61 @@ impl SlotsProcessor<ReqwestTransport> {
         let mut last_processed_block = self.last_processed_block.clone();
 
         for current_slot in slots {
-            let block_header = match self.process_slot(current_slot).await {
-                Ok(block_header) => block_header,
-                Err(error) => {
-                    return Err(SlotsProcessorError::FailedSlotsProcessing {
-                        initial_slot,
-                        final_slot,
-                        failed_slot: current_slot,
-                        error,
-                    });
+            let block_header = match self
+                .context
+                .beacon_client()
+                .get_block_header(current_slot.into())
+                .await?
+            {
+                Some(header) => header,
+                None => {
+                    debug!(current_slot, "Skipping as there is no beacon block header");
+
+                    continue;
                 }
             };
 
-            if let Some(block_header) = block_header {
-                if !is_reverse {
-                    if let Some(prev_block_header) = last_processed_block {
-                        if prev_block_header.root != block_header.parent_root {
-                            self.process_reorg(&prev_block_header, &block_header)
-                                .await
-                                .map_err(|error| SlotsProcessorError::FailedReorgProcessing {
-                                    old_slot: prev_block_header.slot,
-                                    new_slot: block_header.slot,
-                                    new_head_block_root: block_header.root,
-                                    old_head_block_root: prev_block_header.root,
-                                    error,
-                                })?;
-                        }
+            if !is_reverse {
+                if let Some(prev_block_header) = last_processed_block {
+                    if prev_block_header.root != B256::ZERO
+                        && prev_block_header.root != block_header.parent_root
+                    {
+                        info!(
+                            new_head_slot = block_header.slot,
+                            old__head_slot = prev_block_header.slot,
+                            new_head_block_root = ?block_header.root,
+                            old_head_block_root = ?prev_block_header.root,
+                            "Reorg detected!",
+                        );
+
+                        self.process_reorg(&prev_block_header, &block_header)
+                            .await
+                            .map_err(|error| SlotsProcessorError::FailedReorgProcessing {
+                                old_slot: prev_block_header.slot,
+                                new_slot: block_header.slot,
+                                new_head_block_root: block_header.root,
+                                old_head_block_root: prev_block_header.root,
+                                error,
+                            })?;
                     }
                 }
-
-                last_processed_block = Some(block_header);
             }
+
+            if let Err(error) = self.process_block(&block_header).await {
+                return Err(SlotsProcessorError::FailedSlotsProcessing {
+                    initial_slot,
+                    final_slot,
+                    failed_slot: current_slot,
+                    error,
+                });
+            }
+
+            last_processed_block = Some(block_header);
         }
 
         self.last_processed_block = last_processed_block;
 
         Ok(())
-    }
-
-    pub async fn process_slot(
-        &mut self,
-        slot: u32,
-    ) -> Result<Option<BlockHeader>, SlotProcessingError> {
-        let beacon_block_header = match self
-            .context
-            .beacon_client()
-            .get_block_header(slot.into())
-            .await?
-        {
-            Some(header) => header,
-            None => {
-                debug!(slot, "Skipping as there is no beacon block header");
-
-                return Ok(None);
-            }
-        };
-
-        self.process_block(&beacon_block_header).await?;
-
-        Ok(Some(beacon_block_header))
     }
 
     async fn process_block(
@@ -302,9 +298,6 @@ impl SlotsProcessor<ReqwestTransport> {
                 let canonical_block_path =
                     canonical_block_path.into_iter().rev().collect::<Vec<_>>();
 
-                let rewinded_blocks_count = rewinded_blocks.len();
-                let forwarded_blocks_count = canonical_block_path.len();
-
                 let canonical_block_headers: Vec<BlockHeader> = canonical_block_path
                     .iter()
                     .map(|block| block.into())
@@ -320,12 +313,6 @@ impl SlotsProcessor<ReqwestTransport> {
                     }
                 }
 
-                info!(
-                    new_slot = new_head_header.slot,
-                    old_slot = old_head_header.slot,
-                    "Reorg detected! rewinded blocks: {rewinded_blocks_count}, forwarded blocks: {forwarded_blocks_count}",
-                );
-
                 let forwarded_blocks = canonical_block_path
                     .iter()
                     .map(|block| block.execution_block_hash)
@@ -333,8 +320,10 @@ impl SlotsProcessor<ReqwestTransport> {
 
                 self.context
                     .blobscan_client()
-                    .handle_reorg(rewinded_blocks, forwarded_blocks)
+                    .handle_reorg(rewinded_blocks.clone(), forwarded_blocks.clone())
                     .await?;
+
+                info!(rewinded_blocks = ?rewinded_blocks, forwarded_blocks = ?forwarded_blocks, "Reorg handled!",);
 
                 return Ok(());
             }
