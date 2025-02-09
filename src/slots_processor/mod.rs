@@ -384,7 +384,7 @@ impl SlotsProcessor<ReqwestTransport> {
             {
                 Some(block) => block,
                 None => {
-                    return Ok(canonical_execution_blocks);
+                    return Ok(vec![]);
                 }
             };
 
