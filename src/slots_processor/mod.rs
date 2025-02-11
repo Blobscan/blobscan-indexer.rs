@@ -324,7 +324,7 @@ impl SlotsProcessor<ReqwestTransport> {
             reorg_depth += 1;
         }
 
-        Err(anyhow!("No common block found").into())
+        Err(anyhow!("No common block found"))
     }
 
     /// Returns the path of blocks with execution payload from the head block to the provided block.

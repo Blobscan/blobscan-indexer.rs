@@ -61,10 +61,8 @@ impl CommonBeaconClient for BeaconClient {
         let path = format!("v2/beacon/blocks/{}", { block_id.to_detailed_string() });
         let url = self.base_url.join(path.as_str())?;
 
-        json_get!(&self.client, url, BlockResponse, self.exp_backoff.clone()).map(|res| match res {
-            Some(r) => Some(r.into()),
-            None => None,
-        })
+        json_get!(&self.client, url, BlockResponse, self.exp_backoff.clone())
+            .map(|res| res.map(|r| r.into()))
     }
 
     async fn get_block_header(&self, block_id: BlockId) -> ClientResult<Option<BlockHeader>> {
@@ -77,10 +75,7 @@ impl CommonBeaconClient for BeaconClient {
             BlockHeaderResponse,
             self.exp_backoff.clone()
         )
-        .map(|res| match res {
-            Some(r) => Some(r.into()),
-            None => None,
-        })
+        .map(|res| res.map(|r| r.into()))
     }
 
     async fn get_blobs(&self, block_id: BlockId) -> ClientResult<Option<Vec<Blob>>> {

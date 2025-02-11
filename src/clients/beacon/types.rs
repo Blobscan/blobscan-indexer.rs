@@ -241,7 +241,7 @@ impl BlockIdResolution for BlockId {
         match self {
             BlockId::Slot(slot) => Ok(*slot),
             _ => match beacon_client
-                .get_block_header(self.clone().into())
+                .get_block_header(self.clone())
                 .await
                 .map_err(|err| BlockIdResolutionError::FailedBlockIdResolution {
                     block_id: self.clone(),
