@@ -91,7 +91,7 @@ impl SlotsProcessor<ReqwestTransport> {
                     {
                         info!(
                             new_head_slot = block_header.slot,
-                            old__head_slot = prev_block_header.slot,
+                            old_head_slot = prev_block_header.slot,
                             new_head_block_root = ?block_header.root,
                             old_head_block_root = ?prev_block_header.root,
                             "Reorg detected!",
@@ -270,65 +270,58 @@ impl SlotsProcessor<ReqwestTransport> {
         let mut rewinded_blocks: Vec<B256> = vec![];
 
         while reorg_depth <= MAX_ALLOWED_REORG_DEPTH && current_old_slot > 0 {
-            reorg_depth += 1;
-
             // We iterate over blocks by slot and not block root as blobscan blocks don't
             // have parent root we can use to traverse the chain
-            let old_blobscan_block = match self
+            if let Some(old_blobscan_block) = self
                 .context
                 .blobscan_client()
                 .get_block(current_old_slot)
                 .await?
             {
-                Some(block) => block,
-                None => {
-                    current_old_slot -= 1;
-
-                    continue;
-                }
-            };
-
-            let canonical_block_path = self
-                .get_canonical_block_path(&old_blobscan_block, new_head_header.root)
-                .await?;
-
-            // If a path exists, we've found the common ancient block
-            // and can proceed with handling the reorg.
-            if !canonical_block_path.is_empty() {
-                let canonical_block_path =
-                    canonical_block_path.into_iter().rev().collect::<Vec<_>>();
-
-                let canonical_block_headers: Vec<BlockHeader> = canonical_block_path
-                    .iter()
-                    .map(|block| block.into())
-                    .collect::<Vec<_>>();
-
-                // If the new canonical block path includes blocks beyond the new head block,
-                // they were skipped and must be processed.
-                for block in canonical_block_headers.iter() {
-                    if block.slot != new_head_header.slot {
-                        self.process_block(block)
-                            .await
-                            .with_context(|| format!("Failed to sync forwarded block"))?;
-                    }
-                }
-
-                let forwarded_blocks = canonical_block_path
-                    .iter()
-                    .map(|block| block.execution_block_hash)
-                    .collect::<Vec<_>>();
-
-                self.context
-                    .blobscan_client()
-                    .handle_reorg(rewinded_blocks.clone(), forwarded_blocks.clone())
+                let canonical_block_path = self
+                    .get_canonical_block_path(&old_blobscan_block, new_head_header.root)
                     .await?;
 
-                info!(rewinded_blocks = ?rewinded_blocks, forwarded_blocks = ?forwarded_blocks, "Reorg handled!",);
+                // If a path exists, we've found the common ancient block
+                if !canonical_block_path.is_empty() {
+                    let canonical_block_path =
+                        canonical_block_path.into_iter().rev().collect::<Vec<_>>();
 
-                return Ok(());
+                    let canonical_block_headers: Vec<BlockHeader> = canonical_block_path
+                        .iter()
+                        .map(|block| block.into())
+                        .collect::<Vec<_>>();
+
+                    // If the new canonical block path includes blocks beyond the new head block,
+                    // they were skipped and must be processed.
+                    for block in canonical_block_headers.iter() {
+                        if block.slot != new_head_header.slot {
+                            self.process_block(block)
+                                .await
+                                .with_context(|| format!("Failed to sync forwarded block"))?;
+                        }
+                    }
+
+                    let forwarded_blocks = canonical_block_path
+                        .iter()
+                        .map(|block| block.execution_block_hash)
+                        .collect::<Vec<_>>();
+
+                    self.context
+                        .blobscan_client()
+                        .handle_reorg(rewinded_blocks.clone(), forwarded_blocks.clone())
+                        .await?;
+
+                    info!(rewinded_blocks = ?rewinded_blocks, forwarded_blocks = ?forwarded_blocks, "Reorg handled!");
+
+                    return Ok(());
+                }
+
+                rewinded_blocks.push(old_blobscan_block.hash);
             }
 
-            rewinded_blocks.push(old_blobscan_block.hash);
+            current_old_slot -= 1;
+            reorg_depth += 1;
         }
 
         Err(anyhow!("No common block found").into())
