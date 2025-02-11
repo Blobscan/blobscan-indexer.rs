@@ -23,6 +23,15 @@ pub enum Topic {
 }
 
 #[derive(Deserialize, Debug)]
+pub struct Block {
+    pub blob_kzg_commitments: Option<Vec<String>>,
+    pub execution_payload: Option<ExecutionPayload>,
+    pub parent_root: B256,
+    #[serde(deserialize_with = "deserialize_number")]
+    pub slot: u32,
+}
+
+#[derive(Deserialize, Debug)]
 pub struct ExecutionPayload {
     pub block_hash: B256,
     #[serde(deserialize_with = "deserialize_number")]
@@ -43,13 +52,13 @@ pub struct BlockMessage {
 }
 
 #[derive(Deserialize, Debug)]
-pub struct Block {
+pub struct BlockData {
     pub message: BlockMessage,
 }
 
 #[derive(Deserialize, Debug)]
 pub struct BlockResponse {
-    pub data: Block,
+    pub data: BlockData,
 }
 
 #[derive(Deserialize, Debug)]
@@ -194,6 +203,17 @@ impl From<BlockHeaderResponse> for BlockHeader {
     }
 }
 
+impl From<BlockResponse> for Block {
+    fn from(response: BlockResponse) -> Self {
+        Block {
+            blob_kzg_commitments: response.data.message.body.blob_kzg_commitments,
+            execution_payload: response.data.message.body.execution_payload,
+            parent_root: response.data.message.parent_root,
+            slot: response.data.message.slot,
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum BlockIdResolutionError {
     #[error("Block with id '{0}' not found")]
@@ -221,7 +241,7 @@ impl BlockIdResolution for BlockId {
         match self {
             BlockId::Slot(slot) => Ok(*slot),
             _ => match beacon_client
-                .get_block_header(self.clone().into())
+                .get_block_header(self.clone())
                 .await
                 .map_err(|err| BlockIdResolutionError::FailedBlockIdResolution {
                     block_id: self.clone(),

@@ -12,14 +12,11 @@ pub fn create_tx_hash_versioned_hashes_mapping(
     let mut tx_to_versioned_hashes = HashMap::new();
 
     if let Some(transactions) = block.transactions.as_transactions() {
-        transactions
-            .iter()
-            .for_each(|tx| match &tx.blob_versioned_hashes {
-                Some(versioned_hashes) => {
-                    tx_to_versioned_hashes.insert(tx.hash, versioned_hashes.clone());
-                }
-                None => {}
-            });
+        transactions.iter().for_each(|tx| {
+            if let Some(versioned_hashes) = tx.blob_versioned_hashes.as_ref() {
+                tx_to_versioned_hashes.insert(tx.hash, versioned_hashes.clone());
+            }
+        });
     }
 
     Ok(tx_to_versioned_hashes)
