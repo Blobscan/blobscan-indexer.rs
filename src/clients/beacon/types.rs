@@ -23,6 +23,15 @@ pub enum Topic {
 }
 
 #[derive(Deserialize, Debug)]
+pub struct Block {
+    pub blob_kzg_commitments: Option<Vec<String>>,
+    pub execution_payload: Option<ExecutionPayload>,
+    pub parent_root: B256,
+    #[serde(deserialize_with = "deserialize_number")]
+    pub slot: u32,
+}
+
+#[derive(Deserialize, Debug)]
 pub struct ExecutionPayload {
     pub block_hash: B256,
     #[serde(deserialize_with = "deserialize_number")]
@@ -43,13 +52,13 @@ pub struct BlockMessage {
 }
 
 #[derive(Deserialize, Debug)]
-pub struct Block {
+pub struct BlockData {
     pub message: BlockMessage,
 }
 
 #[derive(Deserialize, Debug)]
 pub struct BlockResponse {
-    pub data: Block,
+    pub data: BlockData,
 }
 
 #[derive(Deserialize, Debug)]
@@ -190,6 +199,17 @@ impl From<BlockHeaderResponse> for BlockHeader {
             root: response.data.root,
             parent_root: response.data.header.message.parent_root,
             slot: response.data.header.message.slot,
+        }
+    }
+}
+
+impl From<BlockResponse> for Block {
+    fn from(response: BlockResponse) -> Self {
+        Block {
+            blob_kzg_commitments: response.data.message.body.blob_kzg_commitments,
+            execution_payload: response.data.message.body.execution_payload,
+            parent_root: response.data.message.parent_root,
+            slot: response.data.message.slot,
         }
     }
 }

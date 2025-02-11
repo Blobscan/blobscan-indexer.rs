@@ -145,7 +145,7 @@ impl SlotsProcessor<ReqwestTransport> {
             }
         };
 
-        let execution_payload = match beacon_block.message.body.execution_payload {
+        let execution_payload = match beacon_block.execution_payload {
             Some(payload) => payload,
             None => {
                 debug!(
@@ -157,7 +157,7 @@ impl SlotsProcessor<ReqwestTransport> {
             }
         };
 
-        let has_kzg_blob_commitments = match beacon_block.message.body.blob_kzg_commitments {
+        let has_kzg_blob_commitments = match beacon_block.blob_kzg_commitments {
             Some(commitments) => !commitments.is_empty(),
             None => false,
         };
@@ -343,7 +343,7 @@ impl SlotsProcessor<ReqwestTransport> {
             }
         };
 
-        if let Some(execution_payload) = &canonical_block.message.body.execution_payload {
+        if let Some(execution_payload) = &canonical_block.execution_payload {
             if execution_payload.block_hash == blobscan_block.hash {
                 return Ok(vec![]);
             }
@@ -351,14 +351,14 @@ impl SlotsProcessor<ReqwestTransport> {
 
         let mut current_canonical_block_root = head_block_root;
 
-        while canonical_block.message.parent_root != B256::ZERO {
-            let canonical_block_parent_root = canonical_block.message.parent_root;
+        while canonical_block.parent_root != B256::ZERO {
+            let canonical_block_parent_root = canonical_block.parent_root;
 
-            if canonical_block.message.slot < blobscan_block.slot {
+            if canonical_block.slot < blobscan_block.slot {
                 return Ok(vec![]);
             }
 
-            if let Some(execution_payload) = &canonical_block.message.body.execution_payload {
+            if let Some(execution_payload) = &canonical_block.execution_payload {
                 if execution_payload.block_hash == blobscan_block.hash {
                     return Ok(canonical_execution_blocks);
                 }
@@ -366,7 +366,7 @@ impl SlotsProcessor<ReqwestTransport> {
                 canonical_execution_blocks.push(BlockData {
                     root: current_canonical_block_root,
                     parent_root: canonical_block_parent_root,
-                    slot: canonical_block.message.slot,
+                    slot: canonical_block.slot,
                     execution_block_hash: execution_payload.block_hash,
                 });
             }

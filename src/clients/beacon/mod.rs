@@ -62,7 +62,7 @@ impl CommonBeaconClient for BeaconClient {
         let url = self.base_url.join(path.as_str())?;
 
         json_get!(&self.client, url, BlockResponse, self.exp_backoff.clone()).map(|res| match res {
-            Some(r) => Some(r.data),
+            Some(r) => Some(r.into()),
             None => None,
         })
     }

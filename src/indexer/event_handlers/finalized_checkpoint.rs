@@ -53,7 +53,7 @@ where
                     err,
                 )
             })? {
-            Some(block) => match block.message.body.execution_payload {
+            Some(block) => match block.execution_payload {
                 Some(execution_payload) => execution_payload.block_number,
                 None => {
                     return Err(FinalizedCheckpointEventHandlerError::BlockNotFound(
