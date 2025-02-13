@@ -71,9 +71,11 @@ where
         self.context
             .blobscan_client()
             .update_sync_state(BlockchainSyncState {
+                last_finalized_block: Some(last_finalized_block_number),
                 last_lower_synced_slot: None,
                 last_upper_synced_slot: None,
-                last_finalized_block: Some(last_finalized_block_number),
+                last_upper_synced_block_root: None,
+                last_upper_synced_block_slot: None,
             })
             .await
             .map_err(FinalizedCheckpointEventHandlerError::BlobscanFinalizedBlockUpdateFailure)?;

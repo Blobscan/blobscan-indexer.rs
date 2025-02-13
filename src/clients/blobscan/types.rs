@@ -68,6 +68,10 @@ pub struct BlockchainSyncStateRequest {
     pub last_upper_synced_slot: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_finalized_block: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_upper_synced_block_root: Option<B256>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_upper_synced_block_slot: Option<u32>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -77,6 +81,10 @@ pub struct BlockchainSyncStateResponse {
     pub last_lower_synced_slot: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_upper_synced_slot: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_upper_synced_block_root: Option<B256>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_upper_synced_block_slot: Option<u32>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -84,6 +92,8 @@ pub struct BlockchainSyncState {
     pub last_finalized_block: Option<u32>,
     pub last_lower_synced_slot: Option<u32>,
     pub last_upper_synced_slot: Option<u32>,
+    pub last_upper_synced_block_root: Option<B256>,
+    pub last_upper_synced_block_slot: Option<u32>,
 }
 
 #[derive(Serialize, Debug)]
@@ -253,6 +263,8 @@ impl From<BlockchainSyncStateResponse> for BlockchainSyncState {
             last_finalized_block: None,
             last_lower_synced_slot: response.last_lower_synced_slot,
             last_upper_synced_slot: response.last_upper_synced_slot,
+            last_upper_synced_block_root: response.last_upper_synced_block_root,
+            last_upper_synced_block_slot: response.last_upper_synced_block_slot,
         }
     }
 }
@@ -263,6 +275,8 @@ impl From<BlockchainSyncState> for BlockchainSyncStateRequest {
             last_lower_synced_slot: sync_state.last_lower_synced_slot,
             last_upper_synced_slot: sync_state.last_upper_synced_slot,
             last_finalized_block: sync_state.last_finalized_block,
+            last_upper_synced_block_root: sync_state.last_upper_synced_block_root,
+            last_upper_synced_block_slot: sync_state.last_upper_synced_block_slot,
         }
     }
 }
