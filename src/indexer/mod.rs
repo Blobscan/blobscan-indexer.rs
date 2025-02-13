@@ -112,13 +112,17 @@ impl Indexer<ReqwestTransport> {
         };
 
         let last_synced_block = sync_state.and_then(|state| {
-            state
-                .last_upper_synced_slot
-                .map(|last_upper_synced_slot| BlockHeader {
-                    slot: last_upper_synced_slot,
-                    root: B256::ZERO,
+            match (
+                state.last_upper_synced_block_root,
+                state.last_upper_synced_slot,
+            ) {
+                (Some(root), Some(slot)) => Some(BlockHeader {
                     parent_root: B256::ZERO,
-                })
+                    root,
+                    slot,
+                }),
+                _ => None,
+            }
         });
 
         let upper_indexed_block_id = match &last_synced_block {
