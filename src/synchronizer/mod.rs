@@ -262,16 +262,20 @@ impl Synchronizer<ReqwestTransport> {
             });
 
             if self.checkpoint_type != CheckpointType::Disabled {
-                let last_lower_synced_slot = if self.checkpoint_type == CheckpointType::Lower {
-                    last_slot
-                } else {
-                    None
-                };
-                let last_upper_synced_slot = if self.checkpoint_type == CheckpointType::Upper {
-                    last_slot
-                } else {
-                    None
-                };
+                let mut last_lower_synced_slot = None;
+                let mut last_upper_synced_slot = None;
+                let mut last_upper_synced_block_root = None;
+                let mut last_upper_synced_block_slot = None;
+
+                if self.checkpoint_type == CheckpointType::Lower {
+                    last_lower_synced_slot = last_slot;
+                } else if self.checkpoint_type == CheckpointType::Upper {
+                    last_upper_synced_slot = last_slot;
+                    last_upper_synced_block_root =
+                        self.last_synced_block.as_ref().map(|block| block.root);
+                    last_upper_synced_block_slot =
+                        self.last_synced_block.as_ref().map(|block| block.slot);
+                }
 
                 if let Err(error) = self
                     .context
@@ -280,6 +284,8 @@ impl Synchronizer<ReqwestTransport> {
                         last_finalized_block: None,
                         last_lower_synced_slot,
                         last_upper_synced_slot,
+                        last_upper_synced_block_root,
+                        last_upper_synced_block_slot,
                     })
                     .await
                 {
