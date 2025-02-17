@@ -287,6 +287,18 @@ impl SlotsProcessor<ReqwestTransport> {
                     let canonical_block_path =
                         canonical_block_path.into_iter().rev().collect::<Vec<_>>();
 
+                    let forwarded_blocks = canonical_block_path
+                        .iter()
+                        .map(|block| block.execution_block_hash)
+                        .collect::<Vec<_>>();
+
+                    self.context
+                        .blobscan_client()
+                        .handle_reorg(rewinded_blocks.clone(), forwarded_blocks.clone())
+                        .await?;
+
+                    info!(rewinded_blocks = ?rewinded_blocks, forwarded_blocks = ?forwarded_blocks, "Reorg handled!");
+
                     let canonical_block_headers: Vec<BlockHeader> = canonical_block_path
                         .iter()
                         .map(|block| block.into())
@@ -301,18 +313,6 @@ impl SlotsProcessor<ReqwestTransport> {
                                 .with_context(|| format!("Failed to sync forwarded block"))?;
                         }
                     }
-
-                    let forwarded_blocks = canonical_block_path
-                        .iter()
-                        .map(|block| block.execution_block_hash)
-                        .collect::<Vec<_>>();
-
-                    self.context
-                        .blobscan_client()
-                        .handle_reorg(rewinded_blocks.clone(), forwarded_blocks.clone())
-                        .await?;
-
-                    info!(rewinded_blocks = ?rewinded_blocks, forwarded_blocks = ?forwarded_blocks, "Reorg handled!");
 
                     return Ok(());
                 }
