@@ -4,7 +4,7 @@ use alloy::{
 use anyhow::{anyhow, Context as AnyhowContext, Result};
 
 use crate::clients::beacon::types::BlockHeader;
-use tracing::{debug, info};
+use tracing::{debug, info, Instrument};
 
 use crate::{
     clients::{
@@ -287,21 +287,6 @@ impl SlotsProcessor<ReqwestTransport> {
                     let canonical_block_path =
                         canonical_block_path.into_iter().rev().collect::<Vec<_>>();
 
-                    let canonical_block_headers: Vec<BlockHeader> = canonical_block_path
-                        .iter()
-                        .map(|block| block.into())
-                        .collect::<Vec<_>>();
-
-                    // If the new canonical block path includes blocks beyond the new head block,
-                    // they were skipped and must be processed.
-                    for block in canonical_block_headers.iter() {
-                        if block.slot != new_head_header.slot {
-                            self.process_block(block)
-                                .await
-                                .with_context(|| format!("Failed to sync forwarded block"))?;
-                        }
-                    }
-
                     let forwarded_blocks = canonical_block_path
                         .iter()
                         .map(|block| block.execution_block_hash)
@@ -313,6 +298,27 @@ impl SlotsProcessor<ReqwestTransport> {
                         .await?;
 
                     info!(rewinded_blocks = ?rewinded_blocks, forwarded_blocks = ?forwarded_blocks, "Reorg handled!");
+
+                    let canonical_block_headers: Vec<BlockHeader> = canonical_block_path
+                        .iter()
+                        .map(|block| block.into())
+                        .collect::<Vec<_>>();
+
+                    // If the new canonical block path includes blocks beyond the new head block,
+                    // they were skipped and must be processed.
+                    for block in canonical_block_headers.iter() {
+                        if block.slot != new_head_header.slot {
+                            let reorg_span = tracing::info_span!(
+                                parent: &tracing::Span::current(),
+                                "forwarded_block",
+                            );
+
+                            self.process_block(block)
+                                .instrument(reorg_span)
+                                .await
+                                .with_context(|| format!("Failed to sync forwarded block"))?;
+                        }
+                    }
 
                     return Ok(());
                 }
