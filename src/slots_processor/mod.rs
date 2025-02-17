@@ -4,7 +4,7 @@ use alloy::{
 use anyhow::{anyhow, Context as AnyhowContext, Result};
 
 use crate::clients::beacon::types::BlockHeader;
-use tracing::{debug, info};
+use tracing::{debug, info, Instrument};
 
 use crate::{
     clients::{
@@ -308,7 +308,13 @@ impl SlotsProcessor<ReqwestTransport> {
                     // they were skipped and must be processed.
                     for block in canonical_block_headers.iter() {
                         if block.slot != new_head_header.slot {
+                            let reorg_span = tracing::info_span!(
+                                parent: &tracing::Span::current(),
+                                "forwarded_block",
+                            );
+
                             self.process_block(block)
+                                .instrument(reorg_span)
                                 .await
                                 .with_context(|| format!("Failed to sync forwarded block"))?;
                         }
