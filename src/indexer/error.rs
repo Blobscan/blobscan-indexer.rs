@@ -37,7 +37,7 @@ pub enum HistoricalIndexingError {
 
 #[derive(Debug, thiserror::Error)]
 pub enum LiveIndexingError {
-    #[error("an error ocurred while receiving beacon events")]
+    #[error("an error occurred while receiving beacon events")]
     BeaconEventsConnectionFailure(#[from] reqwest_eventsource::Error),
     #[error("failed to subscribe to beacon events")]
     BeaconEventsSubscriptionError(#[source] ClientError),
