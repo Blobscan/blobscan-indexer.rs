@@ -51,13 +51,13 @@ pub struct BlobscanClient {
     base_url: Url,
     client: reqwest::Client,
     jwt_manager: JWTManager,
-    exp_backoff: Option<ExponentialBackoff>,
+    exp_backoff: ExponentialBackoff,
 }
 
 pub struct Config {
     pub base_url: String,
     pub secret_key: String,
-    pub exp_backoff: Option<ExponentialBackoff>,
+    pub exp_backoff: ExponentialBackoff,
 }
 
 #[async_trait]
@@ -94,7 +94,7 @@ impl CommonBlobscanClient for BlobscanClient {
             blobs,
         };
 
-        json_put!(&self.client, url, token, &req).map(|_: Option<()>| ())
+        json_put!(&self.client, url, token, &req, self.exp_backoff.clone()).map(|_: Option<()>| ())
     }
 
     async fn get_block(&self, slot: u32) -> ClientResult<Option<BlobscanBlock>> {
@@ -116,7 +116,7 @@ impl CommonBlobscanClient for BlobscanClient {
             rewinded_blocks,
         };
 
-        json_put!(&self.client, url, ReorgedBlocksRequestBody, token, &req).map(|_| ())
+        json_put!(&self.client, url, ReorgedBlocksRequestBody, token, &req, self.exp_backoff.clone()).map(|_| ())
     }
 
     async fn update_sync_state(&self, sync_state: BlockchainSyncState) -> ClientResult<()> {
@@ -124,7 +124,7 @@ impl CommonBlobscanClient for BlobscanClient {
         let token = self.jwt_manager.get_token()?;
         let req: BlockchainSyncStateRequest = sync_state.into();
 
-        json_put!(&self.client, url, token, &req).map(|_: Option<()>| ())
+        json_put!(&self.client, url, token, &req, self.exp_backoff.clone()).map(|_: Option<()>| ())
     }
 
     async fn get_sync_state(&self) -> ClientResult<Option<BlockchainSyncState>> {
