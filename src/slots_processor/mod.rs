@@ -2,9 +2,11 @@ use alloy::{
     primitives::B256, rpc::types::BlockTransactionsKind, transports::http::ReqwestTransport,
 };
 use anyhow::{anyhow, Context as AnyhowContext, Result};
+use futures::future::timeout;
+use std::time::Duration;
 
 use crate::clients::beacon::types::BlockHeader;
-use tracing::{debug, info, Instrument};
+use tracing::{debug, info, Instrument, warn};
 
 use crate::{
     clients::{
@@ -42,6 +44,8 @@ impl From<&BlockData> for BlockHeader {
 pub struct SlotsProcessor<T> {
     context: Box<dyn CommonContext<T>>,
     pub last_processed_block: Option<BlockHeader>,
+    // Timeout for network operations in seconds
+    request_timeout: u64,
 }
 
 impl SlotsProcessor<ReqwestTransport> {
@@ -52,6 +56,19 @@ impl SlotsProcessor<ReqwestTransport> {
         Self {
             context,
             last_processed_block,
+            request_timeout: 30,
+        }
+    }
+
+    pub fn with_timeout(
+        context: Box<dyn CommonContext<ReqwestTransport>>,
+        last_processed_block: Option<BlockHeader>,
+        timeout_secs: u64,
+    ) -> SlotsProcessor<ReqwestTransport> {
+        SlotsProcessor {
+            context,
+            last_processed_block,
+            request_timeout: timeout_secs,
         }
     }
 
@@ -70,11 +87,16 @@ impl SlotsProcessor<ReqwestTransport> {
         let mut last_processed_block = self.last_processed_block.clone();
 
         for current_slot in slots {
-            let block_header = match self
-                .context
-                .beacon_client()
-                .get_block_header(current_slot.into())
-                .await?
+            let block_header_result = timeout(
+                Duration::from_secs(self.request_timeout),
+                self.context.beacon_client().get_block_header(current_slot.into())
+            ).await
+            .map_err(|_| SlotProcessingError::OperationTimeout {
+                operation: "get_block_header".to_string(),
+                slot: current_slot,
+            })??;
+            
+            let block_header = match block_header_result
             {
                 Some(header) => header,
                 None => {
@@ -97,9 +119,18 @@ impl SlotsProcessor<ReqwestTransport> {
                             "Reorg detected!",
                         );
 
-                        self.process_reorg(&prev_block_header, &block_header)
-                            .await
-                            .map_err(|error| SlotsProcessorError::FailedReorgProcessing {
+                        timeout(
+                            Duration::from_secs(self.request_timeout * 2),
+                            self.process_reorg(&prev_block_header, &block_header)
+                        ).await
+                        .map_err(|_| SlotsProcessorError::FailedReorgProcessing {
+                            old_slot: prev_block_header.slot,
+                            new_slot: block_header.slot,
+                            new_head_block_root: block_header.root,
+                            old_head_block_root: prev_block_header.root,
+                            error: anyhow!("Operation timed out: process_reorg"),
+                        })??
+                        .map_err(|error| SlotsProcessorError::FailedReorgProcessing {
                                 old_slot: prev_block_header.slot,
                                 new_slot: block_header.slot,
                                 new_head_block_root: block_header.root,
@@ -110,7 +141,25 @@ impl SlotsProcessor<ReqwestTransport> {
                 }
             }
 
-            if let Err(error) = self.process_block(&block_header).await {
+            let process_block_result = timeout(
+                Duration::from_secs(self.request_timeout * 2),
+                self.process_block(&block_header)
+            ).await;
+            
+            if let Err(timeout_error) = process_block_result {
+                warn!(slot = current_slot, "Process block operation timed out");
+                return Err(SlotsProcessorError::FailedSlotsProcessing {
+                    initial_slot,
+                    final_slot,
+                    failed_slot: current_slot,
+                    error: SlotProcessingError::OperationTimeout {
+                        operation: "process_block".to_string(),
+                        slot: current_slot,
+                    },
+                });
+            }
+            
+            if let Err(error) = process_block_result.unwrap() {
                 return Err(SlotsProcessorError::FailedSlotsProcessing {
                     initial_slot,
                     final_slot,

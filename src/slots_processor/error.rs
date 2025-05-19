@@ -8,6 +8,11 @@ pub enum SlotProcessingError {
     ClientError(#[from] crate::clients::common::ClientError),
     #[error(transparent)]
     Provider(#[from] alloy::transports::TransportError),
+    #[error("Operation timed out: {operation} for slot {slot}")]
+    OperationTimeout {
+        operation: String,
+        slot: u32,
+    },
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }
