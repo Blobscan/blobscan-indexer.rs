@@ -1,11 +1,12 @@
 use std::fmt::Debug;
+use std::time::Duration;
 
 use alloy::transports::http::ReqwestTransport;
 use anyhow::anyhow;
 use async_trait::async_trait;
-use futures::future::join_all;
+use futures::future::{join_all, timeout};
 use tokio::task::JoinHandle;
-use tracing::{debug, info, Instrument};
+use tracing::{debug, info, warn, Instrument};
 
 #[cfg(test)]
 use mockall::automock;
@@ -52,6 +53,8 @@ pub struct Synchronizer<T> {
     slots_checkpoint: u32,
     checkpoint_type: CheckpointType,
     last_synced_block: Option<BlockHeader>,
+    // Timeout for network operations in seconds
+    request_timeout: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -69,6 +72,7 @@ impl Default for SynchronizerBuilder {
             slots_checkpoint: 1000,
             checkpoint_type: CheckpointType::Upper,
             last_synced_block: None,
+            request_timeout: 30,
         }
     }
 }
@@ -101,6 +105,11 @@ impl SynchronizerBuilder {
         self
     }
 
+    pub fn with_request_timeout(&mut self, timeout_secs: u64) -> &mut Self {
+        self.request_timeout = timeout_secs;
+        self
+    }
+
     pub fn build(
         &self,
         context: Box<dyn CommonContext<ReqwestTransport>>,
@@ -112,6 +121,7 @@ impl SynchronizerBuilder {
             slots_checkpoint: self.slots_checkpoint,
             checkpoint_type: self.checkpoint_type,
             last_synced_block: self.last_synced_block.clone(),
+            request_timeout: self.request_timeout,
         }
     }
 }
@@ -251,9 +261,14 @@ impl Synchronizer<ReqwestTransport> {
                 checkpoint_final_slot = final_chunk_slot
             );
 
-            self.process_slots(initial_chunk_slot, final_chunk_slot)
-                .instrument(sync_slots_chunk_span)
-                .await?;
+            timeout(
+                Duration::from_secs(self.request_timeout * 3),
+                self.process_slots(initial_chunk_slot, final_chunk_slot).instrument(sync_slots_chunk_span)
+            ).await
+            .map_err(|_| SynchronizerError::OperationTimeout {
+                operation: "process_slots".to_string(),
+                block_id: format!("from {} to {}", initial_chunk_slot, final_chunk_slot),
+            })??;
 
             let last_slot = Some(if is_reverse_sync {
                 final_chunk_slot + 1
@@ -277,17 +292,24 @@ impl Synchronizer<ReqwestTransport> {
                         self.last_synced_block.as_ref().map(|block| block.slot);
                 }
 
-                if let Err(error) = self
-                    .context
-                    .blobscan_client()
-                    .update_sync_state(BlockchainSyncState {
-                        last_finalized_block: None,
-                        last_lower_synced_slot,
-                        last_upper_synced_slot,
-                        last_upper_synced_block_root,
-                        last_upper_synced_block_slot,
-                    })
-                    .await
+                let update_result = timeout(
+                    Duration::from_secs(self.request_timeout),
+                    self.context
+                        .blobscan_client()
+                        .update_sync_state(BlockchainSyncState {
+                            last_finalized_block: None,
+                            last_lower_synced_slot,
+                            last_upper_synced_slot,
+                            last_upper_synced_block_root,
+                            last_upper_synced_block_slot,
+                        })
+                ).await
+                .map_err(|_| SynchronizerError::OperationTimeout {
+                    operation: "update_sync_state".to_string(),
+                    block_id: format!("slot {}", last_lower_synced_slot.or(last_upper_synced_slot).unwrap_or(0)),
+                })?;
+                
+                if let Err(error) = update_result
                 {
                     let new_synced_slot = match last_lower_synced_slot.or(last_upper_synced_slot) {
                         Some(slot) => slot,
@@ -339,12 +361,26 @@ impl CommonSynchronizer for Synchronizer<ReqwestTransport> {
     }
 
     async fn sync_block(&mut self, block_id: BlockId) -> Result<(), SynchronizerError> {
-        let final_slot = block_id
-            .resolve_to_slot(self.context.beacon_client())
-            .await?;
+        let slot_resolution = timeout(
+            Duration::from_secs(self.request_timeout),
+            block_id.resolve_to_slot(self.context.beacon_client())
+        ).await
+        .map_err(|_| SynchronizerError::OperationTimeout {
+            operation: "resolve_to_slot".to_string(),
+            block_id: format!("{:?}", block_id),
+        })??
+        ;
 
-        self.process_slots_by_checkpoints(final_slot, final_slot + 1)
-            .await?;
+        let final_slot = slot_resolution;
+
+        timeout(
+            Duration::from_secs(self.request_timeout * 2),
+            self.process_slots_by_checkpoints(final_slot, final_slot + 1)
+        ).await
+        .map_err(|_| SynchronizerError::OperationTimeout {
+            operation: "process_slots_by_checkpoints".to_string(),
+            block_id: format!("{}", final_slot),
+        })??;
 
         Ok(())
     }
@@ -354,12 +390,25 @@ impl CommonSynchronizer for Synchronizer<ReqwestTransport> {
         initial_block_id: BlockId,
         final_block_id: BlockId,
     ) -> Result<(), SynchronizerError> {
-        let initial_slot = initial_block_id
-            .resolve_to_slot(self.context.beacon_client())
-            .await?;
-        let mut final_slot = final_block_id
-            .resolve_to_slot(self.context.beacon_client())
-            .await?;
+        let initial_slot = timeout(
+            Duration::from_secs(self.request_timeout),
+            initial_block_id.resolve_to_slot(self.context.beacon_client())
+        ).await
+        .map_err(|_| SynchronizerError::OperationTimeout {
+            operation: "resolve_to_slot (initial)".to_string(),
+            block_id: format!("{:?}", initial_block_id),
+        })??
+        ;
+
+        let mut final_slot = timeout(
+            Duration::from_secs(self.request_timeout),
+            final_block_id.resolve_to_slot(self.context.beacon_client())
+        ).await
+        .map_err(|_| SynchronizerError::OperationTimeout {
+            operation: "resolve_to_slot (final)".to_string(),
+            block_id: format!("{:?}", final_block_id),
+        })??
+        ;
 
         if initial_slot == final_slot {
             return Ok(());

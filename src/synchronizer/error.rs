@@ -19,6 +19,11 @@ pub enum SynchronizerError {
         slot: u32,
         error: crate::clients::common::ClientError,
     },
+    #[error("Operation timed out: {operation} for block_id {block_id}")]
+    OperationTimeout {
+        operation: String,
+        block_id: String,
+    },
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }
