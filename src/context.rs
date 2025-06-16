@@ -1,8 +1,8 @@
 use std::{sync::Arc, time::Duration};
 
 use alloy::{
+    network::Ethereum,
     providers::{Provider, ProviderBuilder},
-    transports::http::ReqwestTransport,
 };
 use anyhow::Result as AnyhowResult;
 use backoff::ExponentialBackoffBuilder;
@@ -19,13 +19,13 @@ use crate::{
 // #[cfg(test)]
 // use crate::clients::{beacon::MockCommonBeaconClient, blobscan::MockCommonBlobscanClient};
 
-pub trait CommonContext<T>: Send + Sync + DynClone {
+pub trait CommonContext: Send + Sync + DynClone {
     fn beacon_client(&self) -> &dyn CommonBeaconClient;
     fn blobscan_client(&self) -> &dyn CommonBlobscanClient;
-    fn provider(&self) -> &dyn Provider<T>;
+    fn provider(&self) -> &dyn Provider<Ethereum>;
 }
 
-dyn_clone::clone_trait_object!(CommonContext<ReqwestTransport>);
+dyn_clone::clone_trait_object!(CommonContext);
 // dyn_clone::clone_trait_object!(CommonContext<MockProvider>);
 
 pub struct Config {
@@ -35,18 +35,18 @@ pub struct Config {
     pub secret_key: String,
 }
 
-struct ContextRef<T> {
+struct ContextRef {
     pub beacon_client: Box<dyn CommonBeaconClient>,
     pub blobscan_client: Box<dyn CommonBlobscanClient>,
-    pub provider: Box<dyn Provider<T>>,
+    pub provider: Box<dyn Provider<Ethereum>>,
 }
 
 #[derive(Clone)]
-pub struct Context<T> {
-    inner: Arc<ContextRef<T>>,
+pub struct Context {
+    inner: Arc<ContextRef>,
 }
 
-impl Context<ReqwestTransport> {
+impl Context {
     pub fn try_new(config: Config) -> AnyhowResult<Self> {
         let Config {
             blobscan_api_endpoint,
@@ -59,6 +59,9 @@ impl Context<ReqwestTransport> {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(8))
             .build()?;
+        let provider = ProviderBuilder::new()
+            .network::<Ethereum>()
+            .connect_http(execution_node_endpoint.parse()?);
 
         Ok(Self {
             inner: Arc::new(ContextRef {
@@ -78,15 +81,13 @@ impl Context<ReqwestTransport> {
                     },
                 )?),
                 // Provider::<HttpProvider>::try_from(execution_node_endpoint)?
-                provider: Box::new(
-                    ProviderBuilder::new().on_http(execution_node_endpoint.parse()?),
-                ),
+                provider: Box::new(provider),
             }),
         })
     }
 }
 
-impl CommonContext<ReqwestTransport> for Context<ReqwestTransport> {
+impl CommonContext for Context {
     fn beacon_client(&self) -> &dyn CommonBeaconClient {
         self.inner.beacon_client.as_ref()
     }
@@ -95,7 +96,7 @@ impl CommonContext<ReqwestTransport> for Context<ReqwestTransport> {
         self.inner.blobscan_client.as_ref()
     }
 
-    fn provider(&self) -> &dyn Provider<ReqwestTransport> {
+    fn provider(&self) -> &dyn Provider<Ethereum> {
         self.inner.provider.as_ref()
     }
 }

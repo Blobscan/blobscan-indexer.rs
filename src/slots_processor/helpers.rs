@@ -1,20 +1,17 @@
 use std::collections::HashMap;
 
 use crate::{clients::beacon::types::Blob as BeaconBlob, utils::web3::calculate_versioned_hash};
-use alloy::{
-    primitives::B256,
-    rpc::types::{Block, Transaction},
-};
+use alloy::{consensus::Transaction, primitives::B256, rpc::types::Block};
 
 pub fn create_tx_hash_versioned_hashes_mapping(
-    block: &Block<Transaction>,
+    block: &Block,
 ) -> Result<HashMap<B256, Vec<B256>>, anyhow::Error> {
     let mut tx_to_versioned_hashes = HashMap::new();
 
     if let Some(transactions) = block.transactions.as_transactions() {
         transactions.iter().for_each(|tx| {
-            if let Some(versioned_hashes) = tx.blob_versioned_hashes.as_ref() {
-                tx_to_versioned_hashes.insert(tx.hash, versioned_hashes.clone());
+            if let Some(versioned_hashes) = tx.inner.blob_versioned_hashes() {
+                tx_to_versioned_hashes.insert(tx.info().hash.unwrap(), versioned_hashes.to_vec());
             }
         });
     }

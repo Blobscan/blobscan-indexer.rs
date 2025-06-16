@@ -10,7 +10,7 @@ async-trait = "0.1.80"
 dyn-clone = "1.0.17"
 dotenv = "0.15.0"
 envy = "0.4.2"
-alloy = { version = "0.5.3", features = ["provider-http", "rpc-types"] }
+alloy = { version = "1.0.9", features = ["provider-http", "rpc-types"] }
 sha2 = "0.10.8"
 futures = "0.3.25"
 hex = "0.4.3"

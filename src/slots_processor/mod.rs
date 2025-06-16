@@ -1,6 +1,4 @@
-use alloy::{
-    primitives::B256, rpc::types::BlockTransactionsKind, transports::http::ReqwestTransport,
-};
+use alloy::{eips::BlockId, primitives::B256};
 use anyhow::{anyhow, Context as AnyhowContext, Result};
 
 use crate::clients::beacon::types::BlockHeader;
@@ -39,16 +37,16 @@ impl From<&BlockData> for BlockHeader {
     }
 }
 
-pub struct SlotsProcessor<T> {
-    context: Box<dyn CommonContext<T>>,
+pub struct SlotsProcessor {
+    context: Box<dyn CommonContext>,
     pub last_processed_block: Option<BlockHeader>,
 }
 
-impl SlotsProcessor<ReqwestTransport> {
+impl SlotsProcessor {
     pub fn new(
-        context: Box<dyn CommonContext<ReqwestTransport>>,
+        context: Box<dyn CommonContext>,
         last_processed_block: Option<BlockHeader>,
-    ) -> SlotsProcessor<ReqwestTransport> {
+    ) -> SlotsProcessor {
         Self {
             context,
             last_processed_block,
@@ -176,7 +174,8 @@ impl SlotsProcessor<ReqwestTransport> {
         // Fetch execution block and perform some checks
 
         let execution_block = provider
-            .get_block(execution_block_hash.into(), BlockTransactionsKind::Full)
+            .get_block(BlockId::Hash(execution_block_hash.into()))
+            .full()
             .await?
             .with_context(|| format!("Execution block {execution_block_hash} not found"))?;
 
@@ -220,7 +219,7 @@ impl SlotsProcessor<ReqwestTransport> {
 
         let transactions_entities = block_transactions
             .iter()
-            .filter(|tx| tx_hash_to_versioned_hashes.contains_key(&tx.hash))
+            .filter(|tx| tx_hash_to_versioned_hashes.contains_key(&tx.info().hash.unwrap()))
             .map(|tx| Transaction::try_from((tx, &execution_block)))
             .collect::<Result<Vec<Transaction>>>()?;
 
@@ -316,7 +315,7 @@ impl SlotsProcessor<ReqwestTransport> {
                             self.process_block(block)
                                 .instrument(reorg_span)
                                 .await
-                                .with_context(|| format!("Failed to sync forwarded block"))?;
+                                .with_context(|| "Failed to sync forwarded block".to_string())?;
                         }
                     }
 
