@@ -1,6 +1,6 @@
 use std::thread;
 
-use alloy::{primitives::B256, transports::http::ReqwestTransport};
+use alloy::primitives::B256;
 use anyhow::anyhow;
 use event_handlers::{finalized_checkpoint::FinalizedCheckpointHandler, head::HeadEventHandler};
 use futures::StreamExt;
@@ -26,8 +26,8 @@ pub mod error;
 pub mod event_handlers;
 pub mod types;
 
-pub struct Indexer<T> {
-    context: Box<dyn CommonContext<T>>,
+pub struct Indexer {
+    context: Box<dyn CommonContext>,
     dencun_fork_slot: u32,
     disable_sync_historical: bool,
 
@@ -36,7 +36,7 @@ pub struct Indexer<T> {
     num_threads: u32,
 }
 
-impl Indexer<ReqwestTransport> {
+impl Indexer {
     pub fn try_new(env: &Environment, args: &Args) -> IndexerResult<Self> {
         let context = match Context::try_new(ContextConfig::from(env)) {
             Ok(c) => c,

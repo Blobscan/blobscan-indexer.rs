@@ -1,5 +1,6 @@
 use core::fmt;
 
+use alloy::consensus::Transaction as Consensus;
 use alloy::primitives::{Address, BlockNumber, BlockTimestamp, Bytes, TxIndex, B256, U256};
 use alloy::rpc::types::{Block as ExecutionBlock, Transaction as ExecutionTransaction};
 use anyhow::{Context, Result};
@@ -185,28 +186,25 @@ impl<'a>
             &'a ExecutionBlock<ExecutionTransaction>,
         ),
     ) -> Result<Self, Self::Error> {
-        let hash = execution_tx.hash;
         let block_number = execution_block.header.number;
-        let index = execution_tx
-            .transaction_index
-            .with_context(|| format!("Missing `transaction_index` field in tx {hash}"))?;
-        let from = execution_tx.from;
-        let to = execution_tx.to;
-        let gas_price = match execution_tx.gas_price {
-            Some(gas_price) => U256::from::<u128>(gas_price),
-            None => {
-                return Err(anyhow::anyhow!(
-                    "Missing `gas_price` field in tx {hash} in block {block_number}",
-                    hash = hash,
-                    block_number = block_number
-                ))
-            }
-        };
-        let max_fee_per_blob_gas = match execution_tx.max_fee_per_blob_gas {
+        let hash = execution_tx
+            .info()
+            .hash
+            .with_context(|| format!("Missing `hash` field in tx within block {block_number}"))?;
+        let index = execution_tx.transaction_index.with_context(|| {
+            format!("Missing `transaction_index` field in tx {hash} within block {block_number}")
+        })?;
+        let from = execution_tx.inner.signer();
+        let to = Some(execution_tx.to().with_context(|| {
+            format!("Missing `to` field in tx {hash} within block {block_number}")
+        })?);
+        let gas_price = U256::from::<u128>(execution_tx.effective_gas_price(None));
+
+        let max_fee_per_blob_gas = match execution_tx.max_fee_per_blob_gas() {
             Some(max_fee_per_blob_gas) => U256::from::<u128>(max_fee_per_blob_gas),
             None => {
                 return Err(anyhow::anyhow!(
-                    "Missing `max_fee_per_blob_gas` field in tx {hash} in block {block_number}",
+                    "Missing `max_fee_per_blob_gas` field in tx {hash} within block {block_number}",
                     hash = hash,
                     block_number = block_number
                 ))

@@ -1,6 +1,5 @@
 use std::fmt::Debug;
 
-use alloy::transports::http::ReqwestTransport;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use futures::future::join_all;
@@ -45,8 +44,8 @@ pub struct SynchronizerBuilder {
     last_synced_block: Option<BlockHeader>,
 }
 
-pub struct Synchronizer<T> {
-    context: Box<dyn CommonContext<T>>,
+pub struct Synchronizer {
+    context: Box<dyn CommonContext>,
     num_threads: u32,
     min_slots_per_thread: u32,
     slots_checkpoint: u32,
@@ -101,10 +100,7 @@ impl SynchronizerBuilder {
         self
     }
 
-    pub fn build(
-        &self,
-        context: Box<dyn CommonContext<ReqwestTransport>>,
-    ) -> Synchronizer<ReqwestTransport> {
+    pub fn build(&self, context: Box<dyn CommonContext>) -> Synchronizer {
         Synchronizer {
             context,
             num_threads: self.num_threads,
@@ -116,7 +112,7 @@ impl SynchronizerBuilder {
     }
 }
 
-impl Synchronizer<ReqwestTransport> {
+impl Synchronizer {
     async fn process_slots(
         &mut self,
         from_slot: u32,
@@ -329,7 +325,7 @@ impl Synchronizer<ReqwestTransport> {
 }
 
 #[async_trait]
-impl CommonSynchronizer for Synchronizer<ReqwestTransport> {
+impl CommonSynchronizer for Synchronizer {
     fn clear_last_synced_block(&mut self) {
         self.clear_last_synced_block();
     }

@@ -1,4 +1,3 @@
-use alloy::transports::Transport;
 use tracing::info;
 
 use crate::{
@@ -22,15 +21,12 @@ pub enum FinalizedCheckpointEventHandlerError {
     BlobscanFinalizedBlockUpdateFailure(#[source] ClientError),
 }
 
-pub struct FinalizedCheckpointHandler<T> {
-    context: Box<dyn CommonContext<T>>,
+pub struct FinalizedCheckpointHandler {
+    context: Box<dyn CommonContext>,
 }
 
-impl<T> FinalizedCheckpointHandler<T>
-where
-    T: Transport + Send + Sync + 'static,
-{
-    pub fn new(context: Box<dyn CommonContext<T>>) -> Self {
+impl FinalizedCheckpointHandler {
+    pub fn new(context: Box<dyn CommonContext>) -> Self {
         FinalizedCheckpointHandler { context }
     }
 
