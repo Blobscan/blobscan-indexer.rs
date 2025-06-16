@@ -1,50 +1,14 @@
-name: Release new version and deploy production
+name: Release docker image
 
 on:
   push:
     tags:
-      - "*"
-
-env:
-  CARGO_TERM_COLOR: always
+      - "v*"
 
 jobs:
-  build-test:
-    name: Run tests
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
-
-      - id: toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-
-      - run: rustup override set ${{steps.toolchain.outputs.name}}
-
-      - name: cargo fmt
-        uses: clechasseur/rs-cargo@v2
-        with:
-          command: fmt
-          args: --all --check
-
-      - name: cargo clippy
-        uses: clechasseur/rs-clippy-check@v3
-        with:
-          args: --all --all-features
-
-      - name: Build
-        run: cargo build --verbose
-
-      - name: Run tests
-        run: cargo test --verbose
-
   docker:
     name: Build docker image
     runs-on: ubuntu-latest
-    needs: build-test
 
     steps:
       - name: Checkout
@@ -74,59 +38,3 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-
-  deploy_sepolia:
-    name: Deploy (sepolia)
-    runs-on: ubuntu-latest
-    needs: docker
-    environment: sepolia
-    steps:
-      - uses: appleboy/ssh-action@v0.0.7
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: deploy
-          port: ${{ secrets.SSH_PORT }}
-          key: ${{ secrets.SSH_KEY }}
-          script: ./deploy-blobscan-indexer.rs.sh
-
-  deploy_holesky:
-    name: Deploy (holesky)
-    runs-on: ubuntu-latest
-    needs: docker
-    environment: holesky
-    steps:
-      - uses: appleboy/ssh-action@v0.0.7
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: deploy
-          port: ${{ secrets.SSH_PORT }}
-          key: ${{ secrets.SSH_KEY }}
-          script: ./deploy-blobscan-indexer.rs.sh
-
-  deploy_gnosis:
-    name: Deploy (gnosis)
-    runs-on: ubuntu-latest
-    needs: docker
-    environment: gnosis
-    steps:
-      - uses: appleboy/ssh-action@v0.0.7
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: deploy
-          port: ${{ secrets.SSH_PORT }}
-          key: ${{ secrets.SSH_KEY }}
-          script: ./deploy-blobscan-indexer.rs.sh
-
-  deploy_mainnet:
-    name: Deploy (mainnet)
-    runs-on: ubuntu-latest
-    needs: [deploy_sepolia, deploy_holesky, deploy_gnosis]
-    environment: mainnet
-    steps:
-      - uses: appleboy/ssh-action@v0.0.7
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: deploy
-          port: ${{ secrets.SSH_PORT }}
-          key: ${{ secrets.SSH_KEY }}
-          script: ./deploy-blobscan-indexer.rs.sh
