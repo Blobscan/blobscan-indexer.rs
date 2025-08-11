@@ -142,11 +142,15 @@ impl Indexer {
         }
 
         let historical_sync_completed =
-            matches!(current_lower_block_id, BlockId::Slot(slot) if slot < self.dencun_fork_slot);
+            matches!(current_lower_block_id, BlockId::Slot(slot) if slot <= self.dencun_fork_slot);
 
         if !self.disable_sync_historical && !historical_sync_completed {
-            let historical_sync_final_block_id =
-                end_block_id.unwrap_or(BlockId::Slot(self.dencun_fork_slot - 1));
+            let target_slot = if self.dencun_fork_slot == 0 {
+                self.dencun_fork_slot
+            } else {
+                self.dencun_fork_slot - 1
+            };
+            let historical_sync_final_block_id = end_block_id.unwrap_or(BlockId::Slot(target_slot));
 
             self.start_historical_indexing_task(
                 tx1,
