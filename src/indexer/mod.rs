@@ -111,7 +111,7 @@ impl Indexer<ReqwestTransport> {
             },
         };
 
-        let last_synced_block = sync_state
+        let mut last_synced_block = sync_state
             .map(|state| {
                 state
                     .last_upper_synced_slot
@@ -127,6 +127,26 @@ impl Indexer<ReqwestTransport> {
             Some(block) => block.slot.into(),
             None => BlockId::Head,
         };
+
+        if let Some(last) = last_synced_block.as_ref() {
+            if let Some(finalized_slot) = self
+                .context
+                .beacon_client()
+                .get_block_header(BlockId::Finalized)
+                .await?
+                .map(|h| h.slot)
+            {
+                if last.slot <= finalized_slot {
+                    debug!(
+                        last_synced_slot = last.slot,
+                        finalized_slot,
+                        "Last synced block cleared as it's already finalized or behind chain head"
+                    );
+
+                    last_synced_block = None;
+                }
+            }
+        }
 
         info!(
             lower_indexed_block_id = current_lower_block_id.to_string(),
