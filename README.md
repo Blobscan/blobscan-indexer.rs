@@ -6,6 +6,31 @@ The indexer for the [Blobscan](https://github.com/Blobscan/blobscan) explorer im
 
 Check out our [documentation website](https://docs.blobscan.com/docs/indexer).
 
+```
+./blob-indexer --help
+Blobscan's indexer for blob transactions (EIP-4844).
+
+Usage: blob-indexer [OPTIONS]
+
+Options:
+  -f, --from-slot <FROM_SLOT>
+          Slot to start indexing from
+  -t, --to-slot <TO_SLOT>
+          Slot to stop indexing at
+  -n, --num-threads <NUM_THREADS>
+          Number of threads used for parallel indexing
+  -s, --slots-per-save <SLOTS_PER_SAVE>
+          Amount of slots to be processed before saving latest slot in the database
+  -c, --disable-sync-checkpoint-save
+          Disable slot checkpoint saving when syncing
+  -d, --disable-sync-historical
+          Disable backfill indexing thread
+  -h, --help
+          Print help
+  -V, --version
+          Print version
+```
+
 # Sponsors
 
 We extend our gratitude to each one of them. Thank you 🙏
