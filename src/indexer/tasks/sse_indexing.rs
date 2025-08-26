@@ -89,9 +89,9 @@ impl SSEIndexingTask {
                     let mut catchup_sync_rx: Option<TaskResultChannelReceiver> = None;
                     let mut is_first_event = true;
                     let mut catchup_in_progress = false;
-                    let head_event_span = info_span!(parent: &sse_indexing_span, "head");
+                    let head_event_span = info_span!("head");
                     let finalized_event_span =
-                        info_span!(parent: &sse_indexing_span, "finalized_checkpoint");
+                        info_span!("finalized_checkpoint");
 
                     while let Some(event) = event_source.next().await {
                         match event {
