@@ -9,12 +9,29 @@ use backoff::ExponentialBackoffBuilder;
 use dyn_clone::DynClone;
 
 use crate::{
+    args::Args,
     clients::{
         beacon::{BeaconClient, CommonBeaconClient, Config as BeaconClientConfig},
         blobscan::{BlobscanClient, CommonBlobscanClient, Config as BlobscanClientConfig},
     },
     env::Environment,
 };
+
+pub struct Config {
+    pub blobscan_api_endpoint: String,
+    pub beacon_node_url: String,
+    pub execution_node_endpoint: String,
+    pub secret_key: String,
+    pub concurrency: u32,
+    pub slots_checkpoint: u32,
+    pub disable_checkpoints: bool,
+}
+
+pub struct SyncingSettings {
+    pub concurrency: u32,
+    pub checkpoint_size: u32,
+    pub disable_checkpoints: bool,
+}
 
 // #[cfg(test)]
 // use crate::clients::{beacon::MockCommonBeaconClient, blobscan::MockCommonBlobscanClient};
@@ -23,22 +40,17 @@ pub trait CommonContext: Send + Sync + DynClone {
     fn beacon_client(&self) -> &dyn CommonBeaconClient;
     fn blobscan_client(&self) -> &dyn CommonBlobscanClient;
     fn provider(&self) -> &dyn Provider<Ethereum>;
+    fn syncing_settings(&self) -> &SyncingSettings;
 }
 
 dyn_clone::clone_trait_object!(CommonContext);
 // dyn_clone::clone_trait_object!(CommonContext<MockProvider>);
 
-pub struct Config {
-    pub blobscan_api_endpoint: String,
-    pub beacon_node_url: String,
-    pub execution_node_endpoint: String,
-    pub secret_key: String,
-}
-
 struct ContextRef {
     pub beacon_client: Box<dyn CommonBeaconClient>,
     pub blobscan_client: Box<dyn CommonBlobscanClient>,
     pub provider: Box<dyn Provider<Ethereum>>,
+    pub syncing_settings: SyncingSettings,
 }
 
 #[derive(Clone)]
@@ -53,6 +65,9 @@ impl Context {
             beacon_node_url,
             execution_node_endpoint,
             secret_key,
+            concurrency,
+            slots_checkpoint,
+            disable_checkpoints,
         } = config;
         let exp_backoff = Some(ExponentialBackoffBuilder::default().build());
 
@@ -62,9 +77,15 @@ impl Context {
         let provider = ProviderBuilder::new()
             .network::<Ethereum>()
             .connect_http(execution_node_endpoint.parse()?);
+        let syncing_settings = SyncingSettings {
+            checkpoint_size: slots_checkpoint,
+            concurrency,
+            disable_checkpoints,
+        };
 
         Ok(Self {
             inner: Arc::new(ContextRef {
+                syncing_settings,
                 blobscan_client: Box::new(BlobscanClient::try_with_client(
                     client.clone(),
                     BlobscanClientConfig {
@@ -99,11 +120,18 @@ impl CommonContext for Context {
     fn provider(&self) -> &dyn Provider<Ethereum> {
         self.inner.provider.as_ref()
     }
+
+    fn syncing_settings(&self) -> &SyncingSettings {
+        &self.inner.syncing_settings
+    }
 }
 
-impl From<&Environment> for Config {
-    fn from(env: &Environment) -> Self {
+impl From<(&Environment, &Args)> for Config {
+    fn from((env, args): (&Environment, &Args)) -> Self {
         Self {
+            concurrency: args.num_threads.unwrap_or(1),
+            slots_checkpoint: args.slots_per_save.unwrap_or(1000),
+            disable_checkpoints: args.disable_sync_checkpoint_save,
             blobscan_api_endpoint: env.blobscan_api_endpoint.clone(),
             beacon_node_url: env.beacon_node_endpoint.clone(),
             execution_node_endpoint: env.execution_node_endpoint.clone(),

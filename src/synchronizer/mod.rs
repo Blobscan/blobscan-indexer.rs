@@ -22,40 +22,37 @@ use self::error::{SlotsChunksErrors, SynchronizerError};
 
 pub mod error;
 
+pub type SynchronizerResult = Result<(), SynchronizerError>;
+
 #[async_trait]
 #[cfg_attr(test, automock)]
 pub trait CommonSynchronizer: Send + Sync {
-    fn clear_last_synced_block(&mut self);
-    fn get_last_synced_block(&self) -> Option<BlockHeader>;
-    async fn sync_block(&mut self, block_id: BlockId) -> Result<(), SynchronizerError>;
+    fn set_checkpoint(&mut self, checkpoint: Option<CheckpointType>);
+    fn set_last_synced_block(&mut self, last_synced_block: Option<BlockHeader>);
+    async fn sync_block(&mut self, block_id: BlockId) -> SynchronizerResult;
     async fn sync_blocks(
         &mut self,
         initial_block_id: BlockId,
         final_block_id: BlockId,
-    ) -> Result<(), SynchronizerError>;
+    ) -> SynchronizerResult;
 }
 
 #[derive(Debug)]
 pub struct SynchronizerBuilder {
-    num_threads: u32,
     min_slots_per_thread: u32,
-    slots_checkpoint: u32,
-    checkpoint_type: CheckpointType,
+    checkpoint: Option<CheckpointType>,
     last_synced_block: Option<BlockHeader>,
 }
 
 pub struct Synchronizer {
     context: Box<dyn CommonContext>,
-    num_threads: u32,
     min_slots_per_thread: u32,
-    slots_checkpoint: u32,
-    checkpoint_type: CheckpointType,
+    checkpoint: Option<CheckpointType>,
     last_synced_block: Option<BlockHeader>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum CheckpointType {
-    Disabled,
     Lower,
     Upper,
 }
@@ -63,10 +60,8 @@ pub enum CheckpointType {
 impl Default for SynchronizerBuilder {
     fn default() -> Self {
         SynchronizerBuilder {
-            num_threads: 1,
             min_slots_per_thread: 50,
-            slots_checkpoint: 1000,
-            checkpoint_type: CheckpointType::Upper,
+            checkpoint: Some(CheckpointType::Upper),
             last_synced_block: None,
         }
     }
@@ -77,20 +72,9 @@ impl SynchronizerBuilder {
         SynchronizerBuilder::default()
     }
 
-    pub fn with_checkpoint_type(&mut self, checkpoint_type: CheckpointType) -> &mut Self {
-        self.checkpoint_type = checkpoint_type;
+    pub fn with_checkpoint(&mut self, checkpoint: Option<CheckpointType>) -> &mut Self {
+        self.checkpoint = checkpoint;
 
-        self
-    }
-
-    pub fn with_num_threads(&mut self, num_threads: u32) -> &mut Self {
-        self.num_threads = num_threads;
-
-        self
-    }
-
-    pub fn with_slots_checkpoint(&mut self, slots_checkpoint: u32) -> &mut Self {
-        self.slots_checkpoint = slots_checkpoint;
         self
     }
 
@@ -103,10 +87,8 @@ impl SynchronizerBuilder {
     pub fn build(&self, context: Box<dyn CommonContext>) -> Synchronizer {
         Synchronizer {
             context,
-            num_threads: self.num_threads,
             min_slots_per_thread: self.min_slots_per_thread,
-            slots_checkpoint: self.slots_checkpoint,
-            checkpoint_type: self.checkpoint_type,
+            checkpoint: self.checkpoint,
             last_synced_block: self.last_synced_block.clone(),
         }
     }
@@ -121,8 +103,10 @@ impl Synchronizer {
         let is_reverse_sync = to_slot < from_slot;
         let unprocessed_slots = to_slot.abs_diff(from_slot);
         let min_slots_per_thread = std::cmp::min(unprocessed_slots, self.min_slots_per_thread);
-        let slots_per_thread =
-            std::cmp::max(min_slots_per_thread, unprocessed_slots / self.num_threads);
+        let slots_per_thread = std::cmp::max(
+            min_slots_per_thread,
+            unprocessed_slots / self.context.syncing_settings().concurrency,
+        );
         let num_threads = std::cmp::max(1, unprocessed_slots / slots_per_thread);
         let remaining_slots = unprocessed_slots % num_threads;
 
@@ -232,7 +216,8 @@ impl Synchronizer {
         }
 
         while unprocessed_slots > 0 {
-            let slots_chunk = std::cmp::min(unprocessed_slots, self.slots_checkpoint);
+            let checkpoint_size = self.context.syncing_settings().checkpoint_size;
+            let slots_chunk = std::cmp::min(unprocessed_slots, checkpoint_size);
             let initial_chunk_slot = current_slot;
             let final_chunk_slot = if is_reverse_sync {
                 current_slot - slots_chunk
@@ -257,53 +242,57 @@ impl Synchronizer {
                 final_chunk_slot - 1
             });
 
-            if self.checkpoint_type != CheckpointType::Disabled {
-                let mut last_lower_synced_slot = None;
-                let mut last_upper_synced_slot = None;
-                let mut last_upper_synced_block_root = None;
-                let mut last_upper_synced_block_slot = None;
+            let checkpointing_enabled = !self.context.syncing_settings().disable_checkpoints;
 
-                if self.checkpoint_type == CheckpointType::Lower {
-                    last_lower_synced_slot = last_slot;
-                } else if self.checkpoint_type == CheckpointType::Upper {
-                    last_upper_synced_slot = last_slot;
-                    last_upper_synced_block_root =
-                        self.last_synced_block.as_ref().map(|block| block.root);
-                    last_upper_synced_block_slot =
-                        self.last_synced_block.as_ref().map(|block| block.slot);
-                }
+            if checkpointing_enabled {
+                if let Some(checkpoint) = self.checkpoint {
+                    let mut last_lower_synced_slot = None;
+                    let mut last_upper_synced_slot = None;
+                    let mut last_upper_synced_block_root = None;
+                    let mut last_upper_synced_block_slot = None;
 
-                if let Err(error) = self
-                    .context
-                    .blobscan_client()
-                    .update_sync_state(BlockchainSyncState {
-                        last_finalized_block: None,
-                        last_lower_synced_slot,
-                        last_upper_synced_slot,
-                        last_upper_synced_block_root,
-                        last_upper_synced_block_slot,
-                    })
-                    .await
-                {
-                    let new_synced_slot = match last_lower_synced_slot.or(last_upper_synced_slot) {
-                        Some(slot) => slot,
-                        None => return Err(SynchronizerError::Other(anyhow!(
-                            "Failed to get new last synced slot: last_lower_synced_slot and last_upper_synced_slot are both None"
-                        )))
-                    };
+                    if checkpoint == CheckpointType::Lower {
+                        last_lower_synced_slot = last_slot;
+                    } else if checkpoint == CheckpointType::Upper {
+                        last_upper_synced_slot = last_slot;
+                        last_upper_synced_block_root =
+                            self.last_synced_block.as_ref().map(|block| block.root);
+                        last_upper_synced_block_slot =
+                            self.last_synced_block.as_ref().map(|block| block.slot);
+                    }
 
-                    return Err(SynchronizerError::FailedSlotCheckpointSave {
-                        slot: new_synced_slot,
-                        error,
-                    });
-                }
+                    if let Err(error) = self
+                        .context
+                        .blobscan_client()
+                        .update_sync_state(BlockchainSyncState {
+                            last_finalized_block: None,
+                            last_lower_synced_slot,
+                            last_upper_synced_slot,
+                            last_upper_synced_block_root,
+                            last_upper_synced_block_slot,
+                        })
+                        .await
+                    {
+                        let new_synced_slot = match last_lower_synced_slot.or(last_upper_synced_slot) {
+                                Some(slot) => slot,
+                                None => return Err(SynchronizerError::Other(anyhow!(
+                                    "Failed to get new last synced slot: last_lower_synced_slot and last_upper_synced_slot are both None"
+                                )))
+                            };
 
-                if unprocessed_slots >= self.slots_checkpoint {
-                    debug!(
-                        new_last_lower_synced_slot = last_lower_synced_slot,
-                        new_last_upper_synced_slot = last_upper_synced_slot,
-                        "Checkpoint reached. Last synced slot saved…"
-                    );
+                        return Err(SynchronizerError::FailedSlotCheckpointSave {
+                            slot: new_synced_slot,
+                            error,
+                        });
+                    }
+
+                    if unprocessed_slots >= checkpoint_size {
+                        debug!(
+                            new_last_lower_synced_slot = last_lower_synced_slot,
+                            new_last_upper_synced_slot = last_upper_synced_slot,
+                            "Checkpoint reached. Last synced slot saved…"
+                        );
+                    }
                 }
             }
 
@@ -318,23 +307,19 @@ impl Synchronizer {
 
         Ok(())
     }
-
-    pub fn clear_last_synced_block(&mut self) {
-        self.last_synced_block = None;
-    }
 }
 
 #[async_trait]
 impl CommonSynchronizer for Synchronizer {
-    fn clear_last_synced_block(&mut self) {
-        self.clear_last_synced_block();
+    fn set_checkpoint(&mut self, checkpoint: Option<CheckpointType>) {
+        self.checkpoint = checkpoint;
     }
 
-    fn get_last_synced_block(&self) -> Option<BlockHeader> {
-        self.last_synced_block.clone()
+    fn set_last_synced_block(&mut self, last_synced_block: Option<BlockHeader>) {
+        self.last_synced_block = last_synced_block;
     }
 
-    async fn sync_block(&mut self, block_id: BlockId) -> Result<(), SynchronizerError> {
+    async fn sync_block(&mut self, block_id: BlockId) -> SynchronizerResult {
         let final_slot = block_id
             .resolve_to_slot(self.context.beacon_client())
             .await?;
@@ -349,7 +334,7 @@ impl CommonSynchronizer for Synchronizer {
         &mut self,
         initial_block_id: BlockId,
         final_block_id: BlockId,
-    ) -> Result<(), SynchronizerError> {
+    ) -> SynchronizerResult {
         let initial_slot = initial_block_id
             .resolve_to_slot(self.context.beacon_client())
             .await?;
