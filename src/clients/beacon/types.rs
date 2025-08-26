@@ -15,11 +15,20 @@ pub enum BlockId {
     Hash(B256),
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum Topic {
     Head,
     FinalizedCheckpoint,
+}
+
+impl fmt::Display for Topic {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Topic::Head => write!(f, "head"),
+            Topic::FinalizedCheckpoint => write!(f, "finalized_checkpoint"),
+        }
+    }
 }
 
 #[derive(Deserialize, Debug)]
