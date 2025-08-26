@@ -329,7 +329,15 @@ impl SlotsProcessor {
             reorg_depth += 1;
         }
 
-        Err(anyhow!("No common block found"))
+        let rewinded_blocks_count = rewinded_blocks.len();
+
+        if rewinded_blocks_count > 0 {
+            return Err(anyhow!("{rewinded_blocks_count} Blobscan blocks to rewind detected but no common ancestor found"));
+        }
+
+        info!("Skipping reorg handling: no Blobscan blocks to rewind found");
+
+        Ok(())
     }
 
     /// Returns the path of blocks with execution payload from the head block to the provided block.
