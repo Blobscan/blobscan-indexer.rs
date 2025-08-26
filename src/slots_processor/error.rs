@@ -23,7 +23,7 @@ pub enum SlotsProcessorError {
         failed_slot: u32,
         error: SlotProcessingError,
     },
-    #[error("Failed to process reorg. old slot {old_slot}, new slot {new_slot}, new head block root {new_head_block_root}, old head block root {old_head_block_root}")]
+    #[error("Failed to process reorg. old slot {old_slot}, new slot {new_slot}, new head block root {new_head_block_root}, old head block root {old_head_block_root}: {error}")]
     FailedReorgProcessing {
         old_slot: u32,
         new_slot: u32,
