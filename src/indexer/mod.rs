@@ -1,3 +1,5 @@
+use std::cmp;
+
 use alloy::primitives::B256;
 use anyhow::anyhow;
 use tokio::sync::mpsc::{self};
@@ -134,27 +136,21 @@ impl Indexer {
             "Starting indexer…",
         );
 
-        let current_lower_block_id = match &sync_state {
+        let current_lowest_block_id = match &sync_state {
             Some(state) => match state.last_lower_synced_slot {
-                Some(slot) => BlockId::Slot(slot - 1),
+                Some(slot) => slot.saturating_sub(1).into(),
                 None => match state.last_upper_synced_slot {
-                    Some(slot) => BlockId::Slot(slot - 1),
+                    Some(slot) => slot.saturating_sub(1).into(),
                     None => BlockId::Head,
                 },
             },
             None => BlockId::Head,
         };
 
-        let historical_sync_completed =
-            matches!(current_lower_block_id, BlockId::Slot(slot) if slot <= self.dencun_fork_slot);
+        let backfill_completed =
+            matches!(current_lowest_block_id, BlockId::Slot(slot) if slot <= self.dencun_fork_slot);
 
-        if !self.disable_sync_historical && !historical_sync_completed {
-            let target_slot = if self.dencun_fork_slot == 0 {
-                self.dencun_fork_slot
-            } else {
-                self.dencun_fork_slot - 1
-            };
-
+        if !self.disable_sync_historical && !backfill_completed {
             let task = IndexingTask::new(
                 "backfill",
                 self.context.clone(),
@@ -164,8 +160,8 @@ impl Indexer {
             task.run(IndexingTaskRunParams {
                 error_report_tx: self.error_report_tx.clone(),
                 result_report_tx: None,
-                from_block_id: current_lower_block_id,
-                to_block_id: target_slot.into(),
+                from_block_id: current_lowest_block_id,
+                to_block_id: self.dencun_fork_slot.into(),
                 prev_block: None,
                 checkpoint: Some(CheckpointType::Lower),
             });
