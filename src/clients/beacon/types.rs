@@ -1,11 +1,15 @@
 use std::{fmt, str::FromStr};
 
-use alloy::primitives::{Bytes, B256};
+use alloy::{consensus::Bytes48, eips::eip4844::HeapBlob, primitives::B256};
 use serde::{Deserialize, Serialize};
 
 use crate::clients::common::ClientError;
 
 use super::CommonBeaconClient;
+
+pub type KzgCommitment = Bytes48;
+
+pub type Proof = Bytes48;
 
 #[derive(Serialize, Debug, Clone, PartialEq)]
 pub enum BlockId {
@@ -33,7 +37,7 @@ impl fmt::Display for Topic {
 
 #[derive(Deserialize, Debug)]
 pub struct Block {
-    pub blob_kzg_commitments: Option<Vec<String>>,
+    pub blob_kzg_commitments: Option<Vec<KzgCommitment>>,
     pub execution_payload: Option<ExecutionPayload>,
     pub parent_root: B256,
     #[serde(deserialize_with = "deserialize_number")]
@@ -50,7 +54,7 @@ pub struct ExecutionPayload {
 #[derive(Deserialize, Debug)]
 pub struct BlockBody {
     pub execution_payload: Option<ExecutionPayload>,
-    pub blob_kzg_commitments: Option<Vec<String>>,
+    pub blob_kzg_commitments: Option<Vec<KzgCommitment>>,
 }
 #[derive(Deserialize, Debug)]
 pub struct BlockMessage {
@@ -72,9 +76,9 @@ pub struct BlockResponse {
 
 #[derive(Deserialize, Debug)]
 pub struct Blob {
-    pub kzg_commitment: String,
-    pub kzg_proof: String,
-    pub blob: Bytes,
+    pub kzg_commitment: KzgCommitment,
+    pub kzg_proof: Proof,
+    pub blob: HeapBlob,
 }
 
 #[derive(Deserialize, Debug)]

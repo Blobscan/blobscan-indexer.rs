@@ -1,22 +1,24 @@
-use alloy::{eips::BlockId, primitives::B256};
+use alloy::{
+    consensus::Transaction,
+    eips::{eip4844::kzg_to_versioned_hash, BlockId},
+    primitives::B256,
+};
 use anyhow::{anyhow, Context as AnyhowContext, Result};
 
-use crate::clients::beacon::types::BlockHeader;
+use crate::{clients::beacon::types::BlockHeader, utils::alloy::BlobTransactionExt};
 use tracing::{debug, info, Instrument};
 
 use crate::{
     clients::{
-        blobscan::types::{Blob, BlobscanBlock, Block, Transaction},
+        blobscan::types::{Blob, BlobscanBlock, Block, Transaction as BlobscanTransaction},
         common::ClientError,
     },
     context::CommonContext,
 };
 
 use self::error::{SlotProcessingError, SlotsProcessorError};
-use self::helpers::{create_tx_hash_versioned_hashes_mapping, create_versioned_hash_blob_mapping};
 
 pub mod error;
-mod helpers;
 
 const MAX_ALLOWED_REORG_DEPTH: u32 = 100;
 
@@ -132,6 +134,7 @@ impl SlotsProcessor {
         let beacon_client = self.context.beacon_client();
         let blobscan_client = self.context.blobscan_client();
         let provider = self.context.provider();
+        let beacon_block_root = beacon_block_header.root;
         let slot = beacon_block_header.slot;
 
         let beacon_block = match beacon_client.get_block(slot.into()).await? {
@@ -179,14 +182,11 @@ impl SlotsProcessor {
             .await?
             .with_context(|| format!("Execution block {execution_block_hash} not found"))?;
 
-        let tx_hash_to_versioned_hashes =
-            create_tx_hash_versioned_hashes_mapping(&execution_block)?;
+        let blob_txs = execution_block.transactions.filter_blob_transactions();
 
-        if tx_hash_to_versioned_hashes.is_empty() {
-            return Err(anyhow!("Blocks mismatch: Beacon block contains blob KZG commitments, but the corresponding execution block does not contain any blob transactions").into());
+        if blob_txs.is_empty() {
+            return Err(anyhow!("Blocks mismatch: Consensus block \"{beacon_block_root}\" contains blob KZG commitments, but the corresponding execution block \"{execution_block_hash:#?}\" does not contain any blob transactions").into());
         }
-
-        // Fetch blobs and perform some checks
 
         let blobs = match beacon_client
             .get_blobs(slot.into())
@@ -210,48 +210,44 @@ impl SlotsProcessor {
         };
 
         // Create entities to be indexed
-
         let block_entity = Block::try_from((&execution_block, slot))?;
-        let block_transactions = execution_block
-            .transactions
-            .as_transactions()
-            .ok_or_else(|| anyhow!("Failed to parse transactions"))?;
-
-        let transactions_entities = block_transactions
+        let tx_entities = blob_txs
             .iter()
-            .filter(|tx| tx_hash_to_versioned_hashes.contains_key(&tx.info().hash.unwrap()))
-            .map(|tx| Transaction::try_from((tx, &execution_block)))
-            .collect::<Result<Vec<Transaction>>>()?;
+            .map(|tx| BlobscanTransaction::try_from((*tx, &execution_block)))
+            .collect::<Result<Vec<BlobscanTransaction>>>()?;
 
-        let versioned_hash_to_blob = create_versioned_hash_blob_mapping(&blobs)?;
-        let mut blob_entities: Vec<Blob> = vec![];
+        let blob_entities: Vec<Blob> = blob_txs
+            .into_iter()
+            .flat_map(|tx| {
+                tx.blob_versioned_hashes()
+                    .into_iter()
+                    .flatten()
+                    .enumerate()
+                    .map( |(i, versioned_hash)| {
+                        let tx_hash = tx.inner.hash();
+                        let blob = blobs
+                            .iter()
+                            .find(|blob| {
+                                let vh = kzg_to_versioned_hash(blob.kzg_commitment.as_ref());
 
-        for (tx_hash, versioned_hashes) in tx_hash_to_versioned_hashes.iter() {
-            for (i, versioned_hash) in versioned_hashes.iter().enumerate() {
-                let blob = *versioned_hash_to_blob.get(versioned_hash).with_context(|| format!("Sidecar not found for blob {i} with versioned hash {versioned_hash} from tx {tx_hash}"))?;
+                                vh.eq(versioned_hash)
+                            })
+                            .with_context(|| format!(
+                                "Sidecar not found for blob {i:?} with versioned hash {versioned_hash:?} from tx {tx_hash:?}"
+                            ))
+                            .unwrap(); // (or propagate the error instead of unwrap)
 
-                blob_entities.push(Blob::from((blob, versioned_hash, i, tx_hash)));
-            }
-        }
-
-        /*
-        let tx_hashes = transactions_entities
-            .iter()
-            .map(|tx| tx.hash.to_string())
-            .collect::<Vec<String>>();
-        let blob_versioned_hashes = blob_entities
-            .iter()
-            .map(|blob| blob.versioned_hash.to_string())
-            .collect::<Vec<String>>();
-         */
-
-        let block_number = block_entity.number;
+                        Blob::from((blob, (i as u32), tx_hash))
+                    })
+            })
+            .collect::<Vec<Blob>>();
 
         blobscan_client
-            .index(block_entity, transactions_entities, blob_entities)
+            .index(block_entity, tx_entities, blob_entities)
             .await
             .map_err(SlotProcessingError::ClientError)?;
 
+        let block_number = execution_block.header.number;
         info!(slot, block_number, "Block indexed successfully");
 
         Ok(())
