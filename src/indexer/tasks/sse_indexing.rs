@@ -19,7 +19,7 @@ use crate::{
         },
     },
     synchronizer::{CheckpointType, CommonSynchronizer, SynchronizerBuilder},
-    utils::web3::get_full_hash,
+    utils::alloy::B256Ext,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -171,17 +171,16 @@ impl SSEIndexingTask {
                                             )?;
 
                                              let block_hash = finalized_checkpoint_data.block;
-                                        let full_block_hash = get_full_hash(&block_hash);
+                                        let full_block_hash = block_hash.to_full_hex();
                                         let last_finalized_block_number = match
                                             context
                                             .beacon_client()
                                             .get_block(block_hash.into())
                                             .await
-                                            .map_err(|err| 
+                                            .map_err(|err|
                                                 SSEIndexingError::EventHandlingError { event: event.event.clone(), error: anyhow!(
                                                     "Failed to retrieve finalized block {full_block_hash}: {err}"
                                                 ) }
-
                                             )? {
                                             Some(block) => match block.execution_payload {
                                                 Some(execution_payload) => execution_payload.block_number,

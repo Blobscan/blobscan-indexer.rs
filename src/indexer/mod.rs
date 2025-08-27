@@ -1,5 +1,3 @@
-use std::cmp;
-
 use alloy::primitives::B256;
 use anyhow::anyhow;
 use tokio::sync::mpsc::{self};
