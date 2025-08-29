@@ -81,10 +81,10 @@ pub fn print_banner(args: &Args, env: &Environment) {
 
     println!("Number of threads: {}", args.num_threads);
 
-    println!("Slots checkpoint size: {}", args.slots_per_save);
+    println!("Checkpoint size: {}", args.slots_per_save);
 
     println!(
-        "Disable sync checkpoint saving: {}",
+        "Disable checkpointing: {}",
         if args.disable_sync_checkpoint_save {
             "yes"
         } else {
@@ -93,7 +93,7 @@ pub fn print_banner(args: &Args, env: &Environment) {
     );
 
     println!(
-        "Disable historical sync: {}",
+        "Disable backfill indexing: {}",
         if args.disable_sync_historical {
             "yes"
         } else {

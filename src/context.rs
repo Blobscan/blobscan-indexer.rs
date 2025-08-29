@@ -22,15 +22,23 @@ pub struct Config {
     pub beacon_node_url: String,
     pub execution_node_endpoint: String,
     pub secret_key: String,
-    pub concurrency: u32,
-    pub slots_checkpoint: u32,
-    pub disable_checkpoints: bool,
+    pub syncing_settings: SyncingSettings,
 }
 
 pub struct SyncingSettings {
     pub concurrency: u32,
     pub checkpoint_size: u32,
     pub disable_checkpoints: bool,
+}
+
+impl From<&Args> for SyncingSettings {
+    fn from(args: &Args) -> Self {
+        SyncingSettings {
+            concurrency: args.num_threads.resolve(),
+            checkpoint_size: args.slots_per_save,
+            disable_checkpoints: args.disable_sync_checkpoint_save,
+        }
+    }
 }
 
 // #[cfg(test)]
@@ -65,9 +73,7 @@ impl Context {
             beacon_node_url,
             execution_node_endpoint,
             secret_key,
-            concurrency,
-            slots_checkpoint,
-            disable_checkpoints,
+            syncing_settings,
         } = config;
         let exp_backoff = Some(ExponentialBackoffBuilder::default().build());
 
@@ -77,11 +83,6 @@ impl Context {
         let provider = ProviderBuilder::new()
             .network::<Ethereum>()
             .connect_http(execution_node_endpoint.parse()?);
-        let syncing_settings = SyncingSettings {
-            checkpoint_size: slots_checkpoint,
-            concurrency,
-            disable_checkpoints,
-        };
 
         Ok(Self {
             inner: Arc::new(ContextRef {
@@ -129,13 +130,11 @@ impl CommonContext for Context {
 impl From<(&Environment, &Args)> for Config {
     fn from((env, args): (&Environment, &Args)) -> Self {
         Self {
-            concurrency: args.num_threads.resolve(),
-            slots_checkpoint: args.slots_per_save,
-            disable_checkpoints: args.disable_sync_checkpoint_save,
             blobscan_api_endpoint: env.blobscan_api_endpoint.clone(),
             beacon_node_url: env.beacon_node_endpoint.clone(),
             execution_node_endpoint: env.execution_node_endpoint.clone(),
             secret_key: env.secret_key.clone(),
+            syncing_settings: args.into(),
         }
     }
 }

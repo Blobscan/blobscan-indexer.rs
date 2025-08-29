@@ -60,7 +60,7 @@ pub struct Args {
     #[arg(short, long, default_value_t = NumThreads::Auto)]
     pub num_threads: NumThreads,
 
-    /// Amount of slots to be processed before saving latest slot in the database
+    /// Amount of slots to be processed before saving latest synced slot in the db
     #[arg(short, long, default_value_t = 1000)]
     pub slots_per_save: u32,
 
