@@ -1,4 +1,4 @@
-use tracing::{info_span, Instrument, Span};
+use tracing::{debug, Instrument, Span};
 
 use crate::{
     clients::beacon::types::{BlockHeader, BlockId},
@@ -60,11 +60,15 @@ impl IndexingTask {
             let indexing_task_span = span.unwrap_or(tracing::info_span!("indexing-task"));
 
             async {
-                let result = synchronizer.sync_blocks(from_block_id, to_block_id).await;
+                let result = if from_block_id == to_block_id {
+                    synchronizer.sync_block(from_block_id).await
+                } else {
+                    synchronizer.sync_blocks(from_block_id, to_block_id).await
+                };
 
                 match result {
                     Ok(sync_result) => {
-                        info_span!("Task completed!");
+                        debug!("Task {name} completed!");
 
                         if let Some(report_tx) = result_report_tx {
                             report_tx.send(sync_result).unwrap();

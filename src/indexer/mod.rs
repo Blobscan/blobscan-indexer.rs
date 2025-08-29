@@ -109,7 +109,6 @@ impl Indexer {
         let lowest_synced_slot = sync_state
             .as_ref()
             .and_then(|state| state.last_lower_synced_slot);
-
         let last_synced_block = sync_state.as_ref().and_then(|state| {
             match (
                 state.last_upper_synced_block_root,
@@ -134,19 +133,8 @@ impl Indexer {
             "Starting indexer…",
         );
 
-        let current_lowest_block_id = match &sync_state {
-            Some(state) => match state.last_lower_synced_slot {
-                Some(slot) => slot.saturating_sub(1).into(),
-                None => match state.last_upper_synced_slot {
-                    Some(slot) => slot.saturating_sub(1).into(),
-                    None => BlockId::Head,
-                },
-            },
-            None => BlockId::Head,
-        };
-
         let backfill_completed =
-            matches!(current_lowest_block_id, BlockId::Slot(slot) if slot <= self.dencun_fork_slot);
+            lowest_synced_slot.map_or(false, |slot| slot <= self.dencun_fork_slot);
 
         if !self.disable_sync_historical && !backfill_completed {
             let task = IndexingTask::new(
@@ -154,6 +142,14 @@ impl Indexer {
                 self.context.clone(),
                 Some(info_span!("backfill")),
             );
+
+            let current_lowest_block_id = match lowest_synced_slot {
+                Some(lowest_synced_slot) => lowest_synced_slot.saturating_sub(1).into(),
+                None => match last_synced_slot {
+                    Some(last_synced_slot) => last_synced_slot.saturating_sub(1).into(),
+                    None => BlockId::Head,
+                },
+            };
 
             task.run(IndexingTaskRunParams {
                 error_report_tx: self.error_report_tx.clone(),
