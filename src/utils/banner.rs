@@ -79,11 +79,7 @@ pub fn print_banner(args: &Args, env: &Environment) {
         println!("Custom end slot: {}", to_slot.to_detailed_string());
     }
 
-    if let Some(num_threads) = args.num_threads {
-        println!("Number of threads: {}", num_threads);
-    } else {
-        println!("Number of threads: auto");
-    }
+    println!("Number of threads: {}", args.num_threads);
 
     if let Some(slots_per_save) = args.slots_per_save {
         println!("Slots checkpoint size: {}", slots_per_save);

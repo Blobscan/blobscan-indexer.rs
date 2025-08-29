@@ -129,7 +129,7 @@ impl CommonContext for Context {
 impl From<(&Environment, &Args)> for Config {
     fn from((env, args): (&Environment, &Args)) -> Self {
         Self {
-            concurrency: args.num_threads.unwrap_or(1),
+            concurrency: args.num_threads.resolve(),
             slots_checkpoint: args.slots_per_save.unwrap_or(1000),
             disable_checkpoints: args.disable_sync_checkpoint_save,
             blobscan_api_endpoint: env.blobscan_api_endpoint.clone(),
