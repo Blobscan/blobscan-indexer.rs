@@ -216,10 +216,10 @@ impl SlotsProcessor {
             .map(|tx| BlobscanTransaction::try_from((*tx, &execution_block)))
             .collect::<Result<Vec<BlobscanTransaction>>>()?;
 
-        let blob_entities: Vec<Blob> = blob_txs
+        let blob_entities = blob_txs
             .into_iter()
             .flat_map(|tx| {
-                tx.blob_versioned_hashes()
+               tx.blob_versioned_hashes()
                     .into_iter()
                     .flatten()
                     .enumerate()
@@ -234,13 +234,12 @@ impl SlotsProcessor {
                             })
                             .with_context(|| format!(
                                 "Sidecar not found for blob {i:?} with versioned hash {versioned_hash:?} from tx {tx_hash:?}"
-                            ))
-                            .unwrap(); // (or propagate the error instead of unwrap)
+                            ))?;
 
-                        Blob::from((blob, (i as u32), tx_hash))
+                        Ok(Blob::from((blob, (i as u32), tx_hash)))
                     })
             })
-            .collect::<Vec<Blob>>();
+            .collect::<Result<Vec<Blob>, anyhow::Error>>()?;
 
         blobscan_client
             .index(block_entity, tx_entities, blob_entities)
