@@ -130,7 +130,7 @@ impl From<(&Environment, &Args)> for Config {
     fn from((env, args): (&Environment, &Args)) -> Self {
         Self {
             concurrency: args.num_threads.resolve(),
-            slots_checkpoint: args.slots_per_save.unwrap_or(1000),
+            slots_checkpoint: args.slots_per_save,
             disable_checkpoints: args.disable_sync_checkpoint_save,
             blobscan_api_endpoint: env.blobscan_api_endpoint.clone(),
             beacon_node_url: env.beacon_node_endpoint.clone(),

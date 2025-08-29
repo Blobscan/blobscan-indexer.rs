@@ -81,11 +81,7 @@ pub fn print_banner(args: &Args, env: &Environment) {
 
     println!("Number of threads: {}", args.num_threads);
 
-    if let Some(slots_per_save) = args.slots_per_save {
-        println!("Slots checkpoint size: {}", slots_per_save);
-    } else {
-        println!("Slots checkpoint size: 1000");
-    }
+    println!("Slots checkpoint size: {}", args.slots_per_save);
 
     println!(
         "Disable sync checkpoint saving: {}",
