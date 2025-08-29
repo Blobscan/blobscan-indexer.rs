@@ -1,13 +1,14 @@
 use core::fmt;
 
 use alloy::consensus::Transaction as Consensus;
-use alloy::primitives::{Address, BlockNumber, BlockTimestamp, Bytes, TxIndex, B256, U256};
+use alloy::eips::eip4844::{kzg_to_versioned_hash, HeapBlob};
+use alloy::primitives::{Address, BlockNumber, BlockTimestamp, TxIndex, B256, U256};
 use alloy::rpc::types::{Block as ExecutionBlock, Transaction as ExecutionTransaction};
 use anyhow::{Context, Result};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{clients::beacon::types::Blob as BeaconBlob, utils::web3::calculate_versioned_hash};
+use crate::clients::beacon::types::{Blob as BeaconBlob, KzgCommitment, Proof};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct BlobscanBlock {
@@ -44,9 +45,9 @@ pub struct Transaction {
 #[serde(rename_all = "camelCase")]
 pub struct Blob {
     pub versioned_hash: B256,
-    pub commitment: String,
-    pub proof: String,
-    pub data: Bytes,
+    pub commitment: KzgCommitment,
+    pub proof: Proof,
+    pub data: HeapBlob,
     pub tx_hash: B256,
     pub index: u32,
 }
@@ -223,37 +224,33 @@ impl<'a>
     }
 }
 
-impl<'a> TryFrom<(&'a BeaconBlob, u32, B256)> for Blob {
-    type Error = anyhow::Error;
-
-    fn try_from(
-        (blob_data, index, tx_hash): (&'a BeaconBlob, u32, B256),
-    ) -> Result<Self, Self::Error> {
-        Ok(Self {
-            tx_hash,
-            index,
-            commitment: blob_data.kzg_commitment.clone(),
-            proof: blob_data.kzg_proof.clone(),
-            data: blob_data.blob.clone(),
-            versioned_hash: calculate_versioned_hash(&blob_data.kzg_commitment)?,
-        })
-    }
-}
-
-impl<'a> From<(&'a BeaconBlob, &'a B256, usize, &'a B256)> for Blob {
-    fn from(
-        (blob_data, versioned_hash, index, tx_hash): (&'a BeaconBlob, &'a B256, usize, &'a B256),
-    ) -> Self {
+impl<'a> From<(&'a BeaconBlob, u32, &B256)> for Blob {
+    fn from((blob, index, tx_hash): (&'a BeaconBlob, u32, &B256)) -> Self {
         Self {
-            tx_hash: *tx_hash,
-            index: index as u32,
-            commitment: blob_data.kzg_commitment.clone(),
-            proof: blob_data.kzg_proof.clone(),
-            data: blob_data.blob.clone(),
-            versioned_hash: *versioned_hash,
+            tx_hash: tx_hash.clone(),
+            index,
+            commitment: blob.kzg_commitment,
+            proof: blob.kzg_proof,
+            data: blob.blob.clone(),
+            versioned_hash: kzg_to_versioned_hash(blob.kzg_commitment.as_ref()),
         }
     }
 }
+
+// impl<'a> From<(&'a BeaconBlob, &'a B256, usize, &'a B256)> for Blob {
+//     fn from(
+//         (blob_data, versioned_hash, index, tx_hash): (&'a BeaconBlob, &'a B256, usize, &'a B256),
+//     ) -> Self {
+//         Self {
+//             tx_hash: *tx_hash,
+//             index: index as u32,
+//             commitment: blob_data.kzg_commitment.clone(),
+//             proof: blob_data.kzg_proof.clone(),
+//             data: blob_data.blob.clone(),
+//             versioned_hash: *versioned_hash,
+//         }
+//     }
+// }
 
 impl From<BlockchainSyncStateResponse> for BlockchainSyncState {
     fn from(response: BlockchainSyncStateResponse) -> Self {

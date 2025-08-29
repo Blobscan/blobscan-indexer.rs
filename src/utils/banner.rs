@@ -79,20 +79,12 @@ pub fn print_banner(args: &Args, env: &Environment) {
         println!("Custom end slot: {}", to_slot.to_detailed_string());
     }
 
-    if let Some(num_threads) = args.num_threads {
-        println!("Number of threads: {}", num_threads);
-    } else {
-        println!("Number of threads: auto");
-    }
+    println!("Number of threads: {}", args.num_threads);
 
-    if let Some(slots_per_save) = args.slots_per_save {
-        println!("Slots checkpoint size: {}", slots_per_save);
-    } else {
-        println!("Slots checkpoint size: 1000");
-    }
+    println!("Checkpoint size: {}", args.slots_per_save);
 
     println!(
-        "Disable sync checkpoint saving: {}",
+        "Disable checkpointing: {}",
         if args.disable_sync_checkpoint_save {
             "yes"
         } else {
@@ -101,7 +93,7 @@ pub fn print_banner(args: &Args, env: &Environment) {
     );
 
     println!(
-        "Disable historical sync: {}",
+        "Disable backfill indexing: {}",
         if args.disable_sync_historical {
             "yes"
         } else {

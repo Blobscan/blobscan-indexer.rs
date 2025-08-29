@@ -8,6 +8,8 @@ use utils::{
     telemetry::{get_subscriber, init_subscriber},
 };
 
+use crate::indexer::IndexerResult;
+
 mod args;
 mod clients;
 mod context;
@@ -44,10 +46,20 @@ async fn run() -> AnyhowResult<()> {
 
     print_banner(&args, &env);
 
-    Indexer::try_new(&env, &args)?
-        .run(args.from_slot, args.to_slot)
-        .await
-        .map_err(|err| anyhow!(err))
+    let mut indexer = Indexer::try_new(&env, &args)?;
+    let res: IndexerResult<()>;
+
+    if let Some(from_slot) = args.from_slot {
+        if let Some(to_slot) = args.to_slot {
+            res = indexer.index_block_range(from_slot, to_slot).await;
+        } else {
+            res = indexer.index_from(from_slot).await;
+        }
+    } else {
+        res = indexer.index().await;
+    }
+
+    res.map_err(|err| err.into())
 }
 
 #[tokio::main]

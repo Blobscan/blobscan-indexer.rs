@@ -1,8 +1,22 @@
-use super::error::{IndexerError, IndexingError};
+use tokio::{
+    sync::{
+        mpsc::{Receiver as MPSCReceiver, Sender as MPSCSender},
+        oneshot::{Receiver as OneshotReceiver, Sender as OneshotSender},
+    },
+    task::JoinHandle,
+};
 
-pub type IndexerResult<T> = Result<T, IndexerError>;
+use crate::indexer::error::IndexerTaskError;
 
-pub enum IndexerTaskMessage {
-    Done,
-    Error(IndexingError),
+pub struct ErrorResport {
+    pub task_name: String,
+    pub error: IndexerTaskError,
 }
+
+pub type TaskResult = ();
+pub type TaskResultChannelSender = OneshotSender<TaskResult>;
+pub type TaskResultChannelReceiver = OneshotReceiver<TaskResult>;
+pub type TaskErrorChannelSender = MPSCSender<ErrorResport>;
+pub type TaskErrorChannelReceiver = MPSCReceiver<ErrorResport>;
+
+pub type IndexingTaskJoinHandle = JoinHandle<()>;
