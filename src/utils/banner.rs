@@ -65,10 +65,9 @@ pub fn print_banner(args: &Args, env: &Environment) {
     println!("=======================================================");
 
     println!("Network: {:?}", env.network_name);
+
     if let Some(dencun_fork_slot) = env.dencun_fork_slot {
-        println!("Dencun fork slot: {dencun_fork_slot}");
-    } else {
-        println!("Dencun fork slot: {}", env.network_name.dencun_fork_slot());
+        println!("Custom dencun fork slot: {dencun_fork_slot}");
     }
 
     if let Some(from_slot) = args.from_slot.clone() {

@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result as AnyhowResult};
+use anyhow::{anyhow, Context as AnyhowContext, Result as AnyhowResult};
 use args::Args;
 use clap::Parser;
 use env::Environment;
@@ -8,7 +8,7 @@ use utils::{
     telemetry::{get_subscriber, init_subscriber},
 };
 
-use crate::indexer::IndexerResult;
+use crate::{context::Context, indexer::IndexerResult};
 
 mod args;
 mod clients;
@@ -46,7 +46,8 @@ async fn run() -> AnyhowResult<()> {
 
     print_banner(&args, &env);
 
-    let mut indexer = Indexer::try_new(&env, &args)?;
+    let context = Context::try_new(&env, &args).with_context(|| ("Failed to create context"))?;
+    let mut indexer = Indexer::new(context, args.disable_sync_historical);
     let res: IndexerResult<()>;
 
     if let Some(from_slot) = args.from_slot {

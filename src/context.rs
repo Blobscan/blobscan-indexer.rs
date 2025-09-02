@@ -15,15 +15,8 @@ use crate::{
         blobscan::{BlobscanClient, CommonBlobscanClient, Config as BlobscanClientConfig},
     },
     env::Environment,
+    network::Network,
 };
-
-pub struct Config {
-    pub blobscan_api_endpoint: String,
-    pub beacon_node_url: String,
-    pub execution_node_endpoint: String,
-    pub secret_key: String,
-    pub syncing_settings: SyncingSettings,
-}
 
 pub struct SyncingSettings {
     pub concurrency: u32,
@@ -47,6 +40,7 @@ impl From<&Args> for SyncingSettings {
 pub trait CommonContext: Send + Sync + DynClone {
     fn beacon_client(&self) -> &dyn CommonBeaconClient;
     fn blobscan_client(&self) -> &dyn CommonBlobscanClient;
+    fn network(&self) -> &Network;
     fn provider(&self) -> &dyn Provider<Ethereum>;
     fn syncing_settings(&self) -> &SyncingSettings;
 }
@@ -55,6 +49,7 @@ dyn_clone::clone_trait_object!(CommonContext);
 // dyn_clone::clone_trait_object!(CommonContext<MockProvider>);
 
 struct ContextRef {
+    pub network: Network,
     pub beacon_client: Box<dyn CommonBeaconClient>,
     pub blobscan_client: Box<dyn CommonBlobscanClient>,
     pub provider: Box<dyn Provider<Ethereum>>,
@@ -67,14 +62,7 @@ pub struct Context {
 }
 
 impl Context {
-    pub fn try_new(config: Config) -> AnyhowResult<Self> {
-        let Config {
-            blobscan_api_endpoint,
-            beacon_node_url,
-            execution_node_endpoint,
-            secret_key,
-            syncing_settings,
-        } = config;
+    pub fn try_new(env: &Environment, args: &Args) -> AnyhowResult<Self> {
         let exp_backoff = Some(ExponentialBackoffBuilder::default().build());
 
         let client = reqwest::Client::builder()
@@ -82,23 +70,29 @@ impl Context {
             .build()?;
         let provider = ProviderBuilder::new()
             .network::<Ethereum>()
-            .connect_http(execution_node_endpoint.parse()?);
+            .connect_http(env.execution_node_endpoint.parse()?);
+        let network = Network::from(env);
 
         Ok(Self {
             inner: Arc::new(ContextRef {
-                syncing_settings,
+                network,
+                syncing_settings: SyncingSettings {
+                    concurrency: args.num_threads.resolve(),
+                    checkpoint_size: args.slots_per_save,
+                    disable_checkpoints: args.disable_sync_checkpoint_save,
+                },
                 blobscan_client: Box::new(BlobscanClient::try_with_client(
                     client.clone(),
                     BlobscanClientConfig {
-                        base_url: blobscan_api_endpoint,
-                        secret_key,
+                        base_url: env.blobscan_api_endpoint.clone(),
+                        secret_key: env.secret_key.clone(),
                         exp_backoff: exp_backoff.clone(),
                     },
                 )?),
                 beacon_client: Box::new(BeaconClient::try_with_client(
                     client,
                     BeaconClientConfig {
-                        base_url: beacon_node_url,
+                        base_url: env.beacon_node_endpoint.clone(),
                         exp_backoff,
                     },
                 )?),
@@ -125,17 +119,9 @@ impl CommonContext for Context {
     fn syncing_settings(&self) -> &SyncingSettings {
         &self.inner.syncing_settings
     }
-}
 
-impl From<(&Environment, &Args)> for Config {
-    fn from((env, args): (&Environment, &Args)) -> Self {
-        Self {
-            blobscan_api_endpoint: env.blobscan_api_endpoint.clone(),
-            beacon_node_url: env.beacon_node_endpoint.clone(),
-            execution_node_endpoint: env.execution_node_endpoint.clone(),
-            secret_key: env.secret_key.clone(),
-            syncing_settings: args.into(),
-        }
+    fn network(&self) -> &Network {
+        &self.inner.network
     }
 }
 

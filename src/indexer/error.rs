@@ -6,8 +6,6 @@ use crate::{
 
 #[derive(Debug, thiserror::Error)]
 pub enum IndexerError {
-    #[error("failed to create indexer")]
-    CreationFailure(#[source] anyhow::Error),
     #[error("failed to retrieve blobscan's sync state")]
     IndexerStateRetrievalError(#[from] ClientError),
     #[error("task \"{task_name}\" failed: {error}")]

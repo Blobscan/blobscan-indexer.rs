@@ -1,13 +1,10 @@
 use alloy::primitives::B256;
-use anyhow::anyhow;
 use tokio::sync::mpsc::{self};
 use tracing::{error, info, info_span};
 
 use crate::{
-    args::Args,
     clients::beacon::types::{BlockHeader, BlockId, BlockIdResolution},
-    context::{CommonContext, Config as ContextConfig, Context},
-    env::Environment,
+    context::{CommonContext, Context},
     indexer::{
         tasks::{
             indexing::{IndexingTask, RunParams as IndexingTaskRunParams},
@@ -28,8 +25,7 @@ pub mod types;
 
 pub struct Indexer {
     context: Box<dyn CommonContext>,
-    dencun_fork_slot: u32,
-    disable_sync_historical: bool,
+    disable_backfill: bool,
 
     error_report_tx: TaskErrorChannelSender,
     error_report_rx: TaskErrorChannelReceiver,
@@ -38,33 +34,15 @@ pub struct Indexer {
 pub type IndexerResult<T> = Result<T, IndexerError>;
 
 impl Indexer {
-    pub fn try_new(env: &Environment, args: &Args) -> IndexerResult<Self> {
-        let context = match Context::try_new(ContextConfig::from((env, args))) {
-            Ok(c) => c,
-            Err(error) => {
-                error!(?error, "Failed to create context");
-
-                return Err(IndexerError::CreationFailure(anyhow!(
-                    "Failed to create context: {:?}",
-                    error
-                )));
-            }
-        };
-
-        let disable_sync_historical = args.disable_sync_historical;
-
-        let dencun_fork_slot = env
-            .dencun_fork_slot
-            .unwrap_or(env.network_name.dencun_fork_slot());
+    pub fn new(context: Context, disable_backfill: bool) -> Self {
         let (error_report_tx, error_report_rx) = mpsc::channel::<ErrorResport>(32);
 
-        Ok(Self {
+        Self {
             context: Box::new(context),
-            dencun_fork_slot,
-            disable_sync_historical,
+            disable_backfill,
             error_report_rx,
             error_report_tx,
-        })
+        }
     }
 
     pub async fn index_from(&mut self, from_block_id: BlockId) -> IndexerResult<()> {
@@ -133,10 +111,10 @@ impl Indexer {
             "Starting indexer…",
         );
 
-        let backfill_completed =
-            lowest_synced_slot.map_or(false, |slot| slot <= self.dencun_fork_slot);
+        let dencun_fork_slot = self.context.network().dencun_fork_slot;
+        let backfill_completed = lowest_synced_slot.map_or(false, |slot| slot <= dencun_fork_slot);
 
-        if !self.disable_sync_historical && !backfill_completed {
+        if !self.disable_backfill && !backfill_completed {
             let task = IndexingTask::new(
                 "backfill",
                 self.context.clone(),
@@ -155,7 +133,7 @@ impl Indexer {
                 error_report_tx: self.error_report_tx.clone(),
                 result_report_tx: None,
                 from_block_id: current_lowest_block_id,
-                to_block_id: self.dencun_fork_slot.into(),
+                to_block_id: dencun_fork_slot.into(),
                 prev_block: None,
                 checkpoint: Some(CheckpointType::Lower),
             });
