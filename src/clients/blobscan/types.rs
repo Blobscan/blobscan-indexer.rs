@@ -227,7 +227,7 @@ impl<'a>
 impl<'a> From<(&'a BeaconBlob, u32, &B256)> for Blob {
     fn from((blob, index, tx_hash): (&'a BeaconBlob, u32, &B256)) -> Self {
         Self {
-            tx_hash: tx_hash.clone(),
+            tx_hash: *tx_hash,
             index,
             commitment: blob.kzg_commitment,
             proof: blob.kzg_proof,

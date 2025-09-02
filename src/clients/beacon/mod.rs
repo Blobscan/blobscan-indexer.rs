@@ -95,8 +95,7 @@ impl CommonBeaconClient for BeaconClient {
     }
 
     async fn get_spec(&self) -> ClientResult<Option<Spec>> {
-        let path = format!("v1/config/spec");
-        let url = self.base_url.join(path.as_str())?;
+        let url = self.base_url.join("v1/config/spec")?;
 
         json_get!(&self.client, url, SpecResponse, self.exp_backoff.clone()).map(|res| match res {
             Some(r) => Some(r.data),

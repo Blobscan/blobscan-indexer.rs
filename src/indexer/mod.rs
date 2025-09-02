@@ -112,7 +112,7 @@ impl Indexer {
         );
 
         let dencun_fork_slot = self.context.network().dencun_fork_slot;
-        let backfill_completed = lowest_synced_slot.map_or(false, |slot| slot <= dencun_fork_slot);
+        let backfill_completed = lowest_synced_slot.is_some_and(|slot| slot <= dencun_fork_slot);
 
         if !self.disable_backfill && !backfill_completed {
             let task = IndexingTask::new(
@@ -144,7 +144,7 @@ impl Indexer {
             last_synced_slot,
         });
 
-        while let Some(error_report) = self.error_report_rx.recv().await {
+        if let Some(error_report) = self.error_report_rx.recv().await {
             return Err(IndexerError::IndexingTaskError {
                 task_name: error_report.task_name,
                 error: error_report.error,
