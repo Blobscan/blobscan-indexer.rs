@@ -64,7 +64,7 @@ pub fn print_banner(args: &Args, env: &Environment) {
     println!("Blobscan indexer (EIP-4844 blob indexer) - blobscan.com");
     println!("=======================================================");
 
-    println!("Network: {:?}", env.network_name);
+    println!("Network: {}", env.network_name);
 
     if let Some(dencun_fork_slot) = env.dencun_fork_slot {
         println!("Custom dencun fork slot: {dencun_fork_slot}");

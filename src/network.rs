@@ -1,11 +1,10 @@
-use std::fmt;
+use std::{fmt, str::FromStr};
 
-use serde::{Deserialize, Serialize};
+use anyhow::anyhow;
 
 use crate::env::Environment;
 
-#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy)]
 pub enum EVMNetworkName {
     Mainnet,
     Goerli,
@@ -16,17 +15,16 @@ pub enum EVMNetworkName {
     Chiado,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy)]
 pub enum NetworkName {
     Preset(EVMNetworkName),
     Devnet,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy)]
 pub struct Network {
     pub name: NetworkName,
-    pub chain_id: u32,
+    pub chain_id: u64,
     pub dencun_fork_slot: u32,
     pub epoch: u32,
 }
@@ -81,7 +79,7 @@ impl Network {
     }
 
     /// Construct a custom devnet with your own parameters.
-    pub fn new_devnet(chain_id: u32, dencun_fork_slot: u32, epoch: u32) -> Self {
+    pub fn new_devnet(chain_id: u64, dencun_fork_slot: u32, epoch: u32) -> Self {
         Network {
             name: NetworkName::Devnet,
             chain_id,
@@ -118,6 +116,27 @@ impl fmt::Display for NetworkName {
             NetworkName::Preset(net) => net.fmt(f),
             NetworkName::Devnet => write!(f, "devnet"),
         }
+    }
+}
+
+impl FromStr for NetworkName {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, anyhow::Error> {
+        let network = match s.to_lowercase().as_str() {
+            "mainnet" => EVMNetworkName::Mainnet.into(),
+            "goerli" => EVMNetworkName::Goerli.into(),
+            "sepolia" => EVMNetworkName::Sepolia.into(),
+            "holesky" => EVMNetworkName::Holesky.into(),
+            "hoodi" => EVMNetworkName::Hoodi.into(),
+            "chiado" => EVMNetworkName::Chiado.into(),
+            "devnet" => NetworkName::Devnet,
+            unknown_network => {
+                return Err(anyhow!("{unknown_network} not supported"));
+            }
+        };
+
+        Ok(network)
     }
 }
 

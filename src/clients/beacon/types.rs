@@ -36,18 +36,28 @@ impl fmt::Display for Topic {
 }
 
 #[derive(Deserialize, Debug)]
+pub struct SpecResponse {
+    pub data: Spec,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct Spec {
+    #[serde(rename = "DEPOSIT_NETWORK_ID", deserialize_with = "deserialize_u64")]
+    pub deposit_network_id: u64,
+}
+#[derive(Deserialize, Debug)]
 pub struct Block {
     pub blob_kzg_commitments: Option<Vec<KzgCommitment>>,
     pub execution_payload: Option<ExecutionPayload>,
     pub parent_root: B256,
-    #[serde(deserialize_with = "deserialize_number")]
+    #[serde(deserialize_with = "deserialize_u32")]
     pub slot: u32,
 }
 
 #[derive(Deserialize, Debug)]
 pub struct ExecutionPayload {
     pub block_hash: B256,
-    #[serde(deserialize_with = "deserialize_number")]
+    #[serde(deserialize_with = "deserialize_u32")]
     pub block_number: u32,
 }
 
@@ -60,7 +70,7 @@ pub struct BlockBody {
 pub struct BlockMessage {
     pub body: BlockBody,
     pub parent_root: B256,
-    #[serde(deserialize_with = "deserialize_number")]
+    #[serde(deserialize_with = "deserialize_u32")]
     pub slot: u32,
 }
 
@@ -111,13 +121,13 @@ pub struct InnerBlockHeader {
 #[derive(Deserialize, Debug)]
 pub struct BlockHeaderMessage {
     pub parent_root: B256,
-    #[serde(deserialize_with = "deserialize_number")]
+    #[serde(deserialize_with = "deserialize_u32")]
     pub slot: u32,
 }
 
 #[derive(Deserialize, Debug)]
 pub struct HeadEventData {
-    #[serde(deserialize_with = "deserialize_number")]
+    #[serde(deserialize_with = "deserialize_u32")]
     pub slot: u32,
     #[allow(dead_code)]
     pub block: B256,
@@ -128,13 +138,22 @@ pub struct FinalizedCheckpointEventData {
     pub block: B256,
 }
 
-fn deserialize_number<'de, D>(deserializer: D) -> Result<u32, D::Error>
+fn deserialize_u32<'de, D>(deserializer: D) -> Result<u32, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
     let value = String::deserialize(deserializer)?;
 
     value.parse::<u32>().map_err(serde::de::Error::custom)
+}
+
+fn deserialize_u64<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = String::deserialize(deserializer)?;
+
+    value.parse::<u64>().map_err(serde::de::Error::custom)
 }
 
 impl BlockId {

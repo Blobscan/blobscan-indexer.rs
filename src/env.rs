@@ -5,7 +5,7 @@ use crate::network::{EVMNetworkName, NetworkName};
 
 #[derive(Deserialize, Debug)]
 pub struct Environment {
-    #[serde(default = "default_network")]
+    #[serde(default = "default_network", deserialize_with = "deserialize_network")]
     pub network_name: NetworkName,
     #[serde(default = "default_blobscan_api_endpoint")]
     pub blobscan_api_endpoint: String,
@@ -32,6 +32,17 @@ fn default_beacon_node_endpoint() -> String {
 
 fn default_execution_node_endpoint() -> String {
     "http://localhost:8545".into()
+}
+
+fn deserialize_network<'de, D>(deserializer: D) -> Result<NetworkName, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = String::deserialize(deserializer)?;
+
+    value
+        .parse::<NetworkName>()
+        .map_err(serde::de::Error::custom)
 }
 
 impl Environment {

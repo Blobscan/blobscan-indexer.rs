@@ -4,7 +4,7 @@ use alloy::{
     network::Ethereum,
     providers::{Provider, ProviderBuilder},
 };
-use anyhow::Result as AnyhowResult;
+use anyhow::{anyhow, bail, Result as AnyhowResult};
 use backoff::ExponentialBackoffBuilder;
 use dyn_clone::DynClone;
 
@@ -15,7 +15,7 @@ use crate::{
         blobscan::{BlobscanClient, CommonBlobscanClient, Config as BlobscanClientConfig},
     },
     env::Environment,
-    network::Network,
+    network::{Network, NetworkName},
 };
 
 pub struct SyncingSettings {
@@ -62,7 +62,7 @@ pub struct Context {
 }
 
 impl Context {
-    pub fn try_new(env: &Environment, args: &Args) -> AnyhowResult<Self> {
+    pub async fn try_new(env: &Environment, args: &Args) -> AnyhowResult<Self> {
         let exp_backoff = Some(ExponentialBackoffBuilder::default().build());
 
         let client = reqwest::Client::builder()
@@ -73,7 +73,7 @@ impl Context {
             .connect_http(env.execution_node_endpoint.parse()?);
         let network = Network::from(env);
 
-        Ok(Self {
+        let ctx = Self {
             inner: Arc::new(ContextRef {
                 network,
                 syncing_settings: SyncingSettings {
@@ -99,7 +99,39 @@ impl Context {
                 // Provider::<HttpProvider>::try_from(execution_node_endpoint)?
                 provider: Box::new(provider),
             }),
-        })
+        };
+
+        ctx.validate_clients_consistency().await?;
+
+        Ok(ctx)
+    }
+
+    async fn validate_clients_consistency(&self) -> AnyhowResult<()> {
+        let execution_chain_id = self.provider().get_chain_id().await?;
+        let consensus_spec = self.beacon_client().get_spec().await?;
+        let network = self.network();
+
+        match consensus_spec {
+            Some(spec) => {
+                let deposit_network_id = spec.deposit_network_id;
+                if deposit_network_id != execution_chain_id {
+                    bail!(
+                        "Execution and Consensus clients mismatch: \n consensus deposit_network_id = {deposit_network_id},  execution chain_id = {execution_chain_id}"
+                    );
+                }
+
+                if let NetworkName::Preset(p) = network.name {
+                    if network.chain_id != execution_chain_id {
+                        bail!("Environment network mismatch for '{p}': expected chain_id={}, got {} from execution client", network.chain_id, execution_chain_id);
+                    }
+                }
+            }
+            None => {
+                return Err(anyhow!("No consensus spec found"));
+            }
+        };
+
+        Ok(())
     }
 }
 

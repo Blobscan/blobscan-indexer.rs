@@ -12,7 +12,10 @@ use mockall::automock;
 use types::BlockHeader;
 
 use crate::{
-    clients::{beacon::types::BlockHeaderResponse, common::ClientResult},
+    clients::{
+        beacon::types::{BlockHeaderResponse, Spec, SpecResponse},
+        common::ClientResult,
+    },
     json_get,
 };
 
@@ -38,6 +41,7 @@ pub trait CommonBeaconClient: Send + Sync + Debug {
     async fn get_block(&self, block_id: BlockId) -> ClientResult<Option<Block>>;
     async fn get_block_header(&self, block_id: BlockId) -> ClientResult<Option<BlockHeader>>;
     async fn get_blobs(&self, block_id: BlockId) -> ClientResult<Option<Vec<Blob>>>;
+    async fn get_spec(&self) -> ClientResult<Option<Spec>>;
     fn subscribe_to_events(&self, topics: &[Topic]) -> ClientResult<EventSource>;
 }
 
@@ -85,6 +89,16 @@ impl CommonBeaconClient for BeaconClient {
         let url = self.base_url.join(path.as_str())?;
 
         json_get!(&self.client, url, BlobsResponse, self.exp_backoff.clone()).map(|res| match res {
+            Some(r) => Some(r.data),
+            None => None,
+        })
+    }
+
+    async fn get_spec(&self) -> ClientResult<Option<Spec>> {
+        let path = format!("v1/config/spec");
+        let url = self.base_url.join(path.as_str())?;
+
+        json_get!(&self.client, url, SpecResponse, self.exp_backoff.clone()).map(|res| match res {
             Some(r) => Some(r.data),
             None => None,
         })
