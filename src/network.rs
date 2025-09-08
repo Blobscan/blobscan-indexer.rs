@@ -126,6 +126,7 @@ impl FromStr for NetworkName {
         let network = match s.to_lowercase().as_str() {
             "mainnet" => EVMNetworkName::Mainnet.into(),
             "goerli" => EVMNetworkName::Goerli.into(),
+            "gnosis" => EVMNetworkName::Gnosis.into(),
             "sepolia" => EVMNetworkName::Sepolia.into(),
             "holesky" => EVMNetworkName::Holesky.into(),
             "hoodi" => EVMNetworkName::Hoodi.into(),
