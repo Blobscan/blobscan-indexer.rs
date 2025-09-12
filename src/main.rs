@@ -3,6 +3,7 @@ use args::Args;
 use clap::Parser;
 use env::Environment;
 use indexer::Indexer;
+use tracing::error;
 use utils::{
     banner::print_banner,
     telemetry::{get_subscriber, init_subscriber},
@@ -68,7 +69,8 @@ async fn run() -> AnyhowResult<()> {
 #[tokio::main]
 async fn main() {
     if let Err(err) = run().await {
-        eprintln!("Error: {err:?}");
+        error!("Error: {err:?}");
+
         std::process::exit(1);
     }
 }
