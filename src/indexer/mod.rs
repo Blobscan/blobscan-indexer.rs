@@ -53,9 +53,7 @@ impl Indexer {
         self.start_sse_listening_task(SSEIndexingTaskRunParams {
             last_synced_block: None,
             last_synced_slot: Some(slot),
-        })
-        .await
-        .unwrap();
+        });
 
         Ok(())
     }
