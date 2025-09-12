@@ -61,7 +61,7 @@ pub struct Args {
     pub num_threads: NumThreads,
 
     /// Amount of slots to be processed before saving latest synced slot in the db
-    #[arg(short, long, default_value_t = 1000)]
+    #[arg(short, long, default_value_t = 50)]
     pub slots_per_save: u32,
 
     /// Disable slot checkpoint saving when syncing
