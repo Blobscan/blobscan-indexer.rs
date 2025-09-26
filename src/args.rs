@@ -2,7 +2,7 @@ use clap::{ArgAction, Parser};
 
 use std::str::FromStr;
 
-use crate::clients::beacon::types::BlockId;
+use blob_indexer::clients::beacon::types::BlockId;
 
 #[derive(Debug, Clone)]
 pub enum NumThreads {

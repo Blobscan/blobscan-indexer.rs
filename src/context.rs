@@ -9,12 +9,10 @@ use backoff::ExponentialBackoffBuilder;
 use dyn_clone::DynClone;
 
 use crate::{
-    args::Args,
     clients::{
         beacon::{BeaconClient, CommonBeaconClient, Config as BeaconClientConfig},
         blobscan::{BlobscanClient, CommonBlobscanClient, Config as BlobscanClientConfig},
     },
-    env::Environment,
     network::{Network, NetworkName},
 };
 
@@ -22,16 +20,6 @@ pub struct SyncingSettings {
     pub concurrency: u32,
     pub checkpoint_size: u32,
     pub disable_checkpoints: bool,
-}
-
-impl From<&Args> for SyncingSettings {
-    fn from(args: &Args) -> Self {
-        SyncingSettings {
-            concurrency: args.num_threads.resolve(),
-            checkpoint_size: args.slots_per_save,
-            disable_checkpoints: args.disable_sync_checkpoint_save,
-        }
-    }
 }
 
 // #[cfg(test)]
@@ -61,38 +49,41 @@ pub struct Context {
     inner: Arc<ContextRef>,
 }
 
-impl Context {
-    pub async fn try_new(env: &Environment, args: &Args) -> AnyhowResult<Self> {
-        let exp_backoff = Some(ExponentialBackoffBuilder::default().build());
+pub struct ContextConfig {
+    pub network: Network,
+    pub beacon_api_base_url: String,
+    pub blobscan_api_base_url: String,
+    pub blobscan_secret_key: String,
+    pub execution_node_base_url: String,
+    pub syncing_settings: SyncingSettings,
+}
 
+impl Context {
+    pub async fn try_new(config: ContextConfig) -> AnyhowResult<Self> {
+        let exp_backoff = Some(ExponentialBackoffBuilder::default().build());
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(16))
             .build()?;
         let provider = ProviderBuilder::new()
             .network::<Ethereum>()
-            .connect_http(env.execution_node_endpoint.parse()?);
-        let network = Network::from(env);
+            .connect_http(config.execution_node_base_url.parse()?);
 
         let ctx = Self {
             inner: Arc::new(ContextRef {
-                network,
-                syncing_settings: SyncingSettings {
-                    concurrency: args.num_threads.resolve(),
-                    checkpoint_size: args.slots_per_save,
-                    disable_checkpoints: args.disable_sync_checkpoint_save,
-                },
+                network: config.network,
+                syncing_settings: config.syncing_settings,
                 blobscan_client: Box::new(BlobscanClient::try_with_client(
                     client.clone(),
                     BlobscanClientConfig {
-                        base_url: env.blobscan_api_endpoint.clone(),
-                        secret_key: env.secret_key.clone(),
+                        base_url: config.blobscan_api_base_url.clone(),
+                        secret_key: config.blobscan_secret_key.clone(),
                         exp_backoff: exp_backoff.clone(),
                     },
                 )?),
                 beacon_client: Box::new(BeaconClient::try_with_client(
                     client,
                     BeaconClientConfig {
-                        base_url: env.beacon_node_endpoint.clone(),
+                        base_url: config.beacon_api_base_url.clone(),
                         exp_backoff,
                     },
                 )?),

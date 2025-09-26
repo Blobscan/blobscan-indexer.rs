@@ -2,8 +2,6 @@ use std::{fmt, str::FromStr};
 
 use anyhow::anyhow;
 
-use crate::env::Environment;
-
 #[derive(Debug, Clone, Copy)]
 pub enum EVMNetworkName {
     Mainnet,
@@ -138,14 +136,5 @@ impl FromStr for NetworkName {
         };
 
         Ok(network)
-    }
-}
-
-impl From<&Environment> for Network {
-    fn from(env: &Environment) -> Self {
-        match env.network_name {
-            NetworkName::Preset(name) => Network::new(name),
-            NetworkName::Devnet => Network::new_devnet(0, env.dencun_fork_slot.unwrap_or(0), 0),
-        }
     }
 }
