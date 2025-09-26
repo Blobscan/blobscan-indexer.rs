@@ -1,25 +1,18 @@
 use anyhow::{anyhow, Context as AnyhowContext, Result as AnyhowResult};
-use args::Args;
 use clap::Parser;
-use env::Environment;
-use indexer::Indexer;
 use tracing::error;
-use utils::{
-    banner::print_banner,
-    telemetry::{get_subscriber, init_subscriber},
+
+use blob_indexer::{
+    args::Args,
+    context::Context,
+    env::Environment,
+    indexer::Indexer,
+    indexer::IndexerResult,
+    utils::{
+        banner::print_banner,
+        telemetry::{get_subscriber, init_subscriber},
+    },
 };
-
-use crate::{context::Context, indexer::IndexerResult};
-
-mod args;
-mod clients;
-mod context;
-mod env;
-mod indexer;
-mod network;
-mod slots_processor;
-mod synchronizer;
-mod utils;
 
 async fn run() -> AnyhowResult<()> {
     dotenv::dotenv().ok();
