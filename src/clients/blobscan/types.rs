@@ -52,15 +52,6 @@ pub struct Blob {
     pub index: u32,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct FailedSlotsChunk {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub id: Option<u32>,
-    pub initial_slot: u32,
-    pub final_slot: u32,
-}
-
 #[derive(Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct BlockchainSyncStateRequest {
@@ -119,16 +110,6 @@ impl fmt::Debug for Blob {
             "Blob {{ versioned_hash: {}, commitment: {}, tx_hash: {}, index: {}, data: [omitted] }}",
             self.versioned_hash, self.commitment, self.tx_hash, self.index
         )
-    }
-}
-
-impl From<(u32, u32)> for FailedSlotsChunk {
-    fn from((initial_slot, final_slot): (u32, u32)) -> Self {
-        Self {
-            id: None,
-            initial_slot,
-            final_slot,
-        }
     }
 }
 

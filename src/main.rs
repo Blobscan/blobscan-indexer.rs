@@ -49,7 +49,7 @@ async fn run() -> AnyhowResult<()> {
 
     let context = Context::try_new(&env, &args)
         .await
-        .with_context(|| ("Failed to create context"))?;
+        .with_context(|| "Failed to create context")?;
     let mut indexer = Indexer::new(context, args.disable_sync_historical);
     let res: IndexerResult<()>;
 
