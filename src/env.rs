@@ -1,7 +1,7 @@
 use envy::Error::MissingValue;
 use serde::Deserialize;
 
-use crate::network::{EVMNetworkName, NetworkName};
+use blob_indexer::network::{EVMNetworkName, NetworkName};
 
 #[derive(Deserialize, Debug)]
 pub struct Environment {

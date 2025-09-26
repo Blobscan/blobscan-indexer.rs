@@ -1,6 +1,7 @@
 use std::{fmt, str::FromStr};
 
 use alloy::{consensus::Bytes48, eips::eip4844::HeapBlob, primitives::B256};
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use crate::clients::common::ClientError;
@@ -258,13 +259,15 @@ pub enum BlockIdResolutionError {
     },
 }
 
-pub trait BlockIdResolution {
+#[async_trait]
+pub trait BlockIdResolution: Send + Sync {
     async fn resolve_to_slot(
         &self,
         beacon_client: &dyn CommonBeaconClient,
     ) -> Result<u32, BlockIdResolutionError>;
 }
 
+#[async_trait]
 impl BlockIdResolution for BlockId {
     async fn resolve_to_slot(
         &self,

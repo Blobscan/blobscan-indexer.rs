@@ -1,25 +1,19 @@
 use anyhow::{anyhow, Context as AnyhowContext, Result as AnyhowResult};
-use args::Args;
 use clap::Parser;
-use env::Environment;
-use indexer::Indexer;
 use tracing::error;
-use utils::{
-    banner::print_banner,
-    telemetry::{get_subscriber, init_subscriber},
+
+use blob_indexer::{
+    context::{Context, ContextConfig, SyncingSettings},
+    indexer::{Indexer, IndexerResult},
+    network::{Network, NetworkName},
+    utils::telemetry::{get_subscriber, init_subscriber},
 };
 
-use crate::{context::Context, indexer::IndexerResult};
+use crate::{args::Args, banner::print_banner, env::Environment};
 
 mod args;
-mod clients;
-mod context;
+mod banner;
 mod env;
-mod indexer;
-mod network;
-mod slots_processor;
-mod synchronizer;
-mod utils;
 
 async fn run() -> AnyhowResult<()> {
     dotenv::dotenv().ok();
@@ -47,7 +41,24 @@ async fn run() -> AnyhowResult<()> {
 
     print_banner(&args, &env);
 
-    let context = Context::try_new(&env, &args)
+    let network = match env.network_name {
+        NetworkName::Preset(name) => Network::new(name),
+        NetworkName::Devnet => Network::new_devnet(0, env.dencun_fork_slot.unwrap_or(0), 0),
+    };
+    let syncing_settings = SyncingSettings {
+        checkpoint_size: args.slots_per_save,
+        concurrency: args.num_threads.resolve(),
+        disable_checkpoints: args.disable_sync_checkpoint_save,
+    };
+    let config = ContextConfig {
+        beacon_api_base_url: env.beacon_node_endpoint,
+        blobscan_api_base_url: env.blobscan_api_endpoint,
+        blobscan_secret_key: env.secret_key,
+        execution_node_base_url: env.execution_node_endpoint,
+        network,
+        syncing_settings,
+    };
+    let context = Context::try_new(config)
         .await
         .with_context(|| "Failed to create context")?;
     let mut indexer = Indexer::new(context, args.disable_sync_historical);
