@@ -1,6 +1,10 @@
 [package]
 name = "blob-indexer"
+description = "Blob indexer for the Blobscan explorer"
 version = "0.2.2"
+license = "MIT"
+repository = "https://github.com/Blobscan/blobscan-indexer.rs"
+readme = "README.md"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
