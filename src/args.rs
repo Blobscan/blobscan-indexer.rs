@@ -44,7 +44,7 @@ impl NumThreads {
     }
 }
 
-/// Blobscan's indexer for the EIP-4844 upgrade.
+/// Blobscan's indexer for blob transactions (EIP-4844).
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 pub struct Args {
@@ -68,7 +68,7 @@ pub struct Args {
     #[arg(short = 'c', long, action = ArgAction::SetTrue)]
     pub disable_sync_checkpoint_save: bool,
 
-    /// Disable historical synchronization
+    /// Disable backfill indexing thread
     #[arg(short = 'd', long, action = ArgAction::SetTrue)]
     pub disable_sync_historical: bool,
 }
