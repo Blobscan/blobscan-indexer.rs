@@ -1,7 +1,8 @@
+use alloy::primitives::B256;
 use anyhow::anyhow;
 use futures::{FutureExt, StreamExt};
 use reqwest_eventsource::Event;
-use tokio::sync::oneshot;
+use tokio::{sync::oneshot, task::JoinHandle};
 use tracing::{debug, info, info_span, Instrument};
 
 use crate::{
@@ -28,6 +29,8 @@ pub enum SSEIndexingError {
     ConnectionFailure(#[from] reqwest_eventsource::Error),
     #[error("failed to subscribe to SSE stream")]
     FailedSubscription(#[source] ClientError),
+    #[error("failed to fetch indexer state")]
+    IndexerStateRetrievalError(#[source] ClientError),
     #[error("unexpected event \"{0}\" received")]
     UnknownEvent(String),
     #[error(transparent)]
@@ -61,14 +64,6 @@ impl SSEIndexingTask {
         let last_synced_slot = params.last_synced_slot;
 
         tokio::spawn(async move {
-            let mut sse_synchronizer_builder = SynchronizerBuilder::default();
-
-            if let Some(prev_block) = last_synced_block.clone() {
-                sse_synchronizer_builder.with_last_synced_block(prev_block);
-            }
-
-            let mut sse_synchronizer = sse_synchronizer_builder.build(context.clone());
-
             let topics = vec![Topic::Head, Topic::FinalizedCheckpoint];
             let events = topics
                 .iter()
@@ -76,9 +71,19 @@ impl SSEIndexingTask {
                 .collect::<Vec<String>>()
                 .join(", ");
             let sse_indexing_span = info_span!("sse-indexing");
+            let mut last_sse_synced_block = last_synced_block;
+            let mut last_sse_synced_slot = last_synced_slot;
 
             loop {
                 let result: Result<(), SSEIndexingError> = async {
+                    let mut sse_synchronizer_builder = SynchronizerBuilder::default();
+
+                    if let Some(last_synced_block) = last_sse_synced_block.clone() {
+                        sse_synchronizer_builder.with_last_synced_block(last_synced_block);
+                    }
+
+                    let mut sse_synchronizer = sse_synchronizer_builder.build(context.clone());
+
                     let mut event_source = context
                         .beacon_client()
                         .subscribe_to_events(&topics)
@@ -87,8 +92,8 @@ impl SSEIndexingTask {
                     info!("Subscribed to stream events: {}", events);
 
                     let mut catchup_sync_rx: Option<TaskResultChannelReceiver> = None;
+                    let mut catchup_task_handle: Option<JoinHandle<()>> = None;
                     let mut is_first_event = true;
-                    let mut catchup_in_progress = false;
                     let head_event_span = info_span!("head");
                     let finalized_event_span =
                         info_span!("finalized_checkpoint");
@@ -107,20 +112,19 @@ impl SSEIndexingTask {
                                             serde_json::from_str::<HeadEventData>(&event.data)?;
                                         let head_slot = head_block_data.slot;
 
-                                        if catchup_in_progress {
                                             if let Some(Ok(_)) = catchup_sync_rx
                                                 .as_mut()
                                                 .and_then(|rx| rx.now_or_never())
                                             {
                                                 sse_synchronizer
                                                     .set_checkpoint(Some(CheckpointType::Upper));
-                                                catchup_in_progress = false;
+                                                catchup_sync_rx = None;
                                             }
-                                        }
+
 
                                         if is_first_event {
-                                            if let Some(last_synced_slot) = last_synced_slot {
-                                                if last_synced_slot < head_slot - 1 {
+                                            if let Some(last_sse_synced_slot) = last_sse_synced_slot {
+                                                if last_sse_synced_slot < head_slot - 1 {
                                                     let (channel_tx, channel_rx) =
                                                         oneshot::channel::<TaskResult>();
 
@@ -130,17 +134,18 @@ impl SSEIndexingTask {
                                                         Some(info_span!(parent: None, "catchup"))
                                                     );
 
-                                                    catchup_task.run(IndexingRunParams {
+
+                                                    catchup_task_handle = Some(catchup_task.run(IndexingRunParams {
                                                         error_report_tx: error_report_tx.clone(),
                                                         result_report_tx: Some(channel_tx),
-                                                        from_block_id: (last_synced_slot + 1)
+                                                        from_block_id: (last_sse_synced_slot + 1)
                                                             .into(),
                                                         to_block_id: head_slot.into(),
-                                                        prev_block: last_synced_block.clone(),
+                                                        prev_block: last_sse_synced_block.clone(),
                                                         checkpoint: Some(CheckpointType::Upper),
-                                                    });
+                                                    }));
 
-                                                    catchup_in_progress = true;
+
                                                     catchup_sync_rx = Some(channel_rx);
 
                                                     sse_synchronizer.set_checkpoint(None);
@@ -236,8 +241,29 @@ impl SSEIndexingTask {
                             Err(error) => {
                                 event_source.close();
 
+                                if let Some(catchup_task_handle) = catchup_task_handle {
+                                    catchup_task_handle.abort();
+                                }
+
                                 if let reqwest_eventsource::Error::StreamEnded = error {
                                     info!("SSE stream ended. Resubscribing to stream…");
+
+                                    let sync_state = context.blobscan_client().get_sync_state().await.map_err(SSEIndexingError::IndexerStateRetrievalError)?;
+
+                                    last_sse_synced_slot = sync_state.as_ref().and_then(|state| state.last_upper_synced_slot);
+                                    last_sse_synced_block = sync_state.as_ref().and_then(|state| {
+                                        match (
+                                            state.last_upper_synced_block_root,
+                                            state.last_upper_synced_block_slot,
+                                        ) {
+                                            (Some(root), Some(slot)) => Some(BlockHeader {
+                                                parent_root: B256::ZERO,
+                                                root,
+                                                slot,
+                                            }),
+                                            _ => None,
+                                        }
+                                    });
 
                                     break;
                                 } else {
@@ -259,6 +285,8 @@ impl SSEIndexingTask {
                         })
                         .await
                         .unwrap();
+
+                    break;
                 }
             }
         })
