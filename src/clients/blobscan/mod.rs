@@ -8,15 +8,15 @@ use reqwest::{Client, Url};
 
 #[cfg(test)]
 use mockall::automock;
-use types::{BlobscanBlock, ReorgedBlocksRequestBody};
+use types::{BlobscanBlock, HandleReorgRequestBody};
 
 use crate::{clients::common::ClientResult, json_get, json_put};
 
 use self::{
     jwt_manager::{Config as JWTManagerConfig, JWTManager},
     types::{
-        Blob, Block, BlockchainSyncState, BlockchainSyncStateRequest, BlockchainSyncStateResponse,
-        IndexRequest, Transaction,
+        Blob, Block, BlockchainSyncState, GetSyncStateResponse, IndexRequestBody, Transaction,
+        UpdateSyncStateRequestBody,
     },
 };
 
@@ -87,13 +87,13 @@ impl CommonBlobscanClient for BlobscanClient {
     ) -> ClientResult<()> {
         let url = self.base_url.join("indexer/block-txs-blobs")?;
         let token = self.jwt_manager.get_token()?;
-        let req = IndexRequest {
+        let body = IndexRequestBody {
             block,
             transactions,
             blobs,
         };
 
-        json_put!(&self.client, url, token, &req, self.exp_backoff.clone()).map(|_: Option<()>| ())
+        json_put!(&self.client, url, token, &body, self.exp_backoff.clone()).map(|_: Option<()>| ())
     }
 
     async fn get_block(&self, slot: u32) -> ClientResult<Option<BlobscanBlock>> {
@@ -110,7 +110,7 @@ impl CommonBlobscanClient for BlobscanClient {
         let url = self.base_url.join("indexer/reorged-blocks")?;
         let token = self.jwt_manager.get_token()?;
 
-        let req = ReorgedBlocksRequestBody {
+        let body = HandleReorgRequestBody {
             forwarded_blocks,
             rewinded_blocks,
         };
@@ -118,9 +118,9 @@ impl CommonBlobscanClient for BlobscanClient {
         json_put!(
             &self.client,
             url,
-            ReorgedBlocksRequestBody,
+            HandleReorgRequestBody,
             token,
-            &req,
+            &body,
             self.exp_backoff.clone()
         )
         .map(|_| ())
@@ -129,9 +129,9 @@ impl CommonBlobscanClient for BlobscanClient {
     async fn update_sync_state(&self, sync_state: BlockchainSyncState) -> ClientResult<()> {
         let url = self.base_url.join("blockchain-sync-state")?;
         let token = self.jwt_manager.get_token()?;
-        let req: BlockchainSyncStateRequest = sync_state.into();
+        let body: UpdateSyncStateRequestBody = sync_state.into();
 
-        json_put!(&self.client, url, token, &req, self.exp_backoff.clone()).map(|_: Option<()>| ())
+        json_put!(&self.client, url, token, &body, self.exp_backoff.clone()).map(|_: Option<()>| ())
     }
 
     async fn get_sync_state(&self) -> ClientResult<Option<BlockchainSyncState>> {
@@ -139,9 +139,9 @@ impl CommonBlobscanClient for BlobscanClient {
         json_get!(
             &self.client,
             url,
-            BlockchainSyncStateResponse,
+            GetSyncStateResponse,
             self.exp_backoff.clone()
         )
-        .map(|res: Option<BlockchainSyncStateResponse>| Some(res.unwrap().into()))
+        .map(|res: Option<GetSyncStateResponse>| Some(res.unwrap().into()))
     }
 }
