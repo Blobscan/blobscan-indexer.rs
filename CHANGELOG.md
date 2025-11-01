@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1](https://github.com/Blobscan/blobscan-indexer.rs/compare/v0.5.0...v0.5.1) - 2025-11-01
+
+### Added
+
+- add backoff retry support to PUT requests ([#110](https://github.com/Blobscan/blobscan-indexer.rs/pull/110))
+
 ## [0.5.0](https://github.com/Blobscan/blobscan-indexer.rs/compare/v0.4.4...v0.5.0) - 2025-10-01
 
 ### Fixed
