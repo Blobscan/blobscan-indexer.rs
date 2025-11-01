@@ -54,7 +54,7 @@ pub struct Blob {
 
 #[derive(Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
-pub struct BlockchainSyncStateRequest {
+pub struct UpdateSyncStateRequestBody {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_lower_synced_slot: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -69,7 +69,7 @@ pub struct BlockchainSyncStateRequest {
 
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
-pub struct BlockchainSyncStateResponse {
+pub struct GetSyncStateResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_lower_synced_slot: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -90,7 +90,7 @@ pub struct BlockchainSyncState {
 }
 
 #[derive(Serialize, Debug)]
-pub struct IndexRequest {
+pub struct IndexRequestBody {
     pub block: Block,
     pub transactions: Vec<Transaction>,
     pub blobs: Vec<Blob>,
@@ -98,7 +98,7 @@ pub struct IndexRequest {
 
 #[derive(Deserialize, Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
-pub struct ReorgedBlocksRequestBody {
+pub struct HandleReorgRequestBody {
     pub forwarded_blocks: Vec<B256>,
     pub rewinded_blocks: Vec<B256>,
 }
@@ -233,8 +233,8 @@ impl<'a> From<(&'a BeaconBlob, u32, &B256)> for Blob {
 //     }
 // }
 
-impl From<BlockchainSyncStateResponse> for BlockchainSyncState {
-    fn from(response: BlockchainSyncStateResponse) -> Self {
+impl From<GetSyncStateResponse> for BlockchainSyncState {
+    fn from(response: GetSyncStateResponse) -> Self {
         Self {
             last_finalized_block: None,
             last_lower_synced_slot: response.last_lower_synced_slot,
@@ -245,7 +245,7 @@ impl From<BlockchainSyncStateResponse> for BlockchainSyncState {
     }
 }
 
-impl From<BlockchainSyncState> for BlockchainSyncStateRequest {
+impl From<BlockchainSyncState> for UpdateSyncStateRequestBody {
     fn from(sync_state: BlockchainSyncState) -> Self {
         Self {
             last_lower_synced_slot: sync_state.last_lower_synced_slot,
