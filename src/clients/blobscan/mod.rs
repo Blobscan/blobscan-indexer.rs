@@ -61,7 +61,6 @@ pub struct Config {
 }
 
 #[async_trait]
-
 impl CommonBlobscanClient for BlobscanClient {
     fn try_with_client(client: Client, config: Config) -> ClientResult<Self> {
         let base_url = Url::parse(&format!("{}/", config.base_url))?;
@@ -94,7 +93,7 @@ impl CommonBlobscanClient for BlobscanClient {
             blobs,
         };
 
-        json_put!(&self.client, url, token, &req).map(|_: Option<()>| ())
+        json_put!(&self.client, url, token, &req, self.exp_backoff.clone()).map(|_: Option<()>| ())
     }
 
     async fn get_block(&self, slot: u32) -> ClientResult<Option<BlobscanBlock>> {
@@ -116,7 +115,15 @@ impl CommonBlobscanClient for BlobscanClient {
             rewinded_blocks,
         };
 
-        json_put!(&self.client, url, ReorgedBlocksRequestBody, token, &req).map(|_| ())
+        json_put!(
+            &self.client,
+            url,
+            ReorgedBlocksRequestBody,
+            token,
+            &req,
+            self.exp_backoff.clone()
+        )
+        .map(|_| ())
     }
 
     async fn update_sync_state(&self, sync_state: BlockchainSyncState) -> ClientResult<()> {
@@ -124,7 +131,7 @@ impl CommonBlobscanClient for BlobscanClient {
         let token = self.jwt_manager.get_token()?;
         let req: BlockchainSyncStateRequest = sync_state.into();
 
-        json_put!(&self.client, url, token, &req).map(|_: Option<()>| ())
+        json_put!(&self.client, url, token, &req, self.exp_backoff.clone()).map(|_: Option<()>| ())
     }
 
     async fn get_sync_state(&self) -> ClientResult<Option<BlockchainSyncState>> {

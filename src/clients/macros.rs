@@ -95,22 +95,67 @@ macro_rules! json_get {
 /// Make a PUT request sending JSON.
 /// if JSON deser fails, emit a `WARN` level tracing event
 macro_rules! json_put {
-    ($client:expr, $url:expr, $auth_token:expr, $body:expr) => {
-        json_put!($client, $url, (), $auth_token, $body)
+    ($client:expr, $url:expr, $auth_token:expr, $body:expr, $exp_backoff: expr) => {
+        json_put!($client, $url, (), $auth_token, $body, $exp_backoff)
     };
-    ($client:expr, $url:expr, $expected:ty, $auth_token:expr, $body:expr) => {{
+    ($client:expr, $url:expr, $expected:ty, $auth_token:expr, $body:expr, $exp_backoff: expr) => {{
         let url = $url.clone();
         let body = format!("{:?}", $body);
 
         tracing::trace!(method = "PUT", url = url.as_str(), body, "Dispatching API client request");
 
-
-        let resp = match $client
+        let req = $client
             .put($url)
             .bearer_auth($auth_token)
-            .json($body)
-            .send()
+            .json($body);
+
+        let resp_text = if $exp_backoff.is_some() {
+            match backoff::future::retry_notify(
+                $exp_backoff.unwrap(),
+                || {
+                    let req = req.try_clone().unwrap();
+
+                    async move {
+                        let resp = req.send().await.map_err(|err| backoff::Error::transient(err.into()))?;
+                        let status = resp.status();
+                        let resp_text = resp.text().await.map_err(|err| backoff::Error::transient(err.into()))?;
+
+                        if status.is_server_error() || status.as_u16() == 429 {
+                            let err = anyhow::anyhow!("{}: {}", status, resp_text);
+
+                            return Err((backoff::Error::transient(err)));
+                        }
+
+
+                        Ok(resp_text)
+                    }
+                },
+                |error, duration: std::time::Duration| {
+                    let duration = duration.as_secs();
+
+                    tracing::warn!(
+                        method = "PUT",
+                        url = %url,
+                        ?error,
+                        "Failed to send request. Retrying in {duration} seconds…"
+                    );
+                },
+            )
             .await {
+                Ok(resp) => resp,
+                Err(error) => {
+                    tracing::warn!(
+                        method = "PUT",
+                        url = %url,
+                        ?error,
+                        "Failed to send request. All retries failed"
+                    );
+
+                    return Err(error.into())
+                }
+            }
+        } else {
+            match req.send().await {
                 Err(error) => {
                     tracing::warn!(
                         method = "PUT",
@@ -122,18 +167,18 @@ macro_rules! json_put {
 
                     return Err(error.into())
                 },
-                Ok(resp) => resp
-            };
+                Ok(resp) => resp.text().await?
+            }
+        };
 
-        let text = resp.text().await?;
-        let result: $crate::clients::common::ClientResponse<$expected> = text.parse()?;
+        let result: $crate::clients::common::ClientResponse<$expected> = resp_text.parse()?;
 
         if result.is_err() {
             tracing::warn!(
                 method = "PUT",
                 url = %url,
                 body,
-                response = text.as_str(),
+                response = resp_text.as_str(),
                 "Unexpected response from server"
             );
         }
