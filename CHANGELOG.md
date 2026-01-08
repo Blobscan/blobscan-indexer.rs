@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.3](https://github.com/Blobscan/blobscan-indexer.rs/compare/v0.5.2...v0.5.3) - 2026-01-08
+
+### Other
+
+- update Cargo.lock dependencies
+
 ## [0.5.2](https://github.com/Blobscan/blobscan-indexer.rs/compare/v0.5.1...v0.5.2) - 2025-11-03
 
 ### Other
