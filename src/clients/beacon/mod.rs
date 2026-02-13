@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use anyhow::Context as AnyhowContext;
+use anyhow::{anyhow, Context as AnyhowContext};
 use async_trait::async_trait;
 use backoff::ExponentialBackoff;
 
@@ -112,6 +112,7 @@ impl CommonBeaconClient for BeaconClient {
         let path = format!("v1/events?topics={topics}");
         let url = self.base_url.join(&path)?;
 
-        Ok(EventSource::get(url))
+        EventSource::new(self.client.get(url))
+            .map_err(|e| anyhow!("Failed to create SSE event source: {e}").into())
     }
 }
