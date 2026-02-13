@@ -55,6 +55,13 @@ impl Indexer {
             last_synced_slot: Some(slot),
         });
 
+        if let Some(error_report) = self.error_report_rx.recv().await {
+            return Err(IndexerError::IndexingTaskError {
+                task_name: error_report.task_name,
+                error: error_report.error,
+            });
+        }
+
         Ok(())
     }
 

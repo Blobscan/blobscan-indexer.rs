@@ -1,4 +1,4 @@
-use tracing::{debug, Instrument, Span};
+use tracing::{debug, error, Instrument, Span};
 
 use crate::{
     clients::beacon::types::{BlockHeader, BlockId},
@@ -71,17 +71,23 @@ impl IndexingTask {
                         debug!("Task {name} completed!");
 
                         if let Some(report_tx) = result_report_tx {
-                            report_tx.send(sync_result).unwrap();
+                            if report_tx.send(sync_result).is_err() {
+                                error!("Task {name}: failed to send result (receiver dropped)");
+                            }
                         }
                     }
                     Err(sync_error) => {
-                        error_report_tx
+                        error!("Task {name} failed: {sync_error}");
+
+                        if let Err(send_err) = error_report_tx
                             .send(ErrorResport {
                                 task_name: name,
                                 error: sync_error.into(),
                             })
                             .await
-                            .unwrap();
+                        {
+                            error!("Failed to send error report: {send_err}");
+                        }
                     }
                 }
             }

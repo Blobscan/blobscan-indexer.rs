@@ -1,9 +1,11 @@
+use std::time::Duration;
+
 use alloy::primitives::B256;
 use anyhow::anyhow;
 use futures::{FutureExt, StreamExt};
 use reqwest_eventsource::Event;
-use tokio::{sync::oneshot, task::JoinHandle};
-use tracing::{debug, info, info_span, Instrument};
+use tokio::{sync::oneshot, task::JoinHandle, time::timeout};
+use tracing::{debug, error, info, info_span, warn, Instrument};
 
 use crate::{
     clients::{
@@ -23,13 +25,17 @@ use crate::{
     utils::alloy::B256Ext,
 };
 
+/// Maximum time to wait for an SSE event before considering the connection stale.
+/// Beacon chain slots are ~12s apart, so 120s covers several missed slots.
+const SSE_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
+
 #[derive(Debug, thiserror::Error)]
 pub enum SSEIndexingError {
-    #[error("an error ocurred while receiving events from the SSE stream")]
+    #[error("an error ocurred while receiving events from the SSE stream: {0}")]
     ConnectionFailure(#[from] reqwest_eventsource::Error),
-    #[error("failed to subscribe to SSE stream")]
+    #[error("failed to subscribe to SSE stream: {0}")]
     FailedSubscription(#[source] ClientError),
-    #[error("failed to fetch indexer state")]
+    #[error("failed to fetch indexer state: {0}")]
     IndexerStateRetrievalError(#[source] ClientError),
     #[error("unexpected event \"{0}\" received")]
     UnknownEvent(String),
@@ -98,7 +104,39 @@ impl SSEIndexingTask {
                     let finalized_event_span =
                         info_span!("finalized_checkpoint");
 
-                    while let Some(event) = event_source.next().await {
+                    loop {
+                        let event = match timeout(SSE_IDLE_TIMEOUT, event_source.next()).await {
+                            Ok(Some(event)) => event,
+                            Ok(None) => break,
+                            Err(_) => {
+                                warn!("No SSE event received in {}s. Reconnecting…", SSE_IDLE_TIMEOUT.as_secs());
+                                event_source.close();
+
+                                if let Some(handle) = catchup_task_handle.take() {
+                                    handle.abort();
+                                }
+
+                                let sync_state = context.blobscan_client().get_sync_state().await.map_err(SSEIndexingError::IndexerStateRetrievalError)?;
+
+                                last_sse_synced_slot = sync_state.as_ref().and_then(|state| state.last_upper_synced_slot);
+                                last_sse_synced_block = sync_state.as_ref().and_then(|state| {
+                                    match (
+                                        state.last_upper_synced_block_root,
+                                        state.last_upper_synced_block_slot,
+                                    ) {
+                                        (Some(root), Some(slot)) => Some(BlockHeader {
+                                            parent_root: B256::ZERO,
+                                            root,
+                                            slot,
+                                        }),
+                                        _ => None,
+                                    }
+                                });
+
+                                break;
+                            }
+                        };
+
                         match event {
                             Ok(Event::Open) => {
                                 debug!("Subscrption connection opened")
@@ -112,14 +150,23 @@ impl SSEIndexingTask {
                                             serde_json::from_str::<HeadEventData>(&event.data)?;
                                         let head_slot = head_block_data.slot;
 
-                                            if let Some(Ok(_)) = catchup_sync_rx
-                                                .as_mut()
-                                                .and_then(|rx| rx.now_or_never())
-                                            {
-                                                sse_synchronizer
-                                                    .set_checkpoint(Some(CheckpointType::Upper));
-                                                catchup_sync_rx = None;
+                                        if let Some(result) = catchup_sync_rx
+                                            .as_mut()
+                                            .and_then(|rx| rx.now_or_never())
+                                        {
+                                            match result {
+                                                Ok(_) => {
+                                                    sse_synchronizer
+                                                        .set_checkpoint(Some(CheckpointType::Upper));
+                                                }
+                                                Err(_) => {
+                                                    warn!("Catchup task channel closed unexpectedly. Restoring checkpoint.");
+                                                    sse_synchronizer
+                                                        .set_checkpoint(Some(CheckpointType::Upper));
+                                                }
                                             }
+                                            catchup_sync_rx = None;
+                                        }
 
 
                                         if is_first_event {
@@ -278,13 +325,15 @@ impl SSEIndexingTask {
                 .await;
 
                 if let Err(error) = result {
-                    error_report_tx
+                    if let Err(send_err) = error_report_tx
                         .send(ErrorResport {
                             task_name: "sse-indexing".into(),
                             error: error.into(),
                         })
                         .await
-                        .unwrap();
+                    {
+                        error!("SSE indexing task failed: Failed to send error report: {send_err}");
+                    }
 
                     break;
                 }

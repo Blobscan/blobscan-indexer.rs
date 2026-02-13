@@ -1,6 +1,6 @@
-use std::fmt::Debug;
+use std::{fmt::Debug, time::Duration};
 
-use anyhow::Context as AnyhowContext;
+use anyhow::{anyhow, Context as AnyhowContext};
 use async_trait::async_trait;
 use backoff::ExponentialBackoff;
 
@@ -27,6 +27,7 @@ pub mod types;
 pub struct BeaconClient {
     base_url: Url,
     client: Client,
+    sse_client: Client,
     exp_backoff: Option<ExponentialBackoff>,
 }
 
@@ -51,9 +52,15 @@ impl BeaconClient {
             .with_context(|| "Failed to parse base URL")?;
         let exp_backoff = config.exp_backoff;
 
+        let sse_client = Client::builder()
+            .connect_timeout(Duration::from_secs(32))
+            .build()
+            .with_context(|| "Failed to build SSE client")?;
+
         Ok(Self {
             base_url,
             client,
+            sse_client,
             exp_backoff,
         })
     }
@@ -112,6 +119,7 @@ impl CommonBeaconClient for BeaconClient {
         let path = format!("v1/events?topics={topics}");
         let url = self.base_url.join(&path)?;
 
-        Ok(EventSource::get(url))
+        EventSource::new(self.sse_client.get(url))
+            .map_err(|e| anyhow!("Failed to create SSE event source: {e}").into())
     }
 }
