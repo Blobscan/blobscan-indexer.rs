@@ -31,11 +31,11 @@ const SSE_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[derive(Debug, thiserror::Error)]
 pub enum SSEIndexingError {
-    #[error("an error ocurred while receiving events from the SSE stream")]
+    #[error("an error ocurred while receiving events from the SSE stream: {0}")]
     ConnectionFailure(#[from] reqwest_eventsource::Error),
-    #[error("failed to subscribe to SSE stream")]
+    #[error("failed to subscribe to SSE stream: {0}")]
     FailedSubscription(#[source] ClientError),
-    #[error("failed to fetch indexer state")]
+    #[error("failed to fetch indexer state: {0}")]
     IndexerStateRetrievalError(#[source] ClientError),
     #[error("unexpected event \"{0}\" received")]
     UnknownEvent(String),

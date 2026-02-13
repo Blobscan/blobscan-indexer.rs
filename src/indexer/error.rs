@@ -6,7 +6,7 @@ use crate::{
 
 #[derive(Debug, thiserror::Error)]
 pub enum IndexerError {
-    #[error("failed to retrieve blobscan's sync state")]
+    #[error("failed to retrieve blobscan's sync state: {0}")]
     IndexerStateRetrievalError(#[from] ClientError),
     #[error("task \"{task_name}\" failed: {error}")]
     IndexingTaskError {
