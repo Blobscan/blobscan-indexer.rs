@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.5](https://github.com/Blobscan/blobscan-indexer.rs/compare/v0.5.4...v0.5.5) - 2026-02-13
+
+### Other
+
+- *(deps)* enable aws_lc_rs crypto provider feature ([#119](https://github.com/Blobscan/blobscan-indexer.rs/pull/119))
+
 ## [0.5.4](https://github.com/Blobscan/blobscan-indexer.rs/compare/v0.5.3...v0.5.4) - 2026-02-13
 
 ### Other
