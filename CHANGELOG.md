@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.4](https://github.com/Blobscan/blobscan-indexer.rs/compare/v0.5.3...v0.5.4) - 2026-02-13
+
+### Other
+
+- *(deps)* bump time from 0.3.44 to 0.3.47 ([#117](https://github.com/Blobscan/blobscan-indexer.rs/pull/117))
+- *(deps)* bump bytes from 1.11.0 to 1.11.1 ([#116](https://github.com/Blobscan/blobscan-indexer.rs/pull/116))
+- *(deps)* bump jsonwebtoken from 8.3.0 to 10.3.0 ([#115](https://github.com/Blobscan/blobscan-indexer.rs/pull/115))
+
 ## [0.5.3](https://github.com/Blobscan/blobscan-indexer.rs/compare/v0.5.2...v0.5.3) - 2026-01-08
 
 ### Other
