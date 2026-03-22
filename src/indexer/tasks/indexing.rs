@@ -61,7 +61,7 @@ impl IndexingTask {
 
             async {
                 let result = if from_block_id == to_block_id {
-                    synchronizer.sync_block(from_block_id).await
+                    synchronizer.sync_block_by_id(from_block_id).await
                 } else {
                     synchronizer.sync_blocks(from_block_id, to_block_id).await
                 };

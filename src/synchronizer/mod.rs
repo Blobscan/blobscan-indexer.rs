@@ -29,7 +29,8 @@ pub type SynchronizerResult = Result<(), SynchronizerError>;
 pub trait CommonSynchronizer: Send + Sync {
     fn set_checkpoint(&mut self, checkpoint: Option<CheckpointType>);
     fn set_last_synced_block(&mut self, last_synced_block: Option<BlockHeader>);
-    async fn sync_block(&mut self, block_id: BlockId) -> SynchronizerResult;
+    async fn sync_block_by_id(&mut self, block_id: BlockId) -> SynchronizerResult;
+    async fn sync_block_from_header(&mut self, block_header: BlockHeader) -> SynchronizerResult;
     async fn sync_blocks(
         &mut self,
         initial_block_id: BlockId,
@@ -315,12 +316,23 @@ impl CommonSynchronizer for Synchronizer {
         self.last_synced_block = last_synced_block;
     }
 
-    async fn sync_block(&mut self, block_id: BlockId) -> SynchronizerResult {
+    async fn sync_block_by_id(&mut self, block_id: BlockId) -> SynchronizerResult {
         let final_slot = block_id
             .resolve_to_slot(self.context.beacon_client())
             .await?;
 
         self.sync_slots(final_slot, final_slot + 1).await?;
+
+        Ok(())
+    }
+
+    async fn sync_block_from_header(&mut self, block_header: BlockHeader) -> SynchronizerResult {
+        let mut slots_processor =
+            SlotsProcessor::new(self.context.clone(), self.last_synced_block.clone());
+
+        slots_processor.process_block(&block_header).await?;
+
+        self.save_sync_progress(block_header.slot).await?;
 
         Ok(())
     }

@@ -1,6 +1,6 @@
 use alloy::primitives::B256;
 
-use crate::{clients::common::ClientError, synchronizer::error::SynchronizerError};
+use crate::clients::common::ClientError;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SlotProcessingError {
@@ -14,6 +14,13 @@ pub enum SlotProcessingError {
 
 #[derive(Debug, thiserror::Error)]
 pub enum SlotsProcessorError {
+    #[error("Error processing block {block_root} at  slot {slot} failed: {error}")]
+    FailedBlockProcessing {
+        block_root: B256,
+        slot: u32,
+        error: SlotProcessingError,
+    },
+
     #[error(
         "Error processing slots range {initial_slot}-{final_slot}. Slot {failed_slot} failed: {error}"
     )]
@@ -34,8 +41,6 @@ pub enum SlotsProcessorError {
     },
     #[error("Failed to handle reorged slots")]
     ReorgedFailure(#[from] ClientError),
-    #[error("Failed to handle forwarded blocks")]
-    ForwardedBlocksFailure(#[from] SynchronizerError),
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }
