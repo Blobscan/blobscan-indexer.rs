@@ -154,7 +154,6 @@ impl SlotsProcessor {
         let beacon_block = retry_on_none(
             || {
                 let beacon_client = self.context.beacon_client();
-                let block_root = block_root.clone();
 
                 async move { beacon_client.get_block(block_root.into()).await }
             },
@@ -162,7 +161,7 @@ impl SlotsProcessor {
             RETRY_DELAY,
         )
         .await?
-        .with_context(|| format!("Block not found"))?;
+        .with_context(|| "Block not found".to_string())?;
 
         let slot = beacon_block.slot;
 
@@ -211,7 +210,6 @@ impl SlotsProcessor {
         let blobs = retry_on_none(
             || {
                 let beacon_client = self.context.beacon_client();
-                let block_root = block_root.clone();
 
                 async move {
                     let blobs = beacon_client.get_blobs(block_root.into()).await?;
@@ -226,7 +224,7 @@ impl SlotsProcessor {
             RETRY_DELAY,
         )
         .await?
-        .with_context(|| format!("Blobs sidecar not found"))?;
+        .with_context(|| "Blobs sidecar not found".to_string())?;
 
         if blobs.is_empty() {
             return Err(anyhow!("Blobs sidecar is empty").into());
@@ -295,7 +293,7 @@ impl SlotsProcessor {
             }
         }
 
-        return false;
+        false
     }
 
     /// Handles reorgs by rewinding the blobscan blocks to the common ancestor and forwarding to the new head.
