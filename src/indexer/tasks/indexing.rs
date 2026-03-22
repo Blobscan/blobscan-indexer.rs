@@ -1,7 +1,7 @@
 use tracing::{debug, error, Instrument, Span};
 
 use crate::{
-    clients::beacon::types::{BlockHeader, BlockId},
+    clients::beacon::types::BlockHeader,
     context::CommonContext,
     indexer::types::{
         ErrorResport, IndexingTaskJoinHandle, TaskErrorChannelSender, TaskResultChannelSender,
@@ -18,8 +18,8 @@ pub struct IndexingTask {
 pub struct RunParams {
     pub error_report_tx: TaskErrorChannelSender,
     pub result_report_tx: Option<TaskResultChannelSender>,
-    pub from_block_id: BlockId,
-    pub to_block_id: BlockId,
+    pub from_slot: u32,
+    pub to_slot: u32,
     pub prev_block: Option<BlockHeader>,
     pub checkpoint: Option<CheckpointType>,
 }
@@ -42,10 +42,10 @@ impl IndexingTask {
             let RunParams {
                 error_report_tx,
                 result_report_tx,
-                from_block_id,
+                from_slot,
                 prev_block,
                 checkpoint,
-                to_block_id,
+                to_slot,
             } = params;
             let mut synchronizer_builder = SynchronizerBuilder::new();
 
@@ -60,11 +60,7 @@ impl IndexingTask {
             let indexing_task_span = span.unwrap_or(tracing::info_span!("indexing-task"));
 
             async {
-                let result = if from_block_id == to_block_id {
-                    synchronizer.sync_block_by_id(from_block_id).await
-                } else {
-                    synchronizer.sync_blocks(from_block_id, to_block_id).await
-                };
+                let result = synchronizer.sync_slots(from_slot, to_slot).await;
 
                 match result {
                     Ok(sync_result) => {

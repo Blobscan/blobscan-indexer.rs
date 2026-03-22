@@ -123,7 +123,7 @@ macro_rules! json_put {
                         if status.is_server_error() || status.as_u16() == 429 {
                             let err = anyhow::anyhow!("{}: {}", status, resp_text);
 
-                            return Err((backoff::Error::transient(err)));
+                            return Err(backoff::Error::transient(err));
                         }
 
 
