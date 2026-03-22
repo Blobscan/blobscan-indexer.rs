@@ -76,7 +76,14 @@ impl Indexer {
 
         let mut synchronizer = builder.build(self.context.clone());
 
-        synchronizer.sync_blocks(from_block_id, to_block_id).await?;
+        let from_slot = from_block_id
+            .resolve_to_slot(self.context.beacon_client())
+            .await?;
+        let to_slot = to_block_id
+            .resolve_to_slot(self.context.beacon_client())
+            .await?;
+
+        synchronizer.sync_slots(from_slot, to_slot).await?;
 
         Ok(())
     }
@@ -126,19 +133,23 @@ impl Indexer {
                 Some(info_span!("backfill")),
             );
 
-            let current_lowest_block_id = match lowest_synced_slot {
-                Some(lowest_synced_slot) => lowest_synced_slot.saturating_sub(1).into(),
+            let current_lowest_slot = match lowest_synced_slot {
+                Some(lowest_synced_slot) => lowest_synced_slot.saturating_sub(1),
                 None => match last_synced_slot {
-                    Some(last_synced_slot) => last_synced_slot.saturating_sub(1).into(),
-                    None => BlockId::Head,
+                    Some(last_synced_slot) => last_synced_slot.saturating_sub(1),
+                    None => {
+                        BlockId::Head
+                            .resolve_to_slot(self.context.beacon_client())
+                            .await?
+                    }
                 },
             };
 
             task.run(IndexingTaskRunParams {
                 error_report_tx: self.error_report_tx.clone(),
                 result_report_tx: None,
-                from_block_id: current_lowest_block_id,
-                to_block_id: dencun_fork_slot.into(),
+                from_slot: current_lowest_slot,
+                to_slot: dencun_fork_slot,
                 prev_block: None,
                 checkpoint: Some(CheckpointType::Lower),
             });

@@ -22,15 +22,14 @@ use crate::{
         },
     },
     synchronizer::{CheckpointType, CommonSynchronizer, SynchronizerBuilder},
-    utils::{alloy::B256Ext, futures::retry_on_none},
+    utils::{alloy::B256Ext},
 };
 
 /// Maximum time to wait for an SSE event before considering the connection stale.
 /// Beacon chain slots are ~12s apart, so 120s covers several missed slots.
 const SSE_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 
-const HEAD_BLOCK_FETCH_MAX_ATTEMPTS: u32 = 3;
-const HEAD_BLOCK_FETCH_RETRY_DELAY: Duration = Duration::from_millis(500);
+const HEAD_BLOCK_PROCESSING_DELAY: Duration = Duration::from_millis(500);
 
 #[derive(Debug, thiserror::Error)]
 pub enum SSEIndexingError {
@@ -174,7 +173,7 @@ impl SSEIndexingTask {
 
                                         if is_first_event {
                                             if let Some(last_sse_synced_slot) = last_sse_synced_slot {
-                                                if last_sse_synced_slot < head_slot - 1 {
+                                                if last_sse_synced_slot < head_slot.saturating_sub(1) {
                                                     let (channel_tx, channel_rx) =
                                                         oneshot::channel::<TaskResult>();
 
@@ -188,9 +187,8 @@ impl SSEIndexingTask {
                                                     catchup_task_handle = Some(catchup_task.run(IndexingRunParams {
                                                         error_report_tx: error_report_tx.clone(),
                                                         result_report_tx: Some(channel_tx),
-                                                        from_block_id: (last_sse_synced_slot + 1)
-                                                            .into(),
-                                                        to_block_id: head_slot.into(),
+                                                        from_slot: last_sse_synced_slot + 1,  
+                                                        to_slot: head_slot,
                                                         prev_block: last_sse_synced_block.clone(),
                                                         checkpoint: Some(CheckpointType::Upper),
                                                     }));
@@ -209,25 +207,10 @@ impl SSEIndexingTask {
                                         // the beacon node itself, or because requests are hitting a
                                         // different node in a load-balanced setup. We wait briefly
                                         // before the first attempt and retry on `None` to handle both.
-                                        tokio::time::sleep(HEAD_BLOCK_FETCH_RETRY_DELAY).await;
+                                        tokio::time::sleep(HEAD_BLOCK_PROCESSING_DELAY).await;
 
-                                        let head_block_header = retry_on_none(
-                                            || {
-                                                let beacon_client = context.beacon_client();
-                                                async move { beacon_client.get_block_header(head_root.into()).await }
-                                            },
-                                            HEAD_BLOCK_FETCH_MAX_ATTEMPTS,
-                                            HEAD_BLOCK_FETCH_RETRY_DELAY,
-                                        )
-                                        .await
-                                        .map_err(|err| SSEIndexingError::EventHandlingError {
-                                            event: event.event.clone(),
-                                            error: err.into(),
-                                        })?;
-
-                                        if let Some(block_header) = head_block_header {
-                                            sse_synchronizer
-                                            .sync_block_from_header(block_header)
+                                        sse_synchronizer
+                                            .sync_block(head_root.into())
                                             .instrument(head_event_span.clone())
                                             .await
                                             .map_err(|err| {
@@ -236,9 +219,7 @@ impl SSEIndexingTask {
                                                     error: err.into(),
                                                 }
                                             })?;   
-                                        } else {
-                                            warn!(slot = head_slot, block_root = ?head_root, "Head block header unexpectedly not found after {HEAD_BLOCK_FETCH_MAX_ATTEMPTS} attempts, skipping slot")
-                                        }
+                                        
 
                                         is_first_event = false;
                                     }

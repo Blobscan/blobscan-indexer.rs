@@ -1,11 +1,16 @@
+use std::time::Duration;
+
 use alloy::{
     consensus::Transaction,
-    eips::{eip4844::kzg_to_versioned_hash, BlockId},
+    eips::{eip4844::kzg_to_versioned_hash, BlockId as ExecutionBlockId},
     primitives::B256,
 };
 use anyhow::{anyhow, Context as AnyhowContext, Result};
 
-use crate::{clients::beacon::types::BlockHeader, utils::alloy::BlobTransactionExt};
+use crate::{
+    clients::beacon::types::{BlockHeader, BlockId},
+    utils::{alloy::BlobTransactionExt, futures::retry_on_none},
+};
 use tracing::{debug, info, Instrument};
 
 use crate::{
@@ -21,6 +26,9 @@ use self::error::{SlotProcessingError, SlotsProcessorError};
 pub mod error;
 
 const MAX_ALLOWED_REORG_DEPTH: u32 = 100;
+
+const RETRY_MAX_ATTEMPTS: u32 = 5;
+const RETRY_DELAY: Duration = Duration::from_millis(500);
 
 pub struct BlockData {
     pub root: B256,
@@ -67,8 +75,6 @@ impl SlotsProcessor {
             (initial_slot..final_slot).collect::<Vec<_>>()
         };
 
-        let mut last_processed_block = self.last_processed_block.clone();
-
         for current_slot in slots {
             let block_header = match self
                 .context
@@ -78,96 +84,109 @@ impl SlotsProcessor {
             {
                 Some(header) => header,
                 None => {
-                    debug!(current_slot, "Skipping as there is no beacon block header");
+                    debug!(current_slot, "Skipping - empty slot");
 
                     continue;
                 }
             };
 
-            if !is_reverse_processing {
-                if self.check_reorg(&block_header) {
-                    self.process_reorg(&block_header).await?;
-                }
-            }
-
-            if let Err(error) = self.index_block(&block_header).await {
-                return Err(SlotsProcessorError::FailedSlotsProcessing {
+            self.process_block_header(block_header, !is_reverse_processing)
+                .await
+                .map_err(|error| SlotsProcessorError::FailedSlotsProcessing {
                     initial_slot,
                     final_slot,
                     failed_slot: current_slot,
                     error,
-                });
-            }
-
-            last_processed_block = Some(block_header);
+                })?;
         }
-
-        self.last_processed_block = last_processed_block;
 
         Ok(())
     }
 
-    pub async fn process_block(
-        &mut self,
-        block_header: &BlockHeader,
-    ) -> Result<(), SlotsProcessorError> {
-        if self.check_reorg(block_header) {
-            self.process_reorg(block_header).await?;
-        }
+    pub async fn process_block(&mut self, block_id: BlockId) -> Result<(), SlotsProcessorError> {
+        let block_header = retry_on_none(
+            || {
+                let beacon_client = self.context.beacon_client();
+                let block_id = block_id.clone();
 
-        self.index_block(block_header).await.map_err(|error| {
-            SlotsProcessorError::FailedBlockProcessing {
+                async move { beacon_client.get_block_header(block_id).await }
+            },
+            RETRY_MAX_ATTEMPTS,
+            RETRY_DELAY,
+        )
+        .await?
+        .with_context(|| format!("Block header with id '{block_id}' not found"))?;
+
+        self.process_block_header(block_header.clone(), true)
+            .await
+            .map_err(|error| SlotsProcessorError::FailedBlockProcessing {
                 block_root: block_header.root,
                 error,
                 slot: block_header.slot,
-            }
+            })
+    }
+
+    async fn process_block_header(
+        &mut self,
+        block_header: BlockHeader,
+        detect_reorgs: bool,
+    ) -> Result<(), SlotProcessingError> {
+        if detect_reorgs && self.check_reorg(&block_header) {
+            self.process_reorg(&block_header).await?;
+        }
+
+        let block_root = block_header.root;
+        let block_slot = block_header.slot;
+
+        self.index_block(block_header.root).await.with_context(|| {
+            format!("Failed to index block with root '{block_root}' at slot {block_slot}")
         })?;
 
-        self.last_processed_block = Some(block_header.clone());
+        self.last_processed_block = Some(block_header);
 
         Ok(())
     }
 
-    async fn index_block(
-        &self,
-        beacon_block_header: &BlockHeader,
-    ) -> Result<(), SlotProcessingError> {
-        let beacon_client = self.context.beacon_client();
+    async fn index_block(&self, block_root: B256) -> Result<(), SlotProcessingError> {
         let blobscan_client = self.context.blobscan_client();
         let provider = self.context.provider();
-        let beacon_block_root = beacon_block_header.root;
-        let slot = beacon_block_header.slot;
 
-        let beacon_block = match beacon_client.get_block(slot.into()).await? {
-            Some(block) => block,
-            None => {
-                debug!(slot = slot, "Skipping as there is no beacon block");
+        let beacon_block = retry_on_none(
+            || {
+                let beacon_client = self.context.beacon_client();
+                let block_root = block_root.clone();
 
-                return Ok(());
-            }
-        };
+                async move { beacon_client.get_block(block_root.into()).await }
+            },
+            RETRY_MAX_ATTEMPTS,
+            RETRY_DELAY,
+        )
+        .await?
+        .with_context(|| format!("Block not found"))?;
+
+        let slot = beacon_block.slot;
 
         let execution_payload = match beacon_block.execution_payload {
             Some(payload) => payload,
             None => {
                 debug!(
-                    slot,
-                    "Skipping as beacon block doesn't contain execution payload"
+                    block_root = ?block_root,
+                    slot, "Skipping - block doesn't contain execution payload"
                 );
 
                 return Ok(());
             }
         };
 
-        let has_kzg_blob_commitments = match beacon_block.blob_kzg_commitments {
+        let has_blobs = match beacon_block.blob_kzg_commitments {
             Some(commitments) => !commitments.is_empty(),
             None => false,
         };
 
-        if !has_kzg_blob_commitments {
+        if !has_blobs {
             debug!(
-                slot,
-                "Skipping as beacon block doesn't contain blob kzg commitments"
+                block_root = ?block_root,
+                slot, "Skipping - block doesn't contain blob kzg commitments"
             );
 
             return Ok(());
@@ -178,37 +197,40 @@ impl SlotsProcessor {
         // Fetch execution block and perform some checks
 
         let execution_block = provider
-            .get_block(BlockId::Hash(execution_block_hash.into()))
+            .get_block(ExecutionBlockId::Hash(execution_block_hash.into()))
             .full()
             .await?
-            .with_context(|| format!("Execution block {execution_block_hash} not found"))?;
+            .with_context(|| format!("Execution block '{execution_block_hash}' not found"))?;
 
         let blob_txs = execution_block.transactions.filter_blob_transactions();
 
         if blob_txs.is_empty() {
-            return Err(anyhow!("Blocks mismatch: Consensus block \"{beacon_block_root}\" contains blob KZG commitments, but the corresponding execution block \"{execution_block_hash:#?}\" does not contain any blob transactions").into());
+            return Err(anyhow!("Blocks mismatch: Consensus block \"{block_root}\" contains blob KZG commitments, but the corresponding execution block \"{execution_block_hash:#?}\" does not contain any blob transactions").into());
         }
 
-        let blobs = match beacon_client
-            .get_blobs(slot.into())
-            .await
-            .map_err(SlotProcessingError::ClientError)?
-        {
-            Some(blobs) => {
-                if blobs.is_empty() {
-                    debug!(slot, "Skipping as blobs sidecar is empty");
+        let blobs = retry_on_none(
+            || {
+                let beacon_client = self.context.beacon_client();
+                let block_root = block_root.clone();
 
-                    return Ok(());
-                } else {
-                    blobs
+                async move {
+                    let blobs = beacon_client.get_blobs(block_root.into()).await?;
+
+                    match blobs {
+                        Some(blobs) if blobs.is_empty() => Ok::<_, ClientError>(None),
+                        other => Ok(other),
+                    }
                 }
-            }
-            None => {
-                debug!(slot, "Skipping as there is no blobs sidecar");
+            },
+            RETRY_MAX_ATTEMPTS,
+            RETRY_DELAY,
+        )
+        .await?
+        .with_context(|| format!("Blobs sidecar not found"))?;
 
-                return Ok(());
-            }
-        };
+        if blobs.is_empty() {
+            return Err(anyhow!("Blobs sidecar is empty").into());
+        }
 
         // Create entities to be indexed
         let block_entity = Block::try_from((&execution_block, slot))?;
@@ -248,6 +270,7 @@ impl SlotsProcessor {
             .map_err(SlotProcessingError::ClientError)?;
 
         let block_number = execution_block.header.number;
+
         info!(slot, block_number, "Block indexed successfully");
 
         Ok(())
@@ -327,7 +350,7 @@ impl SlotsProcessor {
                                     "forwarded_block",
                                 );
 
-                                self.index_block(block)
+                                self.index_block(block.root)
                                     .instrument(reorg_span)
                                     .await
                                     .with_context(|| {
