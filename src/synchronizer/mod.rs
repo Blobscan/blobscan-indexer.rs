@@ -334,6 +334,8 @@ impl CommonSynchronizer for Synchronizer {
 
         self.save_sync_progress(block_header.slot).await?;
 
+        self.last_synced_block = Some(block_header);
+
         Ok(())
     }
 

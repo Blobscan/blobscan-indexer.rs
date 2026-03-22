@@ -256,9 +256,20 @@ impl SlotsProcessor {
     /// Returns true if the current block's parent root doesn't match the last processed block root,
     /// indicating the chain has reorged.
     fn check_reorg(&self, curr_block_header: &BlockHeader) -> bool {
-        if let Some(prev_block) = self.last_processed_block.as_ref() {
-            return prev_block.root != B256::ZERO
-                && prev_block.root != curr_block_header.parent_root;
+        if let Some(prev_block_header) = self.last_processed_block.as_ref() {
+            if prev_block_header.root != B256::ZERO
+                && prev_block_header.root != curr_block_header.parent_root
+            {
+                info!(
+                    new_head_slot = curr_block_header.slot,
+                    old_head_slot = prev_block_header.slot,
+                    new_head_block_root = ?curr_block_header.root,
+                    old_head_block_root = ?prev_block_header.root,
+                    "Reorg detected!",
+                );
+
+                return true;
+            }
         }
 
         return false;
