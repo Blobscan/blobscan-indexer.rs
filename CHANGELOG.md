@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.6](https://github.com/Blobscan/blobscan-indexer.rs/compare/v0.5.5...v0.5.6) - 2026-02-13
+
+### Fixed
+
+- *(docker)* bump debian docker image to trixie
+- handle stale sse subscriptions + handle channel errors properly ([#121](https://github.com/Blobscan/blobscan-indexer.rs/pull/121))
+
 ## [0.5.5](https://github.com/Blobscan/blobscan-indexer.rs/compare/v0.5.4...v0.5.5) - 2026-02-13
 
 ### Other
