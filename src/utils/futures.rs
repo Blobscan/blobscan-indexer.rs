@@ -22,10 +22,12 @@ where
                     "Resource not yet available, retrying in {}ms…",
                     retry_delay.as_millis()
                 );
+
                 tokio::time::sleep(retry_delay).await;
             }
             None => break,
         }
     }
+
     Ok(None)
 }
