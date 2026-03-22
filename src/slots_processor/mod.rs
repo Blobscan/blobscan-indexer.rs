@@ -60,8 +60,8 @@ impl SlotsProcessor {
         initial_slot: u32,
         final_slot: u32,
     ) -> Result<(), SlotsProcessorError> {
-        let is_reverse = initial_slot > final_slot;
-        let slots = if is_reverse {
+        let is_reverse_processing = initial_slot > final_slot;
+        let slots = if is_reverse_processing {
             (final_slot..initial_slot).rev().collect::<Vec<_>>()
         } else {
             (initial_slot..final_slot).collect::<Vec<_>>()
@@ -84,33 +84,13 @@ impl SlotsProcessor {
                 }
             };
 
-            if !is_reverse {
-                if let Some(prev_block_header) = last_processed_block {
-                    if prev_block_header.root != B256::ZERO
-                        && prev_block_header.root != block_header.parent_root
-                    {
-                        info!(
-                            new_head_slot = block_header.slot,
-                            old_head_slot = prev_block_header.slot,
-                            new_head_block_root = ?block_header.root,
-                            old_head_block_root = ?prev_block_header.root,
-                            "Reorg detected!",
-                        );
-
-                        self.process_reorg(&prev_block_header, &block_header)
-                            .await
-                            .map_err(|error| SlotsProcessorError::FailedReorgProcessing {
-                                old_slot: prev_block_header.slot,
-                                new_slot: block_header.slot,
-                                new_head_block_root: block_header.root,
-                                old_head_block_root: prev_block_header.root,
-                                error,
-                            })?;
-                    }
+            if !is_reverse_processing {
+                if self.check_reorg(&block_header) {
+                    self.process_reorg(&block_header).await?;
                 }
             }
 
-            if let Err(error) = self.process_block(&block_header).await {
+            if let Err(error) = self.index_block(&block_header).await {
                 return Err(SlotsProcessorError::FailedSlotsProcessing {
                     initial_slot,
                     final_slot,
@@ -127,7 +107,28 @@ impl SlotsProcessor {
         Ok(())
     }
 
-    async fn process_block(
+    pub async fn process_block(
+        &mut self,
+        block_header: &BlockHeader,
+    ) -> Result<(), SlotsProcessorError> {
+        if self.check_reorg(block_header) {
+            self.process_reorg(block_header).await?;
+        }
+
+        self.index_block(block_header).await.map_err(|error| {
+            SlotsProcessorError::FailedBlockProcessing {
+                block_root: block_header.root,
+                error,
+                slot: block_header.slot,
+            }
+        })?;
+
+        self.last_processed_block = Some(block_header.clone());
+
+        Ok(())
+    }
+
+    async fn index_block(
         &self,
         beacon_block_header: &BlockHeader,
     ) -> Result<(), SlotProcessingError> {
@@ -252,85 +253,96 @@ impl SlotsProcessor {
         Ok(())
     }
 
+    /// Returns true if the current block's parent root doesn't match the last processed block root,
+    /// indicating the chain has reorged.
+    fn check_reorg(&self, curr_block_header: &BlockHeader) -> bool {
+        if let Some(prev_block) = self.last_processed_block.as_ref() {
+            return prev_block.root != B256::ZERO
+                && prev_block.root != curr_block_header.parent_root;
+        }
+
+        return false;
+    }
+
     /// Handles reorgs by rewinding the blobscan blocks to the common ancestor and forwarding to the new head.
-    async fn process_reorg(
-        &mut self,
-        old_head_header: &BlockHeader,
-        new_head_header: &BlockHeader,
-    ) -> Result<(), anyhow::Error> {
-        let mut current_old_slot = old_head_header.slot;
-        let mut reorg_depth = 0;
+    async fn process_reorg(&mut self, new_head_header: &BlockHeader) -> Result<(), anyhow::Error> {
+        if let Some(old_head_header) = self.last_processed_block.as_ref() {
+            let mut current_old_slot = old_head_header.slot;
+            let mut reorg_depth = 0;
 
-        let mut rewinded_blocks: Vec<B256> = vec![];
+            let mut rewinded_blocks: Vec<B256> = vec![];
 
-        while reorg_depth <= MAX_ALLOWED_REORG_DEPTH && current_old_slot > 0 {
-            // We iterate over blocks by slot and not block root as blobscan blocks don't
-            // have parent root we can use to traverse the chain
-            if let Some(old_blobscan_block) = self
-                .context
-                .blobscan_client()
-                .get_block(current_old_slot)
-                .await?
-            {
-                let canonical_block_path = self
-                    .get_canonical_block_path(&old_blobscan_block, new_head_header.root)
-                    .await?;
-
-                // If a path exists, we've found the common ancient block
-                if !canonical_block_path.is_empty() {
-                    let canonical_block_path =
-                        canonical_block_path.into_iter().rev().collect::<Vec<_>>();
-
-                    let forwarded_blocks = canonical_block_path
-                        .iter()
-                        .map(|block| block.execution_block_hash)
-                        .collect::<Vec<_>>();
-
-                    self.context
-                        .blobscan_client()
-                        .handle_reorg(rewinded_blocks.clone(), forwarded_blocks.clone())
+            while reorg_depth <= MAX_ALLOWED_REORG_DEPTH && current_old_slot > 0 {
+                // We iterate over blocks by slot and not block root as blobscan blocks don't
+                // have parent root we can use to traverse the chain
+                if let Some(old_blobscan_block) = self
+                    .context
+                    .blobscan_client()
+                    .get_block(current_old_slot)
+                    .await?
+                {
+                    let canonical_block_path = self
+                        .get_canonical_block_path(&old_blobscan_block, new_head_header.root)
                         .await?;
 
-                    info!(rewinded_blocks = ?rewinded_blocks, forwarded_blocks = ?forwarded_blocks, "Reorg handled!");
+                    // If a path exists, we've found the common ancient block
+                    if !canonical_block_path.is_empty() {
+                        let canonical_block_path =
+                            canonical_block_path.into_iter().rev().collect::<Vec<_>>();
 
-                    let canonical_block_headers: Vec<BlockHeader> = canonical_block_path
-                        .iter()
-                        .map(|block| block.into())
-                        .collect::<Vec<_>>();
+                        let forwarded_blocks = canonical_block_path
+                            .iter()
+                            .map(|block| block.execution_block_hash)
+                            .collect::<Vec<_>>();
 
-                    // If the new canonical block path includes blocks beyond the new head block,
-                    // they were skipped and must be processed.
-                    for block in canonical_block_headers.iter() {
-                        if block.slot != new_head_header.slot {
-                            let reorg_span = tracing::info_span!(
-                                parent: &tracing::Span::current(),
-                                "forwarded_block",
-                            );
+                        self.context
+                            .blobscan_client()
+                            .handle_reorg(rewinded_blocks.clone(), forwarded_blocks.clone())
+                            .await?;
 
-                            self.process_block(block)
-                                .instrument(reorg_span)
-                                .await
-                                .with_context(|| "Failed to sync forwarded block".to_string())?;
+                        info!(rewinded_blocks = ?rewinded_blocks, forwarded_blocks = ?forwarded_blocks, "Reorg handled!");
+
+                        let canonical_block_headers: Vec<BlockHeader> = canonical_block_path
+                            .iter()
+                            .map(|block| block.into())
+                            .collect::<Vec<_>>();
+
+                        // If the new canonical block path includes blocks beyond the new head block,
+                        // they were skipped and must be processed.
+                        for block in canonical_block_headers.iter() {
+                            if block.slot != new_head_header.slot {
+                                let reorg_span = tracing::info_span!(
+                                    parent: &tracing::Span::current(),
+                                    "forwarded_block",
+                                );
+
+                                self.index_block(block)
+                                    .instrument(reorg_span)
+                                    .await
+                                    .with_context(|| {
+                                        "Failed to sync forwarded block".to_string()
+                                    })?;
+                            }
                         }
+
+                        return Ok(());
                     }
 
-                    return Ok(());
+                    rewinded_blocks.push(old_blobscan_block.hash);
                 }
 
-                rewinded_blocks.push(old_blobscan_block.hash);
+                current_old_slot -= 1;
+                reorg_depth += 1;
             }
 
-            current_old_slot -= 1;
-            reorg_depth += 1;
+            let rewinded_blocks_count = rewinded_blocks.len();
+
+            if rewinded_blocks_count > 0 {
+                return Err(anyhow!("{rewinded_blocks_count} Blobscan blocks to rewind detected but no common ancestor found"));
+            }
+
+            info!("Skipping reorg handling: no Blobscan blocks to rewind found");
         }
-
-        let rewinded_blocks_count = rewinded_blocks.len();
-
-        if rewinded_blocks_count > 0 {
-            return Err(anyhow!("{rewinded_blocks_count} Blobscan blocks to rewind detected but no common ancestor found"));
-        }
-
-        info!("Skipping reorg handling: no Blobscan blocks to rewind found");
 
         Ok(())
     }

@@ -13,6 +13,8 @@ pub enum SynchronizerError {
         chunk_errors: SlotsChunksErrors,
     },
     #[error(transparent)]
+    FailedBlockSyncing(#[from] SlotsProcessorError),
+    #[error(transparent)]
     FailedBlockIdResolution(#[from] BlockIdResolutionError),
     #[error("Failed to save slot checkpoint for slot {slot}: {error}")]
     FailedSlotCheckpointSave {

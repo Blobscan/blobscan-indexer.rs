@@ -22,12 +22,15 @@ use crate::{
         },
     },
     synchronizer::{CheckpointType, CommonSynchronizer, SynchronizerBuilder},
-    utils::alloy::B256Ext,
+    utils::{alloy::B256Ext, futures::retry_on_none},
 };
 
 /// Maximum time to wait for an SSE event before considering the connection stale.
 /// Beacon chain slots are ~12s apart, so 120s covers several missed slots.
 const SSE_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
+
+const HEAD_BLOCK_FETCH_MAX_ATTEMPTS: u32 = 3;
+const HEAD_BLOCK_FETCH_RETRY_DELAY: Duration = Duration::from_millis(500);
 
 #[derive(Debug, thiserror::Error)]
 pub enum SSEIndexingError {
@@ -149,6 +152,7 @@ impl SSEIndexingTask {
                                         let head_block_data =
                                             serde_json::from_str::<HeadEventData>(&event.data)?;
                                         let head_slot = head_block_data.slot;
+                                        let head_root = head_block_data.block;
 
                                         if let Some(result) = catchup_sync_rx
                                             .as_mut()
@@ -167,7 +171,6 @@ impl SSEIndexingTask {
                                             }
                                             catchup_sync_rx = None;
                                         }
-
 
                                         if is_first_event {
                                             if let Some(last_sse_synced_slot) = last_sse_synced_slot {
@@ -201,8 +204,30 @@ impl SSEIndexingTask {
                                             }
                                         }
 
-                                        sse_synchronizer
-                                            .sync_block(head_slot.into())
+                                        // The head SSE event may arrive before the block header is
+                                        // queryable via the REST API — either due to a race within
+                                        // the beacon node itself, or because requests are hitting a
+                                        // different node in a load-balanced setup. We wait briefly
+                                        // before the first attempt and retry on `None` to handle both.
+                                        tokio::time::sleep(HEAD_BLOCK_FETCH_RETRY_DELAY).await;
+
+                                        let head_block_header = retry_on_none(
+                                            || {
+                                                let beacon_client = context.beacon_client();
+                                                async move { beacon_client.get_block_header(head_root.into()).await }
+                                            },
+                                            HEAD_BLOCK_FETCH_MAX_ATTEMPTS,
+                                            HEAD_BLOCK_FETCH_RETRY_DELAY,
+                                        )
+                                        .await
+                                        .map_err(|err| SSEIndexingError::EventHandlingError {
+                                            event: event.event.clone(),
+                                            error: err.into(),
+                                        })?;
+
+                                        if let Some(block_header) = head_block_header {
+                                            sse_synchronizer
+                                            .sync_block_from_header(block_header)
                                             .instrument(head_event_span.clone())
                                             .await
                                             .map_err(|err| {
@@ -210,7 +235,10 @@ impl SSEIndexingTask {
                                                     event: event.event.clone(),
                                                     error: err.into(),
                                                 }
-                                            })?;
+                                            })?;   
+                                        } else {
+                                            warn!(slot = head_slot, block_root = ?head_root, "Head block header unexpectedly not found after {HEAD_BLOCK_FETCH_MAX_ATTEMPTS} attempts, skipping slot")
+                                        }
 
                                         is_first_event = false;
                                     }
