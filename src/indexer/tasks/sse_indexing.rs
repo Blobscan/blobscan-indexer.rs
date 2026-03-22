@@ -22,7 +22,7 @@ use crate::{
         },
     },
     synchronizer::{CheckpointType, CommonSynchronizer, SynchronizerBuilder},
-    utils::{alloy::B256Ext},
+    utils::alloy::B256Ext,
 };
 
 /// Maximum time to wait for an SSE event before considering the connection stale.
@@ -187,7 +187,7 @@ impl SSEIndexingTask {
                                                     catchup_task_handle = Some(catchup_task.run(IndexingRunParams {
                                                         error_report_tx: error_report_tx.clone(),
                                                         result_report_tx: Some(channel_tx),
-                                                        from_slot: last_sse_synced_slot + 1,  
+                                                        from_slot: last_sse_synced_slot + 1,
                                                         to_slot: head_slot,
                                                         prev_block: last_sse_synced_block.clone(),
                                                         checkpoint: Some(CheckpointType::Upper),
@@ -218,8 +218,7 @@ impl SSEIndexingTask {
                                                     event: event.event.clone(),
                                                     error: err.into(),
                                                 }
-                                            })?;   
-                                        
+                                            })?;
 
                                         is_first_event = false;
                                     }
