@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0](https://github.com/Blobscan/blobscan-indexer.rs/compare/v0.5.6...v0.6.0) - 2026-03-23
+
+### Fixed
+
+- add retry logic for 404 responses when indexing blocks ([#128](https://github.com/Blobscan/blobscan-indexer.rs/pull/128))
+- re-add reorg handling log + missing last processed block set
+- handle beacon block header propagation delay on SSE head events ([#126](https://github.com/Blobscan/blobscan-indexer.rs/pull/126))
+
+### Other
+
+- *(deps)* bump rustls-webpki from 0.103.8 to 0.103.10 ([#125](https://github.com/Blobscan/blobscan-indexer.rs/pull/125))
+- *(deps)* bump quinn-proto from 0.11.13 to 0.11.14 ([#124](https://github.com/Blobscan/blobscan-indexer.rs/pull/124))
+- *(deps)* bump keccak from 0.1.5 to 0.1.6 ([#123](https://github.com/Blobscan/blobscan-indexer.rs/pull/123))
+
 ## [0.5.6](https://github.com/Blobscan/blobscan-indexer.rs/compare/v0.5.5...v0.5.6) - 2026-02-13
 
 ### Fixed
