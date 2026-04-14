@@ -14,7 +14,7 @@ async-trait = "0.1.80"
 dyn-clone = "1.0.17"
 dotenv = "0.15.0"
 envy = "0.4.2"
-alloy = { version = "2.0.0", features = ["provider-http", "rpc-types"] }
+alloy = { version = "2.0.0", default-features = false, features = ["consensus", "eips", "network", "provider-http", "rpc-types", "transports", "std", "reqwest-rustls-tls"] }
 sha2 = "0.10.8"
 futures = "0.3.25"
 hex = "0.4.3"
@@ -24,7 +24,7 @@ url = { version = "2.3.1", features = ["serde"] }
 serde = { version = "1.0.150", features = ["derive"] }
 tokio = { version = "1.43.1", features = ["full"] }
 jsonwebtoken = "10.3.0"
-backoff = { version = "0.4.0", features = ["tokio"] }
+backon = "1.6.0"
 chrono = "0.4.24"
 serde_json = "1.0.96"
 clap = { version = "4.3.0", features = ["derive"] }
@@ -38,8 +38,8 @@ tracing-log = "0.1.1"
 # error handling
 anyhow = { version = "1.0.70", features = ["backtrace"] }
 thiserror = "1.0.40"
-sentry = { version = "0.31.2", features = ["debug-images"] }
-sentry-tracing = "0.31.2"
+sentry = { version = "0.47.0", features = ["debug-images"] }
+sentry-tracing = "0.47.0"
 
 
 [dev-dependencies]

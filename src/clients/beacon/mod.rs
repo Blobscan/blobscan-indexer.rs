@@ -2,7 +2,7 @@ use std::{fmt::Debug, time::Duration};
 
 use anyhow::{anyhow, Context as AnyhowContext};
 use async_trait::async_trait;
-use backoff::ExponentialBackoff;
+use backon::ExponentialBuilder;
 
 use reqwest::{Client, Url};
 use reqwest_eventsource::EventSource;
@@ -28,12 +28,12 @@ pub struct BeaconClient {
     base_url: Url,
     client: Client,
     sse_client: Client,
-    exp_backoff: Option<ExponentialBackoff>,
+    exp_backoff: Option<ExponentialBuilder>,
 }
 
 pub struct Config {
     pub base_url: String,
-    pub exp_backoff: Option<ExponentialBackoff>,
+    pub exp_backoff: Option<ExponentialBuilder>,
 }
 
 #[async_trait]
