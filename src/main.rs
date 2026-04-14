@@ -45,6 +45,12 @@ async fn run() -> AnyhowResult<()> {
         NetworkName::Preset(name) => Network::new(name),
         NetworkName::Devnet => Network::new_devnet(0, env.dencun_fork_slot.unwrap_or(0), 0),
     };
+
+    sentry::configure_scope(|scope| {
+        scope.set_tag("network_name", network.name);
+        scope.set_tag("chain_id", network.chain_id);
+    });
+
     let syncing_settings = SyncingSettings {
         checkpoint_size: args.slots_per_save,
         concurrency: args.num_threads.resolve(),
