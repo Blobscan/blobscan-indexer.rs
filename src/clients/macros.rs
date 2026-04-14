@@ -16,32 +16,33 @@ macro_rules! json_get {
           req = req.bearer_auth($auth_token);
         }
 
-        let resp = if $exp_backoff.is_some() {
-            match backoff::future::retry_notify(
-                $exp_backoff.unwrap(),
-                || {
-                    let req = req.try_clone().unwrap();
+        let resp = if let Some(backoff_builder) = $exp_backoff {
+            use backon::Retryable;
 
-                    async move { req.send().await.map_err(|err| err.into()) }
-                },
-                |error, duration: std::time::Duration| {
-                    let duration = duration.as_secs();
+            match (|| {
+                let req = req.try_clone().unwrap();
+                async move {
+                    req.send().await.map_err(|err| -> anyhow::Error { err.into() })
+                }
+            })
+            .retry(backoff_builder)
+            .notify(|error: &anyhow::Error, duration: std::time::Duration| {
+                let duration = duration.as_secs();
 
-                    tracing::warn!(
-                        method = "GET",
-                        url = %url,
-                        ?error,
-                        "Failed to send request. Retrying in {duration} seconds…"
-                    );
-                },
-            )
+                tracing::warn!(
+                    method = "GET",
+                    url = %url,
+                    %error,
+                    "Failed to send request. Retrying in {duration} seconds…"
+                );
+            })
             .await {
                 Ok(resp) => resp,
                 Err(error) => {
                     tracing::warn!(
                         method = "GET",
                         url = %url,
-                        ?error,
+                        %error,
                         "Failed to send request. All retries failed"
                     );
 
@@ -109,45 +110,44 @@ macro_rules! json_put {
             .bearer_auth($auth_token)
             .json($body);
 
-        let resp_text = if $exp_backoff.is_some() {
-            match backoff::future::retry_notify(
-                $exp_backoff.unwrap(),
-                || {
-                    let req = req.try_clone().unwrap();
+        let resp_text = if let Some(backoff_builder) = $exp_backoff {
+            use backon::Retryable;
 
-                    async move {
-                        let resp = req.send().await.map_err(|err| backoff::Error::transient(err.into()))?;
-                        let status = resp.status();
-                        let resp_text = resp.text().await.map_err(|err| backoff::Error::transient(err.into()))?;
+            match (|| {
+                let req = req.try_clone().unwrap();
 
-                        if status.is_server_error() || status.as_u16() == 429 {
-                            let err = anyhow::anyhow!("{}: {}", status, resp_text);
+                async move {
+                    let resp = req.send().await.map_err(|err| -> anyhow::Error { err.into() })?;
+                    let status = resp.status();
+                    let resp_text = resp.text().await.map_err(|err| -> anyhow::Error { err.into() })?;
 
-                            return Err(backoff::Error::transient(err));
-                        }
+                    if status.is_server_error() || status.as_u16() == 429 {
+                        let err = anyhow::anyhow!("{}: {}", status, resp_text);
 
-
-                        Ok(resp_text)
+                        return Err(err);
                     }
-                },
-                |error, duration: std::time::Duration| {
-                    let duration = duration.as_secs();
 
-                    tracing::warn!(
-                        method = "PUT",
-                        url = %url,
-                        ?error,
-                        "Failed to send request. Retrying in {duration} seconds…"
-                    );
-                },
-            )
+                    Ok(resp_text)
+                }
+            })
+            .retry(backoff_builder)
+            .notify(|error: &anyhow::Error, duration: std::time::Duration| {
+                let duration = duration.as_secs();
+
+                tracing::warn!(
+                    method = "PUT",
+                    url = %url,
+                    %error,
+                    "Failed to send request. Retrying in {duration} seconds…"
+                );
+            })
             .await {
                 Ok(resp) => resp,
                 Err(error) => {
                     tracing::warn!(
                         method = "PUT",
                         url = %url,
-                        ?error,
+                        %error,
                         "Failed to send request. All retries failed"
                     );
 

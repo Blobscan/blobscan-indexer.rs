@@ -2,7 +2,7 @@ use std::fmt::Debug;
 
 use alloy::primitives::B256;
 use async_trait::async_trait;
-use backoff::ExponentialBackoff;
+use backon::ExponentialBuilder;
 use chrono::TimeDelta;
 use reqwest::{Client, Url};
 
@@ -51,13 +51,13 @@ pub struct BlobscanClient {
     base_url: Url,
     client: reqwest::Client,
     jwt_manager: JWTManager,
-    exp_backoff: Option<ExponentialBackoff>,
+    exp_backoff: Option<ExponentialBuilder>,
 }
 
 pub struct Config {
     pub base_url: String,
     pub secret_key: String,
-    pub exp_backoff: Option<ExponentialBackoff>,
+    pub exp_backoff: Option<ExponentialBuilder>,
 }
 
 #[async_trait]

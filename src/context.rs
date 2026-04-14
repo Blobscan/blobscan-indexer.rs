@@ -5,7 +5,7 @@ use alloy::{
     providers::{Provider, ProviderBuilder},
 };
 use anyhow::{anyhow, bail, Result as AnyhowResult};
-use backoff::ExponentialBackoffBuilder;
+use backon::ExponentialBuilder;
 use dyn_clone::DynClone;
 
 use crate::{
@@ -60,7 +60,7 @@ pub struct ContextConfig {
 
 impl Context {
     pub async fn try_new(config: ContextConfig) -> AnyhowResult<Self> {
-        let exp_backoff = Some(ExponentialBackoffBuilder::default().build());
+        let exp_backoff = Some(ExponentialBuilder::default());
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(16))
             .build()?;
