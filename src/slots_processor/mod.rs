@@ -231,7 +231,8 @@ impl SlotsProcessor {
         }
 
         // Create entities to be indexed
-        let block_entity = Block::try_from((&execution_block, slot))?;
+        let block_entity =
+            Block::try_from((&execution_block, slot, self.context.slots_per_epoch()))?;
         let tx_entities = blob_txs
             .iter()
             .map(|tx| BlobscanTransaction::try_from((*tx, &execution_block)))

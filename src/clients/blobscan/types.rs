@@ -24,6 +24,7 @@ pub struct Block {
     pub hash: B256,
     pub timestamp: BlockTimestamp,
     pub slot: u32,
+    pub epoch: u32,
     pub blob_gas_used: U256,
     pub excess_blob_gas: U256,
 }
@@ -113,11 +114,15 @@ impl fmt::Debug for Blob {
     }
 }
 
-impl<'a> TryFrom<(&'a ExecutionBlock<ExecutionTransaction>, u32)> for Block {
+impl<'a> TryFrom<(&'a ExecutionBlock<ExecutionTransaction>, u32, u32)> for Block {
     type Error = anyhow::Error;
 
     fn try_from(
-        (execution_block, slot): (&'a ExecutionBlock<ExecutionTransaction>, u32),
+        (execution_block, slot, slots_per_epoch): (
+            &'a ExecutionBlock<ExecutionTransaction>,
+            u32,
+            u32,
+        ),
     ) -> Result<Self, Self::Error> {
         let number = execution_block.header.number;
         let hash = execution_block.header.hash;
@@ -143,11 +148,14 @@ impl<'a> TryFrom<(&'a ExecutionBlock<ExecutionTransaction>, u32)> for Block {
             }
         };
 
+        let epoch = slot / slots_per_epoch;
+
         Ok(Self {
             number,
             hash,
             timestamp,
             slot,
+            epoch,
             blob_gas_used,
             excess_blob_gas,
         })

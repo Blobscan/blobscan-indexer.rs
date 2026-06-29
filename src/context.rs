@@ -31,6 +31,8 @@ pub trait CommonContext: Send + Sync + DynClone {
     fn network(&self) -> &Network;
     fn provider(&self) -> &dyn Provider<Ethereum>;
     fn syncing_settings(&self) -> &SyncingSettings;
+    /// Number of slots per epoch, as reported by the consensus client's spec.
+    fn slots_per_epoch(&self) -> u32;
 }
 
 dyn_clone::clone_trait_object!(CommonContext);
@@ -38,6 +40,7 @@ dyn_clone::clone_trait_object!(CommonContext);
 
 struct ContextRef {
     pub network: Network,
+    pub slots_per_epoch: u32,
     pub beacon_client: Box<dyn CommonBeaconClient>,
     pub blobscan_client: Box<dyn CommonBlobscanClient>,
     pub provider: Box<dyn Provider<Ethereum>>,
@@ -64,43 +67,56 @@ impl Context {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(16))
             .build()?;
-        let provider = ProviderBuilder::new()
-            .network::<Ethereum>()
-            .connect_http(config.execution_node_base_url.parse()?);
+        let provider: Box<dyn Provider<Ethereum>> = Box::new(
+            ProviderBuilder::new()
+                .network::<Ethereum>()
+                .connect_http(config.execution_node_base_url.parse()?),
+        );
+        let beacon_client: Box<dyn CommonBeaconClient> = Box::new(BeaconClient::try_with_client(
+            client.clone(),
+            BeaconClientConfig {
+                base_url: config.beacon_api_base_url.clone(),
+                exp_backoff: exp_backoff.clone(),
+            },
+        )?);
+        let blobscan_client: Box<dyn CommonBlobscanClient> =
+            Box::new(BlobscanClient::try_with_client(
+                client,
+                BlobscanClientConfig {
+                    base_url: config.blobscan_api_base_url.clone(),
+                    secret_key: config.blobscan_secret_key.clone(),
+                    exp_backoff,
+                },
+            )?);
 
-        let ctx = Self {
+        let slots_per_epoch = Self::validate_clients_consistency(
+            provider.as_ref(),
+            beacon_client.as_ref(),
+            &config.network,
+        )
+        .await?;
+
+        Ok(Self {
             inner: Arc::new(ContextRef {
                 network: config.network,
+                slots_per_epoch,
                 syncing_settings: config.syncing_settings,
-                blobscan_client: Box::new(BlobscanClient::try_with_client(
-                    client.clone(),
-                    BlobscanClientConfig {
-                        base_url: config.blobscan_api_base_url.clone(),
-                        secret_key: config.blobscan_secret_key.clone(),
-                        exp_backoff: exp_backoff.clone(),
-                    },
-                )?),
-                beacon_client: Box::new(BeaconClient::try_with_client(
-                    client,
-                    BeaconClientConfig {
-                        base_url: config.beacon_api_base_url.clone(),
-                        exp_backoff,
-                    },
-                )?),
-                // Provider::<HttpProvider>::try_from(execution_node_endpoint)?
-                provider: Box::new(provider),
+                blobscan_client,
+                beacon_client,
+                provider,
             }),
-        };
-
-        ctx.validate_clients_consistency().await?;
-
-        Ok(ctx)
+        })
     }
 
-    async fn validate_clients_consistency(&self) -> AnyhowResult<()> {
-        let execution_chain_id = self.provider().get_chain_id().await?;
-        let consensus_spec = self.beacon_client().get_spec().await?;
-        let network = self.network();
+    /// Cross-checks the execution and consensus clients against the configured network
+    /// and returns the consensus `SLOTS_PER_EPOCH` value.
+    async fn validate_clients_consistency(
+        provider: &dyn Provider<Ethereum>,
+        beacon_client: &dyn CommonBeaconClient,
+        network: &Network,
+    ) -> AnyhowResult<u32> {
+        let execution_chain_id = provider.get_chain_id().await?;
+        let consensus_spec = beacon_client.get_spec().await?;
 
         match consensus_spec {
             Some(spec) => {
@@ -116,13 +132,15 @@ impl Context {
                         bail!("Environment network mismatch for '{p}': expected chain_id={}, got {} from execution client", network.chain_id, execution_chain_id);
                     }
                 }
-            }
-            None => {
-                return Err(anyhow!("No consensus spec found"));
-            }
-        };
 
-        Ok(())
+                if spec.slots_per_epoch == 0 {
+                    bail!("Consensus spec reported SLOTS_PER_EPOCH = 0");
+                }
+
+                Ok(spec.slots_per_epoch as u32)
+            }
+            None => Err(anyhow!("No consensus spec found")),
+        }
     }
 }
 
@@ -145,6 +163,10 @@ impl CommonContext for Context {
 
     fn network(&self) -> &Network {
         &self.inner.network
+    }
+
+    fn slots_per_epoch(&self) -> u32 {
+        self.inner.slots_per_epoch
     }
 }
 

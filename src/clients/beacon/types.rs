@@ -45,6 +45,8 @@ pub struct SpecResponse {
 pub struct Spec {
     #[serde(rename = "DEPOSIT_NETWORK_ID", deserialize_with = "deserialize_u64")]
     pub deposit_network_id: u64,
+    #[serde(rename = "SLOTS_PER_EPOCH", deserialize_with = "deserialize_u64")]
+    pub slots_per_epoch: u64,
 }
 #[derive(Deserialize, Debug)]
 pub struct Block {
