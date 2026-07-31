@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use alloy::{
     consensus::Transaction,
@@ -268,8 +268,16 @@ impl SlotsProcessor {
             .map_err(SlotProcessingError::ClientError)?;
 
         let block_number = execution_block.header.number;
+        let time_since_block = SystemTime::now()
+            .duration_since(UNIX_EPOCH + Duration::from_secs(execution_block.header.timestamp))
+            .unwrap_or_default();
 
-        info!(slot, block_number, "Block indexed successfully");
+        info!(
+            slot,
+            block_number,
+            time_since_block = ?time_since_block,
+            "Block indexed successfully"
+        );
 
         Ok(())
     }
