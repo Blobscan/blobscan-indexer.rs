@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1](https://github.com/Blobscan/blobscan-indexer.rs/compare/v0.6.0...v0.6.1) - 2026-07-31
+
+### Added
+
+- log time elapsed since block timestamp on successful index
+- send network_name and chain_id tags to Sentry
+
+### Fixed
+
+- restore jsonwebtoken with feature aws_lc_rs enabled
+
+### Other
+
+- Merge pull request #134 from Blobscan/dependabot/cargo/rand-0.8.6
+- migrate from backoff to backon and update dependencies
+- update deps aws-lc-rs and rand
+- bump alloy to 2.0.0
+
 ## [0.6.0](https://github.com/Blobscan/blobscan-indexer.rs/compare/v0.5.6...v0.6.0) - 2026-03-23
 
 ### Fixed
