@@ -275,7 +275,7 @@ impl SlotsProcessor {
         info!(
             slot,
             block_number,
-            time_since_block = ?time_since_block,
+            time_since_block = %humantime::format_duration(time_since_block),
             "Block indexed successfully"
         );
 

@@ -40,6 +40,7 @@ anyhow = { version = "1.0.70", features = ["backtrace"] }
 thiserror = "1.0.40"
 sentry = { version = "0.47.0", features = ["debug-images"] }
 sentry-tracing = "0.47.0"
+humantime = "2.4.0"
 
 
 [dev-dependencies]
