@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.3](https://github.com/Blobscan/blobscan-indexer.rs/compare/v0.6.2...v0.6.3) - 2026-10-15
+
+### Fixed
+
+- fetch blobs by slot instead of block root ([#146](https://github.com/Blobscan/blobscan-indexer.rs/pull/146))
+
 ## [0.6.2](https://github.com/Blobscan/blobscan-indexer.rs/compare/v0.6.1...v0.6.2) - 2026-09-23
 
 ### Fixed
