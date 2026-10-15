@@ -177,12 +177,9 @@ impl SlotsProcessor {
             }
         };
 
-        let has_blobs = match beacon_block.blob_kzg_commitments {
-            Some(commitments) => !commitments.is_empty(),
-            None => false,
-        };
+        let blob_kzg_commitments = beacon_block.blob_kzg_commitments.unwrap_or_default();
 
-        if !has_blobs {
+        if blob_kzg_commitments.is_empty() {
             debug!(
                 block_root = ?block_root,
                 slot, "Skipping - block doesn't contain blob kzg commitments"
@@ -207,12 +204,14 @@ impl SlotsProcessor {
             return Err(anyhow!("Blocks mismatch: Consensus block \"{block_root}\" contains blob KZG commitments, but the corresponding execution block \"{execution_block_hash:#?}\" does not contain any blob transactions").into());
         }
 
+        // Fetch the blobs by slot and not by block root, as some beacon nodes (for example, nodes
+        // that are not supernodes) cannot reconstruct old blobs by block root.
         let blobs = retry_on_none(
             || {
                 let beacon_client = self.context.beacon_client();
 
                 async move {
-                    let blobs = beacon_client.get_blobs(block_root.into()).await?;
+                    let blobs = beacon_client.get_blobs(slot.into()).await?;
 
                     match blobs {
                         Some(blobs) if blobs.is_empty() => Ok::<_, ClientError>(None),
@@ -228,6 +227,20 @@ impl SlotsProcessor {
 
         if blobs.is_empty() {
             return Err(anyhow!("Blobs sidecar is empty").into());
+        }
+
+        // The block at the slot can change if a reorg occurs. Thus, make sure that the sidecar
+        // commitments are equal to the commitments of the block that we got by block root.
+        let is_commitments_match = blobs
+            .iter()
+            .map(|blob| &blob.kzg_commitment)
+            .eq(blob_kzg_commitments.iter());
+
+        if !is_commitments_match {
+            return Err(anyhow!(
+                "Blob sidecars at slot {slot} do not match the KZG commitments of block '{block_root}'. The block was possibly reorged"
+            )
+            .into());
         }
 
         // Create entities to be indexed
