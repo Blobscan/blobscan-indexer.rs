@@ -45,3 +45,4 @@ humantime = "2.4.0"
 
 [dev-dependencies]
 mockall = "0.12.1"
+tokio = { version = "1.43.1", features = ["test-util"] }

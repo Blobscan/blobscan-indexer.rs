@@ -56,10 +56,9 @@ pub enum SSEIndexingError {
 }
 
 /// Delay before the `failures`-th consecutive reconnect attempt: 2s, 4s, 8s… capped at 60s.
-fn sse_reconnect_delay(failures: u32) -> Duration {
-    SSE_RECONNECT_BASE_DELAY
-        .saturating_mul(2u32.saturating_pow(failures.saturating_sub(1)))
-        .min(SSE_RECONNECT_MAX_DELAY)
+fn sse_reconnect_delay(failures: u32, base: Duration, max: Duration) -> Duration {
+    base.saturating_mul(2u32.saturating_pow(failures.saturating_sub(1)))
+        .min(max)
 }
 
 /// A connection-level failure the beacon node or a proxy in front of it can cause
@@ -108,6 +107,8 @@ pub struct RunParams {
 pub struct SSEIndexingTask {
     context: Box<dyn CommonContext>,
     error_report_tx: TaskErrorChannelSender,
+    /// (base, max) of the exponential delay between resubscriptions.
+    reconnect_delays: (Duration, Duration),
 }
 
 impl SSEIndexingTask {
@@ -115,12 +116,20 @@ impl SSEIndexingTask {
         SSEIndexingTask {
             context,
             error_report_tx,
+            reconnect_delays: (SSE_RECONNECT_BASE_DELAY, SSE_RECONNECT_MAX_DELAY),
         }
+    }
+
+    #[cfg(test)]
+    fn with_reconnect_delays(mut self, base: Duration, max: Duration) -> Self {
+        self.reconnect_delays = (base, max);
+        self
     }
 
     pub fn run(&self, params: RunParams) -> IndexingTaskJoinHandle {
         let context = self.context.clone();
         let error_report_tx = self.error_report_tx.clone();
+        let reconnect_delays = self.reconnect_delays;
         let last_synced_block = params.last_synced_block;
         let last_synced_slot = params.last_synced_slot;
 
@@ -156,6 +165,7 @@ impl SSEIndexingTask {
                     let mut catchup_sync_rx: Option<TaskResultChannelReceiver> = None;
                     let mut catchup_task_handle: Option<JoinHandle<()>> = None;
                     let mut is_first_event = true;
+                    let mut received_message = false;
                     let head_event_span = info_span!("head");
                     let finalized_event_span =
                         info_span!("finalized_checkpoint");
@@ -163,7 +173,8 @@ impl SSEIndexingTask {
                     loop {
                         let event = match timeout(SSE_IDLE_TIMEOUT, event_source.next()).await {
                             Ok(Some(event)) => event,
-                            Ok(None) => break,
+                            // A closed stream is handled like `StreamEnded` below.
+                            Ok(None) => Err(reqwest_eventsource::Error::StreamEnded),
                             Err(_) => {
                                 warn!("No SSE event received in {}s. Reconnecting…", SSE_IDLE_TIMEOUT.as_secs());
                                 event_source.close();
@@ -199,6 +210,7 @@ impl SSEIndexingTask {
                             }
                             Ok(Event::Message(event)) => {
                                 consecutive_failures = 0;
+                                received_message = true;
                                 let event_name = event.event.as_str();
 
                                 match event_name {
@@ -359,7 +371,10 @@ impl SSEIndexingTask {
                                     return Err(error.into());
                                 }
 
-                                if let reqwest_eventsource::Error::StreamEnded = error {
+                                // A stream that ends after delivering events is routine. One that
+                                // ends before delivering any is a failure, or this would resubscribe
+                                // in a tight loop.
+                                if matches!(error, reqwest_eventsource::Error::StreamEnded) && received_message {
                                     info!("SSE stream ended. Resubscribing to stream…");
                                 } else {
                                     consecutive_failures += 1;
@@ -373,7 +388,7 @@ impl SSEIndexingTask {
                                         });
                                     }
 
-                                    let delay = sse_reconnect_delay(consecutive_failures);
+                                    let delay = sse_reconnect_delay(consecutive_failures, reconnect_delays.0, reconnect_delays.1);
 
                                     warn!(
                                         attempt = consecutive_failures,
@@ -436,7 +451,8 @@ mod tests {
 
     #[test]
     fn reconnect_delay_doubles_and_is_capped() {
-        let secs = |n| sse_reconnect_delay(n).as_secs();
+        let secs =
+            |n| sse_reconnect_delay(n, SSE_RECONNECT_BASE_DELAY, SSE_RECONNECT_MAX_DELAY).as_secs();
 
         assert_eq!(secs(1), 2);
         assert_eq!(secs(2), 4);
@@ -454,5 +470,193 @@ mod tests {
         assert!(!is_recoverable_sse_error(&Error::InvalidLastEventId(
             "x".into()
         )));
+    }
+
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    use alloy::{
+        network::Ethereum,
+        providers::{Provider, ProviderBuilder},
+        transports::mock::Asserter,
+    };
+    use reqwest_eventsource::EventSource;
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpListener,
+        sync::mpsc,
+    };
+
+    use crate::{
+        clients::{beacon::MockCommonBeaconClient, blobscan::MockCommonBlobscanClient},
+        context::SyncingSettings,
+        indexer::types::TaskErrorChannelReceiver,
+        network::{Network, NetworkName},
+    };
+
+    #[derive(Clone)]
+    struct TestContext {
+        beacon: Arc<MockCommonBeaconClient>,
+        blobscan: Arc<MockCommonBlobscanClient>,
+        provider: Arc<dyn Provider<Ethereum>>,
+        network: Network,
+        settings: Arc<SyncingSettings>,
+    }
+
+    impl CommonContext for TestContext {
+        fn beacon_client(&self) -> &dyn crate::clients::beacon::CommonBeaconClient {
+            self.beacon.as_ref()
+        }
+
+        fn blobscan_client(&self) -> &dyn crate::clients::blobscan::CommonBlobscanClient {
+            self.blobscan.as_ref()
+        }
+
+        fn network(&self) -> &Network {
+            &self.network
+        }
+
+        fn provider(&self) -> &dyn Provider<Ethereum> {
+            self.provider.as_ref()
+        }
+
+        fn syncing_settings(&self) -> &SyncingSettings {
+            &self.settings
+        }
+    }
+
+    /// One scripted answer of the fake beacon node: status, content type, body and whether the
+    /// connection then stays open (a healthy event stream does).
+    type Reply = (u16, &'static str, &'static str, bool);
+
+    const BAD_CONTENT_TYPE: Reply = (200, "application/json", "{\"message\":\"oops\"}", false);
+    const UNAVAILABLE: Reply = (503, "application/json", "{\"message\":\"down\"}", false);
+    const HEALTHY: Reply = (200, "text/event-stream", ": hello\n\n", true);
+
+    /// Serves `replies` to successive connections (the last one repeats).
+    async fn fake_beacon_node(replies: Vec<Reply>) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/events", listener.local_addr().unwrap());
+        let served = AtomicUsize::new(0);
+
+        tokio::spawn(async move {
+            loop {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let n = served.fetch_add(1, Ordering::SeqCst);
+                let (status, content_type, body, keep_open) = replies[n.min(replies.len() - 1)];
+                let mut buf = [0u8; 4096];
+                let _ = socket.read(&mut buf).await;
+
+                let head = if keep_open {
+                    format!("HTTP/1.1 {status} X\r\ncontent-type: {content_type}\r\n\r\n{body}")
+                } else {
+                    format!(
+                        "HTTP/1.1 {status} X\r\ncontent-type: {content_type}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                        body.len()
+                    )
+                };
+                let _ = socket.write_all(head.as_bytes()).await;
+
+                if keep_open {
+                    tokio::spawn(async move {
+                        let _socket = socket;
+                        std::future::pending::<()>().await;
+                    });
+                }
+            }
+        });
+
+        url
+    }
+
+    /// Runs the SSE task against `replies`. Returns the receiver of subscription
+    /// notifications and the error reports, plus the task handle.
+    async fn run_task(
+        replies: Vec<Reply>,
+    ) -> (
+        mpsc::UnboundedReceiver<()>,
+        TaskErrorChannelReceiver,
+        IndexingTaskJoinHandle,
+    ) {
+        let url = fake_beacon_node(replies).await;
+        let (subscribed_tx, subscribed_rx) = mpsc::unbounded_channel();
+        let mut beacon = MockCommonBeaconClient::new();
+
+        beacon.expect_subscribe_to_events().returning(move |_| {
+            subscribed_tx.send(()).unwrap();
+
+            Ok(EventSource::new(reqwest::Client::new().get(url.clone())).unwrap())
+        });
+
+        let mut blobscan = MockCommonBlobscanClient::new();
+
+        blobscan
+            .expect_get_sync_state()
+            .returning(|| Box::pin(std::future::ready(Ok(None))));
+
+        let context = TestContext {
+            beacon: Arc::new(beacon),
+            blobscan: Arc::new(blobscan),
+            provider: Arc::new(ProviderBuilder::new().connect_mocked_client(Asserter::new())),
+            network: Network {
+                name: NetworkName::Devnet,
+                chain_id: 1,
+                dencun_fork_slot: 0,
+                epoch: 0,
+            },
+            settings: Arc::new(SyncingSettings {
+                concurrency: 1,
+                checkpoint_size: 1,
+                disable_checkpoints: true,
+            }),
+        };
+        let (error_tx, error_rx) = mpsc::channel(8);
+        let handle = SSEIndexingTask::new(Box::new(context), error_tx)
+            .with_reconnect_delays(Duration::from_millis(1), Duration::from_millis(4))
+            .run(RunParams {
+                last_synced_slot: None,
+                last_synced_block: None,
+            });
+
+        (subscribed_rx, error_rx, handle)
+    }
+
+    #[tokio::test]
+    async fn resubscribes_after_connection_failures_instead_of_exiting() {
+        let (mut subscribed, mut errors, handle) =
+            run_task(vec![BAD_CONTENT_TYPE, UNAVAILABLE, HEALTHY]).await;
+
+        for attempt in 1..=3 {
+            subscribed
+                .recv()
+                .await
+                .unwrap_or_else(|| panic!("no subscription attempt {attempt}"));
+        }
+
+        assert!(errors.try_recv().is_err(), "the task reported an error");
+        assert!(!handle.is_finished(), "the task exited");
+
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn gives_up_after_too_many_consecutive_failures() {
+        let (mut subscribed, mut errors, _handle) = run_task(vec![UNAVAILABLE]).await;
+
+        let report = errors.recv().await.expect("an error report");
+        let message = report.error.to_string();
+
+        assert!(message.contains("consecutive failures"), "{message}");
+        assert!(message.contains("503"), "{message}");
+
+        let mut attempts = 0;
+
+        while subscribed.try_recv().is_ok() {
+            attempts += 1;
+        }
+
+        assert_eq!(attempts, SSE_MAX_CONSECUTIVE_FAILURES as usize + 1);
     }
 }
