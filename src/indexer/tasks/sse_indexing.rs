@@ -31,10 +31,18 @@ const SSE_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 
 const HEAD_BLOCK_PROCESSING_DELAY: Duration = Duration::from_millis(500);
 
+/// Consecutive failed (re)subscriptions tolerated before giving up and letting the
+/// process restart. Any received message resets the count.
+const SSE_MAX_CONSECUTIVE_FAILURES: u32 = 10;
+const SSE_RECONNECT_BASE_DELAY: Duration = Duration::from_secs(2);
+const SSE_RECONNECT_MAX_DELAY: Duration = Duration::from_secs(60);
+
 #[derive(Debug, thiserror::Error)]
 pub enum SSEIndexingError {
     #[error("an error ocurred while receiving events from the SSE stream: {0}")]
     ConnectionFailure(#[from] reqwest_eventsource::Error),
+    #[error("SSE stream unavailable after {attempts} consecutive failures: {detail}")]
+    Unavailable { attempts: u32, detail: String },
     #[error("failed to subscribe to SSE stream: {0}")]
     FailedSubscription(#[source] ClientError),
     #[error("failed to fetch indexer state: {0}")]
@@ -45,6 +53,51 @@ pub enum SSEIndexingError {
     EventDeserializationFailure(#[from] serde_json::Error),
     #[error("failed to handle event \"{event}\": {error}")]
     EventHandlingError { event: String, error: anyhow::Error },
+}
+
+/// Delay before the `failures`-th consecutive reconnect attempt: 2s, 4s, 8s… capped at 60s.
+fn sse_reconnect_delay(failures: u32) -> Duration {
+    SSE_RECONNECT_BASE_DELAY
+        .saturating_mul(2u32.saturating_pow(failures.saturating_sub(1)))
+        .min(SSE_RECONNECT_MAX_DELAY)
+}
+
+/// A connection-level failure the beacon node or a proxy in front of it can cause
+/// (restart, 429, 502, an error page with a JSON body): worth resubscribing.
+/// Malformed streams are not: they point at a bug, not at the network.
+fn is_recoverable_sse_error(error: &reqwest_eventsource::Error) -> bool {
+    use reqwest_eventsource::Error;
+
+    matches!(
+        error,
+        Error::StreamEnded
+            | Error::Transport(_)
+            | Error::InvalidContentType(..)
+            | Error::InvalidStatusCode(..)
+    )
+}
+
+/// The error message alone ("Invalid header value: \"application/json\"") hides what the
+/// server actually answered, so read the status and the start of the body.
+async fn describe_sse_error(error: reqwest_eventsource::Error) -> String {
+    use reqwest_eventsource::Error;
+
+    let (summary, response) = match error {
+        Error::InvalidContentType(_, response) | Error::InvalidStatusCode(_, response) => {
+            (format!("HTTP {}", response.status()), Some(response))
+        }
+        other => (other.to_string(), None),
+    };
+
+    match response {
+        Some(response) => {
+            let body = response.text().await.unwrap_or_default();
+            let body: String = body.chars().take(300).collect();
+
+            format!("{summary}, body: {body}")
+        }
+        None => summary,
+    }
 }
 
 pub struct RunParams {
@@ -81,6 +134,7 @@ impl SSEIndexingTask {
             let sse_indexing_span = info_span!("sse-indexing");
             let mut last_sse_synced_block = last_synced_block;
             let mut last_sse_synced_slot = last_synced_slot;
+            let mut consecutive_failures: u32 = 0;
 
             loop {
                 let result: Result<(), SSEIndexingError> = async {
@@ -144,6 +198,7 @@ impl SSEIndexingTask {
                                 debug!("Subscrption connection opened")
                             }
                             Ok(Event::Message(event)) => {
+                                consecutive_failures = 0;
                                 let event_name = event.event.as_str();
 
                                 match event_name {
@@ -300,9 +355,36 @@ impl SSEIndexingTask {
                                     catchup_task_handle.abort();
                                 }
 
+                                if !is_recoverable_sse_error(&error) {
+                                    return Err(error.into());
+                                }
+
                                 if let reqwest_eventsource::Error::StreamEnded = error {
                                     info!("SSE stream ended. Resubscribing to stream…");
+                                } else {
+                                    consecutive_failures += 1;
 
+                                    let detail = describe_sse_error(error).await;
+
+                                    if consecutive_failures > SSE_MAX_CONSECUTIVE_FAILURES {
+                                        return Err(SSEIndexingError::Unavailable {
+                                            attempts: consecutive_failures,
+                                            detail,
+                                        });
+                                    }
+
+                                    let delay = sse_reconnect_delay(consecutive_failures);
+
+                                    warn!(
+                                        attempt = consecutive_failures,
+                                        "SSE connection failed ({detail}). Resubscribing in {}s…",
+                                        delay.as_secs()
+                                    );
+
+                                    tokio::time::sleep(delay).await;
+                                }
+
+                                {
                                     let sync_state = context.blobscan_client().get_sync_state().await.map_err(SSEIndexingError::IndexerStateRetrievalError)?;
 
                                     last_sse_synced_slot = sync_state.as_ref().and_then(|state| state.last_upper_synced_slot);
@@ -321,8 +403,6 @@ impl SSEIndexingTask {
                                     });
 
                                     break;
-                                } else {
-                                    return Err(error.into());
                                 }
                             }
                         }
@@ -347,5 +427,32 @@ impl SSEIndexingTask {
                 }
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reconnect_delay_doubles_and_is_capped() {
+        let secs = |n| sse_reconnect_delay(n).as_secs();
+
+        assert_eq!(secs(1), 2);
+        assert_eq!(secs(2), 4);
+        assert_eq!(secs(3), 8);
+        assert_eq!(secs(5), 32);
+        assert_eq!(secs(6), 60);
+        assert_eq!(secs(u32::MAX), 60);
+    }
+
+    #[test]
+    fn only_connection_level_errors_are_recoverable() {
+        use reqwest_eventsource::Error;
+
+        assert!(is_recoverable_sse_error(&Error::StreamEnded));
+        assert!(!is_recoverable_sse_error(&Error::InvalidLastEventId(
+            "x".into()
+        )));
     }
 }

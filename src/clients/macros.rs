@@ -22,7 +22,19 @@ macro_rules! json_get {
             match (|| {
                 let req = req.try_clone().unwrap();
                 async move {
-                    req.send().await.map_err(|err| -> anyhow::Error { err.into() })
+                    let resp = req.send().await.map_err(|err| -> anyhow::Error { err.into() })?;
+                    let status = resp.status();
+
+                    // A rate limit or a proxy/upstream failure is transient: retry it
+                    // like a transport error instead of failing the slot.
+                    if status.is_server_error() || status.as_u16() == 429 {
+                        let body = resp.text().await.unwrap_or_default();
+                        let body: String = body.chars().take(200).collect();
+
+                        return Err(anyhow::anyhow!("{status}: {body}"));
+                    }
+
+                    Ok(resp)
                 }
             })
             .retry(backoff_builder)
