@@ -42,6 +42,7 @@ struct TestContext {
     provider: Arc<dyn Provider<Ethereum>>,
     network: Network,
     settings: Arc<SyncingSettings>,
+    gloas_payload_wait: Duration,
 }
 
 impl CommonContext for TestContext {
@@ -63,6 +64,10 @@ impl CommonContext for TestContext {
 
     fn syncing_settings(&self) -> &SyncingSettings {
         &self.settings
+    }
+
+    fn gloas_payload_wait(&self) -> Duration {
+        self.gloas_payload_wait
     }
 }
 
@@ -134,7 +139,18 @@ struct Harness {
     provider_asserter: Asserter,
 }
 
+/// One slot, the default wait for a Gloas payload on most networks.
+const PAYLOAD_WAIT: Duration = Duration::from_secs(12);
+
 fn harness(beacon: MockCommonBeaconClient, execution_responses: Vec<Value>) -> Harness {
+    harness_with_payload_wait(beacon, execution_responses, PAYLOAD_WAIT)
+}
+
+fn harness_with_payload_wait(
+    beacon: MockCommonBeaconClient,
+    execution_responses: Vec<Value>,
+    gloas_payload_wait: Duration,
+) -> Harness {
     let indexed = Arc::new(Mutex::new(vec![]));
     let sink = indexed.clone();
     let mut blobscan = MockCommonBlobscanClient::new();
@@ -176,6 +192,7 @@ fn harness(beacon: MockCommonBeaconClient, execution_responses: Vec<Value>) -> H
             checkpoint_size: 1,
             disable_checkpoints: true,
         }),
+        gloas_payload_wait,
     };
 
     Harness {
@@ -265,7 +282,7 @@ async fn gloas_payload_that_is_never_revealed_is_skipped_not_fatal() {
 
     let h = harness(
         beacon,
-        vec![Value::Null; GLOAS_PAYLOAD_RETRY_MAX_ATTEMPTS as usize],
+        vec![Value::Null; retry_attempts_for(PAYLOAD_WAIT) as usize],
     );
 
     h.processor
@@ -278,6 +295,38 @@ async fn gloas_payload_that_is_never_revealed_is_skipped_not_fatal() {
         h.provider_asserter.read_q().is_empty(),
         "every attempt must have asked the execution client"
     );
+}
+
+#[test]
+fn the_payload_wait_becomes_attempts_every_half_second() {
+    assert_eq!(retry_attempts_for(Duration::from_secs(12)), 24);
+    assert_eq!(retry_attempts_for(Duration::from_secs(5)), 10);
+    assert_eq!(retry_attempts_for(Duration::from_millis(100)), 1);
+    assert_eq!(retry_attempts_for(Duration::ZERO), 1);
+}
+
+/// A shorter wait (Gnosis has 5 second slots) gives up after fewer attempts.
+#[tokio::test(start_paused = true)]
+async fn gloas_payload_wait_is_configurable() {
+    let commitments = vec![commitment_of(&blob(5))];
+    let mut beacon = MockCommonBeaconClient::new();
+
+    beacon
+        .expect_get_block()
+        .returning(move |_| ready(Ok(Some(gloas_block(commitments.clone())))));
+
+    let wait = Duration::from_secs(5);
+    let attempts = retry_attempts_for(wait) as usize;
+    // One more answer than attempts: it must stay unread.
+    let h = harness_with_payload_wait(beacon, vec![Value::Null; attempts + 1], wait);
+
+    h.processor
+        .index_block(B256::repeat_byte(0xaa))
+        .await
+        .unwrap();
+
+    assert_eq!(attempts, 10);
+    assert_eq!(h.provider_asserter.read_q().len(), 1);
 }
 
 #[tokio::test(start_paused = true)]

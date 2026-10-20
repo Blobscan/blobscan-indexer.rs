@@ -35,10 +35,14 @@ mod tests;
 const MAX_ALLOWED_REORG_DEPTH: u32 = 100;
 
 const RETRY_MAX_ATTEMPTS: u32 = 5;
-
-/// How long to wait for a Gloas payload to reach the execution client: about one slot.
-const GLOAS_PAYLOAD_RETRY_MAX_ATTEMPTS: u32 = 24;
 const RETRY_DELAY: Duration = Duration::from_millis(500);
+
+/// Attempts that cover `wait` at one every `RETRY_DELAY`, and at least one.
+fn retry_attempts_for(wait: Duration) -> u32 {
+    u32::try_from(wait.as_millis() / RETRY_DELAY.as_millis())
+        .unwrap_or(u32::MAX)
+        .max(1)
+}
 
 pub struct BlockData {
     pub root: B256,
@@ -205,7 +209,7 @@ impl SlotsProcessor {
         let execution_block = if execution_payload.from_bid {
             // Gloas (ePBS): the beacon block only commits to the payload. The builder reveals it
             // afterwards, so the execution client may not know the hash yet, and never will if
-            // the builder withholds it. Wait for it within a slot, then skip: there is nothing
+            // the builder withholds it. Wait for it (by default one slot), then skip: there is nothing
             // to index for a payload that never became part of the chain.
             let block = retry_on_none(
                 || async move {
@@ -214,7 +218,7 @@ impl SlotsProcessor {
                         .full()
                         .await
                 },
-                GLOAS_PAYLOAD_RETRY_MAX_ATTEMPTS,
+                retry_attempts_for(self.context.gloas_payload_wait()),
                 RETRY_DELAY,
             )
             .await?;

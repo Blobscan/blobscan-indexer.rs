@@ -16,6 +16,9 @@ pub struct Environment {
     pub secret_key: String,
     pub dencun_fork_slot: Option<u32>,
     pub sentry_dsn: Option<String>,
+    /// Seconds to wait for a Gloas execution payload to reach the execution client before
+    /// skipping its block. Defaults to one slot of the network.
+    pub gloas_payload_wait_secs: Option<u64>,
 }
 
 fn default_network() -> NetworkName {
