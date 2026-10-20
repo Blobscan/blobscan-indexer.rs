@@ -27,8 +27,10 @@ pub fn is_placeholder_proof(proof: &Proof) -> bool {
 /// block at the same slot, say) yields a proof that does not verify, and this returns an error
 /// instead of attaching the blob to the wrong commitment.
 ///
-/// Blobscan stores and serves the proof, and it is a pure function of the blob and its
-/// commitment, so it can be recomputed when a beacon node does not return a real one.
+/// The beacon `blob_sidecars` endpoint used to return this proof next to every blob. It stopped
+/// working for Gloas blocks, and its replacement (`/eth/v1/beacon/blobs`) returns the raw blobs
+/// only. Blobscan stores and serves the proof, and it is a pure function of the blob and its
+/// commitment, so it is recomputed here instead of being dropped.
 pub fn compute_blob_proof(blob: &HeapBlob, commitment: &KzgCommitment) -> Result<Proof> {
     let kzg_blob = KzgBlob::from_bytes(blob.inner().as_ref())
         .map_err(|err| anyhow!("Invalid blob for KZG proof computation: {err}"))?;
@@ -49,6 +51,32 @@ pub fn compute_blob_proof(blob: &HeapBlob, commitment: &KzgCommitment) -> Result
     }
 
     Ok(Proof::from_slice(proof_bytes.as_ref()))
+}
+
+/// Computes (and verifies) the proofs of many blobs in parallel, in the same order as `items`.
+///
+/// One proof takes about 45 ms of CPU in a release build and a block can carry 21 blobs, so doing
+/// them one after the other would hold the indexer for about a second per block.
+pub async fn compute_blob_proofs(items: Vec<(HeapBlob, KzgCommitment)>) -> Result<Vec<Proof>> {
+    let mut tasks = JoinSet::new();
+
+    for (i, (blob, commitment)) in items.into_iter().enumerate() {
+        tasks.spawn_blocking(move || {
+            compute_blob_proof(&blob, &commitment)
+                .map(|proof| (i, proof))
+                .with_context(|| format!("Blob {i}"))
+        });
+    }
+
+    let mut proofs = Vec::with_capacity(tasks.len());
+
+    while let Some(result) = tasks.join_next().await {
+        proofs.push(result??);
+    }
+
+    proofs.sort_by_key(|(i, _)| *i);
+
+    Ok(proofs.into_iter().map(|(_, proof)| proof).collect())
 }
 
 /// Whether `proof` is a valid KZG proof of `blob` for `commitment`. A proof that cannot even be
@@ -225,6 +253,35 @@ mod tests {
         assert_eq!(PLACEHOLDER_PROOF, hex.parse::<Proof>().unwrap());
         assert!(is_placeholder_proof(&PLACEHOLDER_PROOF));
         assert!(!is_placeholder_proof(&Proof::ZERO));
+    }
+
+    #[tokio::test]
+    async fn proofs_come_back_in_input_order() {
+        let blobs: Vec<_> = (1..=5).map(test_blob).collect();
+        let items: Vec<_> = blobs
+            .iter()
+            .map(|b| (b.clone(), commitment_of(b)))
+            .collect();
+
+        let proofs = compute_blob_proofs(items.clone()).await.unwrap();
+
+        for ((blob, commitment), proof) in items.iter().zip(&proofs) {
+            assert_eq!(*proof, compute_blob_proof(blob, commitment).unwrap());
+        }
+    }
+
+    #[tokio::test]
+    async fn a_failing_blob_fails_the_batch_and_names_the_blob() {
+        let good = test_blob(1);
+        let other = test_blob(2);
+        let items = vec![
+            (good.clone(), commitment_of(&good)),
+            (good.clone(), commitment_of(&other)),
+        ];
+
+        let err = compute_blob_proofs(items).await.unwrap_err();
+
+        assert!(format!("{err:#}").contains("Blob 1"), "{err:#}");
     }
 
     #[tokio::test]

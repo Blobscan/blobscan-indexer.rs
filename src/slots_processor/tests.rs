@@ -1,5 +1,5 @@
-//! `index_block` against mocked clients: the sidecar KZG proofs that beacon nodes return (the
-//! infinity point since Fulu) are replaced with real ones, and real ones are kept.
+//! `index_block` against mocked clients: the Gloas path (payload bid, raw blobs, computed proofs)
+//! and a regression test that the pre-Gloas path still passes sidecar proofs through untouched.
 
 use std::sync::{Arc, Mutex};
 
@@ -16,7 +16,7 @@ use super::*;
 use crate::{
     clients::{
         beacon::{
-            types::{Blob as BeaconBlob, Block as BeaconBlock, ExecutionPayload, KzgCommitment},
+            types::{Blob as BeaconBlob, Block as BeaconBlock, BlockExecutionPayload},
             MockCommonBeaconClient,
         },
         blobscan::MockCommonBlobscanClient,
@@ -98,7 +98,7 @@ fn commitment_of(blob: &HeapBlob) -> KzgCommitment {
     )
 }
 
-/// The real sepolia block 11942470, trimmed to two blob
+/// The real sepolia block 11942470 (the payload of slot 11384159), trimmed to two blob
 /// transactions, with their versioned hashes replaced by those of `commitments`.
 fn execution_block_json(commitments: &[KzgCommitment]) -> Value {
     let mut block: Value = serde_json::from_str(EXECUTION_BLOCK).unwrap();
@@ -115,12 +115,13 @@ fn execution_block_json(commitments: &[KzgCommitment]) -> Value {
     block
 }
 
-fn beacon_block(commitments: Vec<KzgCommitment>) -> BeaconBlock {
+fn gloas_block(commitments: Vec<KzgCommitment>) -> BeaconBlock {
     BeaconBlock {
         blob_kzg_commitments: Some(commitments),
-        execution_payload: Some(ExecutionPayload {
+        execution_payload: Some(BlockExecutionPayload {
             block_hash: B256::repeat_byte(0x07),
-            block_number: 11942470,
+            block_number: None,
+            from_bid: true,
         }),
         parent_root: B256::repeat_byte(0x01),
         slot: SLOT,
@@ -130,6 +131,7 @@ fn beacon_block(commitments: Vec<KzgCommitment>) -> BeaconBlock {
 struct Harness {
     processor: SlotsProcessor,
     indexed: Arc<Mutex<Vec<Vec<IndexedBlob>>>>,
+    provider_asserter: Asserter,
 }
 
 fn harness(beacon: MockCommonBeaconClient, execution_responses: Vec<Value>) -> Harness {
@@ -179,6 +181,7 @@ fn harness(beacon: MockCommonBeaconClient, execution_responses: Vec<Value>) -> H
     Harness {
         processor: SlotsProcessor::new(Box::new(context), None),
         indexed,
+        provider_asserter,
     }
 }
 
@@ -186,8 +189,127 @@ fn proof_for(blob: &HeapBlob, commitment: &KzgCommitment) -> B256x48 {
     compute_blob_proof(blob, commitment).unwrap()
 }
 
-/// A block whose sidecars carry `sidecar_proofs`, one per blob.
-async fn index_block_with_sidecar_proofs(
+#[tokio::test(start_paused = true)]
+async fn gloas_block_is_indexed_with_computed_proofs() {
+    let blobs = vec![blob(1), blob(2)];
+    let commitments: Vec<_> = blobs.iter().map(commitment_of).collect();
+    let (raw, block_commitments) = (blobs.clone(), commitments.clone());
+    let mut beacon = MockCommonBeaconClient::new();
+
+    beacon
+        .expect_get_block()
+        .returning(move |_| ready(Ok(Some(gloas_block(block_commitments.clone())))));
+    beacon
+        .expect_get_blob_data()
+        .times(1)
+        .returning(move |_| ready(Ok(Some(raw.clone()))));
+    beacon.expect_get_blobs().never();
+
+    let h = harness(beacon, vec![execution_block_json(&commitments)]);
+
+    h.processor
+        .index_block(B256::repeat_byte(0xaa))
+        .await
+        .unwrap();
+
+    let indexed = h.indexed.lock().unwrap();
+
+    assert_eq!(indexed.len(), 1, "the block must be indexed exactly once");
+    assert_eq!(indexed[0].len(), 2);
+
+    for (i, indexed_blob) in indexed[0].iter().enumerate() {
+        assert_eq!(indexed_blob.proof, proof_for(&blobs[i], &commitments[i]));
+        assert_ne!(
+            indexed_blob.proof, PLACEHOLDER_PROOF,
+            "a real proof, not the infinity placeholder"
+        );
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn gloas_payload_that_arrives_late_is_still_indexed() {
+    let blobs = vec![blob(3), blob(4)];
+    let commitments: Vec<_> = blobs.iter().map(commitment_of).collect();
+    let (raw, block_commitments) = (blobs.clone(), commitments.clone());
+    let mut beacon = MockCommonBeaconClient::new();
+
+    beacon
+        .expect_get_block()
+        .returning(move |_| ready(Ok(Some(gloas_block(block_commitments.clone())))));
+    beacon
+        .expect_get_blob_data()
+        .returning(move |_| ready(Ok(Some(raw.clone()))));
+
+    // The execution client answers `null` (unknown hash) a few times before the builder reveals.
+    let mut responses = vec![Value::Null; 5];
+    responses.push(execution_block_json(&commitments));
+    let h = harness(beacon, responses);
+
+    h.processor
+        .index_block(B256::repeat_byte(0xaa))
+        .await
+        .unwrap();
+
+    assert_eq!(h.indexed.lock().unwrap().len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn gloas_payload_that_is_never_revealed_is_skipped_not_fatal() {
+    let commitments = vec![commitment_of(&blob(5))];
+    let mut beacon = MockCommonBeaconClient::new();
+
+    beacon
+        .expect_get_block()
+        .returning(move |_| ready(Ok(Some(gloas_block(commitments.clone())))));
+    beacon.expect_get_blob_data().never();
+
+    let h = harness(
+        beacon,
+        vec![Value::Null; GLOAS_PAYLOAD_RETRY_MAX_ATTEMPTS as usize],
+    );
+
+    h.processor
+        .index_block(B256::repeat_byte(0xaa))
+        .await
+        .expect("a withheld payload must not stop the indexer");
+
+    assert!(h.indexed.lock().unwrap().is_empty());
+    assert!(
+        h.provider_asserter.read_q().is_empty(),
+        "every attempt must have asked the execution client"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn gloas_blob_that_does_not_match_its_commitment_is_rejected() {
+    let blobs = vec![blob(6), blob(7)];
+    let commitments: Vec<_> = blobs.iter().map(commitment_of).collect();
+    // Same count, but the node returned the blobs of another block at this slot (a reorg).
+    let other_block_blobs = vec![blob(8), blob(9)];
+    let block_commitments = commitments.clone();
+    let mut beacon = MockCommonBeaconClient::new();
+
+    beacon
+        .expect_get_block()
+        .returning(move |_| ready(Ok(Some(gloas_block(block_commitments.clone())))));
+    beacon
+        .expect_get_blob_data()
+        .returning(move |_| ready(Ok(Some(other_block_blobs.clone()))));
+
+    let h = harness(beacon, vec![execution_block_json(&commitments)]);
+
+    let err = h
+        .processor
+        .index_block(B256::repeat_byte(0xaa))
+        .await
+        .expect_err("mismatched blobs must not be indexed");
+
+    assert!(format!("{err:?}").contains("does not match"), "{err:?}");
+    assert!(h.indexed.lock().unwrap().is_empty());
+}
+
+/// A pre-Gloas block whose sidecars carry `sidecar_proofs`, one per blob.
+async fn index_pre_gloas_block(
     blobs: &[HeapBlob],
     sidecar_proofs: Vec<B256x48>,
 ) -> Vec<IndexedBlob> {
@@ -201,9 +323,16 @@ async fn index_block_with_sidecar_proofs(
     let block_commitments = commitments.clone();
     let mut beacon = MockCommonBeaconClient::new();
 
-    beacon
-        .expect_get_block()
-        .returning(move |_| ready(Ok(Some(beacon_block(block_commitments.clone())))));
+    beacon.expect_get_block().returning(move |_| {
+        ready(Ok(Some(BeaconBlock {
+            execution_payload: Some(BlockExecutionPayload {
+                block_hash: B256::repeat_byte(0x07),
+                block_number: Some(11942470),
+                from_bid: false,
+            }),
+            ..gloas_block(block_commitments.clone())
+        })))
+    });
     beacon.expect_get_blobs().returning(move |_| {
         ready(Ok(Some(
             sidecars
@@ -216,6 +345,7 @@ async fn index_block_with_sidecar_proofs(
                 .collect(),
         )))
     });
+    beacon.expect_get_blob_data().never();
 
     let h = harness(beacon, vec![execution_block_json(&commitments)]);
 
@@ -232,9 +362,9 @@ async fn index_block_with_sidecar_proofs(
 
 /// Since Fulu the beacon nodes answer sidecars with the infinity point instead of the proof.
 #[tokio::test(start_paused = true)]
-async fn placeholder_proofs_are_replaced_with_real_ones() {
+async fn pre_gloas_placeholder_proofs_are_replaced_with_real_ones() {
     let blobs = vec![blob(10), blob(11)];
-    let indexed = index_block_with_sidecar_proofs(&blobs, vec![PLACEHOLDER_PROOF; 2]).await;
+    let indexed = index_pre_gloas_block(&blobs, vec![PLACEHOLDER_PROOF; 2]).await;
 
     for (i, indexed_blob) in indexed.iter().enumerate() {
         assert_ne!(indexed_blob.proof, PLACEHOLDER_PROOF);
@@ -246,24 +376,23 @@ async fn placeholder_proofs_are_replaced_with_real_ones() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn valid_proofs_are_kept() {
+async fn pre_gloas_valid_proofs_are_kept() {
     let blobs = vec![blob(12), blob(13)];
     let given: Vec<_> = blobs
         .iter()
         .map(|b| proof_for(b, &commitment_of(b)))
         .collect();
-    let indexed = index_block_with_sidecar_proofs(&blobs, given.clone()).await;
+    let indexed = index_pre_gloas_block(&blobs, given.clone()).await;
 
     assert_eq!(indexed.iter().map(|b| b.proof).collect::<Vec<_>>(), given);
 }
 
 /// Not only the infinity point: any proof that does not verify is replaced.
 #[tokio::test(start_paused = true)]
-async fn proofs_that_do_not_verify_are_replaced() {
+async fn pre_gloas_proofs_that_do_not_verify_are_replaced() {
     let blobs = vec![blob(12), blob(13)];
     let indexed =
-        index_block_with_sidecar_proofs(&blobs, vec![B256x48::repeat_byte(0x11), B256x48::ZERO])
-            .await;
+        index_pre_gloas_block(&blobs, vec![B256x48::repeat_byte(0x11), B256x48::ZERO]).await;
 
     for (i, indexed_blob) in indexed.iter().enumerate() {
         assert_eq!(
@@ -274,10 +403,10 @@ async fn proofs_that_do_not_verify_are_replaced() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn only_the_invalid_sidecar_proofs_are_replaced() {
+async fn pre_gloas_only_the_invalid_sidecar_proofs_are_replaced() {
     let blobs = vec![blob(14), blob(15)];
     let valid = proof_for(&blobs[0], &commitment_of(&blobs[0]));
-    let indexed = index_block_with_sidecar_proofs(&blobs, vec![valid, PLACEHOLDER_PROOF]).await;
+    let indexed = index_pre_gloas_block(&blobs, vec![valid, PLACEHOLDER_PROOF]).await;
 
     assert_eq!(indexed[0].proof, valid);
     assert_eq!(

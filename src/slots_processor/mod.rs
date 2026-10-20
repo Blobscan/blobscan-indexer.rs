@@ -8,10 +8,14 @@ use alloy::{
 use anyhow::{anyhow, Context as AnyhowContext, Result};
 
 use crate::{
-    clients::beacon::types::{BlockHeader, BlockId},
-    utils::{alloy::BlobTransactionExt, futures::retry_on_none, kzg::replace_invalid_proofs},
+    clients::beacon::types::{Blob as BeaconBlob, BlockHeader, BlockId, KzgCommitment},
+    utils::{
+        alloy::BlobTransactionExt,
+        futures::retry_on_none,
+        kzg::{compute_blob_proofs, replace_invalid_proofs},
+    },
 };
-use tracing::{debug, info, Instrument};
+use tracing::{debug, info, warn, Instrument};
 
 use crate::{
     clients::{
@@ -31,6 +35,9 @@ mod tests;
 const MAX_ALLOWED_REORG_DEPTH: u32 = 100;
 
 const RETRY_MAX_ATTEMPTS: u32 = 5;
+
+/// How long to wait for a Gloas payload to reach the execution client: about one slot.
+const GLOAS_PAYLOAD_RETRY_MAX_ATTEMPTS: u32 = 24;
 const RETRY_DELAY: Duration = Duration::from_millis(500);
 
 pub struct BlockData {
@@ -195,11 +202,43 @@ impl SlotsProcessor {
 
         // Fetch execution block and perform some checks
 
-        let execution_block = provider
-            .get_block(ExecutionBlockId::Hash(execution_block_hash.into()))
-            .full()
-            .await?
-            .with_context(|| format!("Execution block '{execution_block_hash}' not found"))?;
+        let execution_block = if execution_payload.from_bid {
+            // Gloas (ePBS): the beacon block only commits to the payload. The builder reveals it
+            // afterwards, so the execution client may not know the hash yet, and never will if
+            // the builder withholds it. Wait for it within a slot, then skip: there is nothing
+            // to index for a payload that never became part of the chain.
+            let block = retry_on_none(
+                || async move {
+                    provider
+                        .get_block(ExecutionBlockId::Hash(execution_block_hash.into()))
+                        .full()
+                        .await
+                },
+                GLOAS_PAYLOAD_RETRY_MAX_ATTEMPTS,
+                RETRY_DELAY,
+            )
+            .await?;
+
+            match block {
+                Some(block) => block,
+                None => {
+                    warn!(
+                        block_root = ?block_root,
+                        slot,
+                        execution_block_hash = ?execution_block_hash,
+                        "Skipping - the execution client does not know the payload committed by the bid. It was withheld, or has not been revealed yet"
+                    );
+
+                    return Ok(());
+                }
+            }
+        } else {
+            provider
+                .get_block(ExecutionBlockId::Hash(execution_block_hash.into()))
+                .full()
+                .await?
+                .with_context(|| format!("Execution block '{execution_block_hash}' not found"))?
+        };
 
         let blob_txs = execution_block.transactions.filter_blob_transactions();
 
@@ -207,55 +246,62 @@ impl SlotsProcessor {
             return Err(anyhow!("Blocks mismatch: Consensus block \"{block_root}\" contains blob KZG commitments, but the corresponding execution block \"{execution_block_hash:#?}\" does not contain any blob transactions").into());
         }
 
-        // Fetch the blobs by slot and not by block root, as some beacon nodes (for example, nodes
-        // that are not supernodes) cannot reconstruct old blobs by block root.
-        let mut blobs = retry_on_none(
-            || {
-                let beacon_client = self.context.beacon_client();
+        let blobs = if execution_payload.from_bid {
+            self.fetch_blobs_with_computed_proofs(slot, &blob_kzg_commitments)
+                .await?
+        } else {
+            // Fetch the blobs by slot and not by block root, as some beacon nodes (for example, nodes
+            // that are not supernodes) cannot reconstruct old blobs by block root.
+            let mut blobs = retry_on_none(
+                || {
+                    let beacon_client = self.context.beacon_client();
 
-                async move {
-                    let blobs = beacon_client.get_blobs(slot.into()).await?;
+                    async move {
+                        let blobs = beacon_client.get_blobs(slot.into()).await?;
 
-                    match blobs {
-                        Some(blobs) if blobs.is_empty() => Ok::<_, ClientError>(None),
-                        other => Ok(other),
+                        match blobs {
+                            Some(blobs) if blobs.is_empty() => Ok::<_, ClientError>(None),
+                            other => Ok(other),
+                        }
                     }
-                }
-            },
-            RETRY_MAX_ATTEMPTS,
-            RETRY_DELAY,
-        )
-        .await?
-        .with_context(|| "Blobs sidecar not found".to_string())?;
-
-        if blobs.is_empty() {
-            return Err(anyhow!("Blobs sidecar is empty").into());
-        }
-
-        // The block at the slot can change if a reorg occurs. Thus, make sure that the sidecar
-        // commitments are equal to the commitments of the block that we got by block root.
-        let is_commitments_match = blobs
-            .iter()
-            .map(|blob| &blob.kzg_commitment)
-            .eq(blob_kzg_commitments.iter());
-
-        if !is_commitments_match {
-            return Err(anyhow!(
-                "Blob sidecars at slot {slot} do not match the KZG commitments of block '{block_root}'. The block was possibly reorged"
+                },
+                RETRY_MAX_ATTEMPTS,
+                RETRY_DELAY,
             )
-            .into());
-        }
+            .await?
+            .with_context(|| "Blobs sidecar not found".to_string())?;
 
-        // Since Fulu the beacon nodes rebuild sidecars from PeerDAS data and return a dummy
-        // (the infinity point) instead of the blob's KZG proof. Blobscan stores and serves the
-        // proof, so keep a sidecar's proof only if it verifies and compute it otherwise.
-        let replaced = replace_invalid_proofs(&mut blobs)
-            .await
-            .with_context(|| format!("Blobs of slot {slot}"))?;
+            if blobs.is_empty() {
+                return Err(anyhow!("Blobs sidecar is empty").into());
+            }
 
-        if replaced > 0 {
-            debug!(slot, replaced, "Replaced invalid KZG proofs");
-        }
+            // The block at the slot can change if a reorg occurs. Thus, make sure that the sidecar
+            // commitments are equal to the commitments of the block that we got by block root.
+            let is_commitments_match = blobs
+                .iter()
+                .map(|blob| &blob.kzg_commitment)
+                .eq(blob_kzg_commitments.iter());
+
+            if !is_commitments_match {
+                return Err(anyhow!(
+                    "Blob sidecars at slot {slot} do not match the KZG commitments of block '{block_root}'. The block was possibly reorged"
+                )
+                .into());
+            }
+
+            // Since Fulu the beacon nodes rebuild sidecars from PeerDAS data and return a dummy
+            // (the infinity point) instead of the blob's KZG proof. Blobscan stores and serves
+            // the proof, so keep a sidecar's proof only if it verifies and compute it otherwise.
+            let replaced = replace_invalid_proofs(&mut blobs)
+                .await
+                .with_context(|| format!("Blobs of slot {slot}"))?;
+
+            if replaced > 0 {
+                debug!(slot, replaced, "Replaced invalid KZG proofs");
+            }
+
+            blobs
+        };
 
         // Create entities to be indexed
         let block_entity = Block::try_from((&execution_block, slot))?;
@@ -307,6 +353,67 @@ impl SlotsProcessor {
         );
 
         Ok(())
+    }
+
+    /// Fetches the blobs of a Gloas block and rebuilds the sidecar data the rest of the indexer
+    /// expects.
+    ///
+    /// `blob_sidecars` does not work for Gloas blocks, so this reads `/eth/v1/beacon/blobs`, which
+    /// returns the raw blobs in the order of the block's commitments. The commitments come from
+    /// the block's bid. The proof is computed (and verified, which also catches a blob that
+    /// belongs to a different block at the same slot).
+    async fn fetch_blobs_with_computed_proofs(
+        &self,
+        slot: u32,
+        blob_kzg_commitments: &[KzgCommitment],
+    ) -> Result<Vec<BeaconBlob>> {
+        let raw_blobs = retry_on_none(
+            || {
+                let beacon_client = self.context.beacon_client();
+
+                async move {
+                    let blobs = beacon_client.get_blob_data(slot.into()).await?;
+
+                    match blobs {
+                        Some(blobs) if blobs.is_empty() => Ok::<_, ClientError>(None),
+                        other => Ok(other),
+                    }
+                }
+            },
+            RETRY_MAX_ATTEMPTS,
+            RETRY_DELAY,
+        )
+        .await?
+        .with_context(|| "Blobs not found".to_string())?;
+
+        if raw_blobs.len() != blob_kzg_commitments.len() {
+            return Err(anyhow!(
+                "Slot {slot} has {} blobs but its block commits to {}. The block was possibly reorged",
+                raw_blobs.len(),
+                blob_kzg_commitments.len()
+            ));
+        }
+
+        let proofs = compute_blob_proofs(
+            raw_blobs
+                .iter()
+                .cloned()
+                .zip(blob_kzg_commitments.iter().copied())
+                .collect(),
+        )
+        .await
+        .with_context(|| format!("Blobs of slot {slot}"))?;
+
+        Ok(raw_blobs
+            .into_iter()
+            .zip(blob_kzg_commitments)
+            .zip(proofs)
+            .map(|((blob, kzg_commitment), kzg_proof)| BeaconBlob {
+                kzg_commitment: *kzg_commitment,
+                kzg_proof,
+                blob,
+            })
+            .collect())
     }
 
     /// Returns true if the current block's parent root doesn't match the last processed block root,
