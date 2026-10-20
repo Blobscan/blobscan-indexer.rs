@@ -9,7 +9,7 @@ use anyhow::{anyhow, Context as AnyhowContext, Result};
 
 use crate::{
     clients::beacon::types::{BlockHeader, BlockId},
-    utils::{alloy::BlobTransactionExt, futures::retry_on_none},
+    utils::{alloy::BlobTransactionExt, futures::retry_on_none, kzg::replace_invalid_proofs},
 };
 use tracing::{debug, info, Instrument};
 
@@ -24,6 +24,9 @@ use crate::{
 use self::error::{SlotProcessingError, SlotsProcessorError};
 
 pub mod error;
+
+#[cfg(test)]
+mod tests;
 
 const MAX_ALLOWED_REORG_DEPTH: u32 = 100;
 
@@ -206,7 +209,7 @@ impl SlotsProcessor {
 
         // Fetch the blobs by slot and not by block root, as some beacon nodes (for example, nodes
         // that are not supernodes) cannot reconstruct old blobs by block root.
-        let blobs = retry_on_none(
+        let mut blobs = retry_on_none(
             || {
                 let beacon_client = self.context.beacon_client();
 
@@ -241,6 +244,17 @@ impl SlotsProcessor {
                 "Blob sidecars at slot {slot} do not match the KZG commitments of block '{block_root}'. The block was possibly reorged"
             )
             .into());
+        }
+
+        // Since Fulu the beacon nodes rebuild sidecars from PeerDAS data and return a dummy
+        // (the infinity point) instead of the blob's KZG proof. Blobscan stores and serves the
+        // proof, so keep a sidecar's proof only if it verifies and compute it otherwise.
+        let replaced = replace_invalid_proofs(&mut blobs)
+            .await
+            .with_context(|| format!("Blobs of slot {slot}"))?;
+
+        if replaced > 0 {
+            debug!(slot, replaced, "Replaced invalid KZG proofs");
         }
 
         // Create entities to be indexed
