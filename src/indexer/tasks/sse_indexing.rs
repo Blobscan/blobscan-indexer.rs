@@ -22,7 +22,7 @@ use crate::{
         },
     },
     synchronizer::{CheckpointType, CommonSynchronizer, SynchronizerBuilder},
-    utils::alloy::B256Ext,
+    utils::{alloy::B256Ext, execution_payload::resolve_execution_block_number},
 };
 
 /// Maximum time to wait for an SSE event before considering the connection stale.
@@ -30,6 +30,9 @@ use crate::{
 const SSE_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 
 const HEAD_BLOCK_PROCESSING_DELAY: Duration = Duration::from_millis(500);
+
+const FINALIZED_PAYLOAD_RETRY_ATTEMPTS: u32 = 5;
+const FINALIZED_PAYLOAD_RETRY_DELAY: Duration = Duration::from_millis(500);
 
 #[derive(Debug, thiserror::Error)]
 pub enum SSEIndexingError {
@@ -232,8 +235,7 @@ impl SSEIndexingTask {
 
                                              let block_hash = finalized_checkpoint_data.block;
                                         let full_block_hash = block_hash.to_full_hex();
-                                        let last_finalized_block_number = match
-                                            context
+                                        let finalized_block = context
                                             .beacon_client()
                                             .get_block(block_hash.into())
                                             .await
@@ -241,23 +243,48 @@ impl SSEIndexingTask {
                                                 SSEIndexingError::EventHandlingError { event: event.event.clone(), error: anyhow!(
                                                     "Failed to retrieve finalized block {full_block_hash}: {err}"
                                                 ) }
-                                            )? {
-                                            Some(block) => match block.execution_payload {
-                                                Some(execution_payload) => execution_payload.block_number,
-                                                None => {
-                                                    return Err(
-                                                        SSEIndexingError::EventHandlingError { event: event.event.clone(), error: anyhow!(
-                                                    "Finalized block {full_block_hash} not found"
-                                                ) },
-                                                    )
-                                                }
-                                            },
+                                            )?
+                                            .ok_or_else(|| SSEIndexingError::EventHandlingError {
+                                                event: event.event.clone(),
+                                                error: anyhow!("Finalized block {full_block_hash} not found"),
+                                            })?;
+
+                                        // From Gloas on the block carries a payload bid instead of
+                                        // the payload, so this is neither "block not found" nor a
+                                        // reason to exit. Only a block with no payload information
+                                        // at all is an error: it means a fork we do not parse yet.
+                                        let execution_payload = finalized_block
+                                            .execution_payload
+                                            .ok_or_else(|| SSEIndexingError::EventHandlingError {
+                                                event: event.event.clone(),
+                                                error: anyhow!(
+                                                    "Finalized block {full_block_hash} has neither an execution payload nor an execution payload bid"
+                                                ),
+                                            })?;
+
+                                        let last_finalized_block_number = match resolve_execution_block_number(
+                                            context.provider(),
+                                            &execution_payload,
+                                            FINALIZED_PAYLOAD_RETRY_ATTEMPTS,
+                                            FINALIZED_PAYLOAD_RETRY_DELAY,
+                                        )
+                                        .await
+                                        .map_err(|err| SSEIndexingError::EventHandlingError {
+                                            event: event.event.clone(),
+                                            error: err,
+                                        })? {
+                                            Some(number) => number,
                                             None => {
-                                                return Err(
-                                                    SSEIndexingError::EventHandlingError { event: event.event.clone(), error: anyhow!(
-                                                    "Finalized block {full_block_hash} not found"
-                                                ) },
-                                                )
+                                                // Gloas: the execution client never got the
+                                                // payload for this block (withheld, or not yet
+                                                // revealed). The next checkpoint moves the marker.
+                                                warn!(
+                                                    block_root = %full_block_hash,
+                                                    execution_block_hash = %execution_payload.block_hash,
+                                                    "Skipping finalized checkpoint: the execution client does not know the payload of the finalized block"
+                                                );
+
+                                                return Ok::<_, SSEIndexingError>(());
                                             }
                                         };
 

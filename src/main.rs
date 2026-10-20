@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use anyhow::{anyhow, Context as AnyhowContext, Result as AnyhowResult};
 use clap::Parser;
 use tracing::error;
@@ -56,6 +58,10 @@ async fn run() -> AnyhowResult<()> {
         concurrency: args.num_threads.resolve(),
         disable_checkpoints: args.disable_sync_checkpoint_save,
     };
+    let gloas_payload_wait = env
+        .gloas_payload_wait_secs
+        .map(Duration::from_secs)
+        .unwrap_or_else(|| network.slot_duration());
     let config = ContextConfig {
         beacon_api_base_url: env.beacon_node_endpoint,
         blobscan_api_base_url: env.blobscan_api_endpoint,
@@ -63,6 +69,7 @@ async fn run() -> AnyhowResult<()> {
         execution_node_base_url: env.execution_node_endpoint,
         network,
         syncing_settings,
+        gloas_payload_wait,
     };
     let context = Context::try_new(config)
         .await

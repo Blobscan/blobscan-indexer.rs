@@ -1,4 +1,4 @@
-use std::{fmt, str::FromStr};
+use std::{fmt, str::FromStr, time::Duration};
 
 use anyhow::anyhow;
 
@@ -76,6 +76,17 @@ impl Network {
         }
     }
 
+    /// Duration of a slot: 5 seconds on the Gnosis chains and 12 on every other network, devnets
+    /// included.
+    pub fn slot_duration(&self) -> Duration {
+        match self.name {
+            NetworkName::Preset(EVMNetworkName::Gnosis | EVMNetworkName::Chiado) => {
+                Duration::from_secs(5)
+            }
+            _ => Duration::from_secs(12),
+        }
+    }
+
     /// Construct a custom devnet with your own parameters.
     pub fn new_devnet(chain_id: u64, dencun_fork_slot: u32, epoch: u32) -> Self {
         Network {
@@ -136,5 +147,32 @@ impl FromStr for NetworkName {
         };
 
         Ok(network)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn slot_duration_is_5_seconds_on_gnosis_chains_and_12_elsewhere() {
+        for (name, secs) in [
+            (EVMNetworkName::Mainnet, 12),
+            (EVMNetworkName::Sepolia, 12),
+            (EVMNetworkName::Hoodi, 12),
+            (EVMNetworkName::Gnosis, 5),
+            (EVMNetworkName::Chiado, 5),
+        ] {
+            assert_eq!(
+                Network::new(name).slot_duration(),
+                Duration::from_secs(secs),
+                "{name}"
+            );
+        }
+
+        assert_eq!(
+            Network::new_devnet(1337, 0, 0).slot_duration(),
+            Duration::from_secs(12)
+        );
     }
 }
