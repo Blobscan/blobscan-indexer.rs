@@ -1,7 +1,6 @@
 use alloy::eips::eip4844::HeapBlob;
 use anyhow::{anyhow, Context, Result};
 use c_kzg::{ethereum_kzg_settings, Blob as KzgBlob, Bytes48 as KzgBytes48};
-use tokio::task::JoinSet;
 
 use crate::clients::beacon::types::{Blob as BeaconBlob, KzgCommitment, Proof};
 
@@ -75,41 +74,38 @@ pub fn verify_blob_proof(blob: &HeapBlob, commitment: &KzgCommitment, proof: &Pr
 /// point that beacon nodes return since Fulu, any other dummy a node or proxy may use, or plain
 /// garbage. The check is deliberately "does it verify" and not "does it equal the infinity
 /// point", so it does not depend on knowing every placeholder there is.
-pub async fn replace_invalid_proofs(blobs: &mut [BeaconBlob]) -> Result<usize> {
-    let mut tasks = JoinSet::new();
+///
+/// All the blobs are processed one after the other in one blocking task. The slots processors
+/// run in parallel, so this keeps the number of CPU-bound tasks at the same time equal to the
+/// slots concurrency. The function also stops at the first error.
+pub async fn replace_invalid_proofs(
+    mut blobs: Vec<BeaconBlob>,
+) -> Result<(Vec<BeaconBlob>, usize)> {
+    tokio::task::spawn_blocking(move || {
+        let mut replaced = 0;
 
-    for (i, sidecar) in blobs.iter().enumerate() {
-        let (blob, commitment, proof) = (
-            sidecar.blob.clone(),
-            sidecar.kzg_commitment,
-            sidecar.kzg_proof,
-        );
-
-        tasks.spawn_blocking(move || -> Result<(usize, Option<Proof>)> {
+        for (i, sidecar) in blobs.iter_mut().enumerate() {
             // The infinity point is by far the common case: skip the verification for it.
-            if !is_placeholder_proof(&proof) && verify_blob_proof(&blob, &commitment, &proof) {
-                return Ok((i, None));
+            if !is_placeholder_proof(&sidecar.kzg_proof)
+                && verify_blob_proof(&sidecar.blob, &sidecar.kzg_commitment, &sidecar.kzg_proof)
+            {
+                continue;
             }
 
-            let proof =
-                compute_blob_proof(&blob, &commitment).with_context(|| format!("Blob {i}"))?;
+            let proof = compute_blob_proof(&sidecar.blob, &sidecar.kzg_commitment)
+                .with_context(|| format!("Blob {i}"))?;
 
-            Ok((i, Some(proof)))
-        });
-    }
-
-    let mut replaced = 0;
-
-    while let Some(result) = tasks.join_next().await {
-        let (i, proof) = result??;
-
-        if let Some(proof) = proof {
-            blobs[i].kzg_proof = proof;
-            replaced += 1;
+            // The infinity point is the correct proof of a constant polynomial (for example, an
+            // all-zero blob). Count only the proofs that change.
+            if proof != sidecar.kzg_proof {
+                sidecar.kzg_proof = proof;
+                replaced += 1;
+            }
         }
-    }
 
-    Ok(replaced)
+        Ok((blobs, replaced))
+    })
+    .await?
 }
 
 #[cfg(test)]
@@ -230,13 +226,13 @@ mod tests {
     #[tokio::test]
     async fn only_the_invalid_proofs_are_replaced() {
         let real = compute_blob_proof(&test_blob(3), &commitment_of(&test_blob(3))).unwrap();
-        let mut blobs = vec![
+        let blobs = vec![
             sidecar(1, PLACEHOLDER_PROOF),
             sidecar(3, real),
             sidecar(2, PLACEHOLDER_PROOF),
         ];
 
-        let replaced = replace_invalid_proofs(&mut blobs).await.unwrap();
+        let (blobs, replaced) = replace_invalid_proofs(blobs).await.unwrap();
 
         assert_eq!(replaced, 2);
         assert_eq!(blobs[1].kzg_proof, real, "a real proof must not be touched");
@@ -253,10 +249,42 @@ mod tests {
     #[tokio::test]
     async fn nothing_to_do_when_every_proof_is_valid() {
         let real = compute_blob_proof(&test_blob(4), &commitment_of(&test_blob(4))).unwrap();
-        let mut blobs = vec![sidecar(4, real)];
+        let blobs = vec![sidecar(4, real)];
 
-        assert_eq!(replace_invalid_proofs(&mut blobs).await.unwrap(), 0);
+        let (blobs, replaced) = replace_invalid_proofs(blobs).await.unwrap();
+
+        assert_eq!(replaced, 0);
         assert_eq!(blobs[0].kzg_proof, real);
+    }
+
+    #[tokio::test]
+    async fn the_infinity_point_of_a_constant_blob_is_not_counted_as_replaced() {
+        // The KZG proof of a constant polynomial is the infinity point.
+        let blob = HeapBlob::new(&vec![0u8; 131_072]).unwrap();
+        let blobs = vec![BeaconBlob {
+            kzg_commitment: commitment_of(&blob),
+            kzg_proof: PLACEHOLDER_PROOF,
+            blob,
+        }];
+
+        let (blobs, replaced) = replace_invalid_proofs(blobs).await.unwrap();
+
+        assert_eq!(replaced, 0);
+        assert_eq!(blobs[0].kzg_proof, PLACEHOLDER_PROOF);
+    }
+
+    #[tokio::test]
+    async fn fails_when_a_blob_does_not_match_its_commitment() {
+        let (a, b) = (test_blob(1), test_blob(2));
+        let blobs = vec![BeaconBlob {
+            kzg_commitment: commitment_of(&b),
+            kzg_proof: PLACEHOLDER_PROOF,
+            blob: a,
+        }];
+
+        let err = replace_invalid_proofs(blobs).await.unwrap_err();
+
+        assert!(format!("{err:#}").contains("does not match"), "{err:#}");
     }
 
     #[tokio::test]
@@ -265,9 +293,9 @@ mod tests {
         let garbage = Proof::repeat_byte(0x11);
         // A valid proof of ANOTHER blob: well-formed, but not the proof of this one.
         let other = compute_blob_proof(&test_blob(9), &commitment_of(&test_blob(9))).unwrap();
-        let mut blobs = vec![sidecar(1, zeros), sidecar(2, garbage), sidecar(3, other)];
+        let blobs = vec![sidecar(1, zeros), sidecar(2, garbage), sidecar(3, other)];
 
-        let replaced = replace_invalid_proofs(&mut blobs).await.unwrap();
+        let (blobs, replaced) = replace_invalid_proofs(blobs).await.unwrap();
 
         assert_eq!(replaced, 3);
 

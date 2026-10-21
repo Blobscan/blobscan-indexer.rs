@@ -209,7 +209,7 @@ impl SlotsProcessor {
 
         // Fetch the blobs by slot and not by block root, as some beacon nodes (for example, nodes
         // that are not supernodes) cannot reconstruct old blobs by block root.
-        let mut blobs = retry_on_none(
+        let blobs = retry_on_none(
             || {
                 let beacon_client = self.context.beacon_client();
 
@@ -246,23 +246,30 @@ impl SlotsProcessor {
             .into());
         }
 
-        // Since Fulu the beacon nodes rebuild sidecars from PeerDAS data and return a dummy
-        // (the infinity point) instead of the blob's KZG proof. Blobscan stores and serves the
-        // proof, so keep a sidecar's proof only if it verifies and compute it otherwise.
-        let replaced = replace_invalid_proofs(&mut blobs)
-            .await
-            .with_context(|| format!("Blobs of slot {slot}"))?;
-
-        if replaced > 0 {
-            debug!(slot, replaced, "Replaced invalid KZG proofs");
-        }
-
         // Create entities to be indexed
         let block_entity = Block::try_from((&execution_block, slot))?;
         let tx_entities = blob_txs
             .iter()
             .map(|tx| BlobscanTransaction::try_from((*tx, &execution_block)))
             .collect::<Result<Vec<BlobscanTransaction>>>()?;
+
+        // Since Fulu the beacon nodes rebuild sidecars from PeerDAS data and return a dummy
+        // (the infinity point) instead of the blob's KZG proof. Blobscan stores and serves the
+        // proof, so keep a sidecar's proof only if it verifies and compute it otherwise.
+        //
+        // This step comes after the block and transaction conversions, because those cost less
+        // and can also fail. It must come before the blob entities are created, because they
+        // copy the proof.
+        //
+        // If a blob is not valid or does not match its commitment, the slot fails. This is
+        // intentional: the indexer must not store a blob that does not match its commitment.
+        let (blobs, replaced) = replace_invalid_proofs(blobs)
+            .await
+            .with_context(|| format!("Blobs of slot {slot}"))?;
+
+        if replaced > 0 {
+            debug!(slot, replaced, "Replaced invalid KZG proofs");
+        }
 
         let blob_entities = blob_txs
             .into_iter()
