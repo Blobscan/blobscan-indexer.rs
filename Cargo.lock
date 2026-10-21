@@ -1216,6 +1216,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "backon",
+ "c-kzg",
  "chrono",
  "clap",
  "dotenv",
