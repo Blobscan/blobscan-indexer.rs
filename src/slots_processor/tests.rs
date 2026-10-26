@@ -123,10 +123,8 @@ fn execution_block_json(commitments: &[KzgCommitment]) -> Value {
 fn gloas_block(commitments: Vec<KzgCommitment>) -> BeaconBlock {
     BeaconBlock {
         blob_kzg_commitments: Some(commitments),
-        execution_payload: Some(BlockExecutionPayload {
+        execution_payload: Some(BlockExecutionPayload::Bid {
             block_hash: B256::repeat_byte(0x07),
-            block_number: None,
-            from_bid: true,
         }),
         parent_root: B256::repeat_byte(0x01),
         slot: SLOT,
@@ -374,10 +372,9 @@ async fn index_pre_gloas_block(
 
     beacon.expect_get_block().returning(move |_| {
         ready(Ok(Some(BeaconBlock {
-            execution_payload: Some(BlockExecutionPayload {
+            execution_payload: Some(BlockExecutionPayload::InBody {
                 block_hash: B256::repeat_byte(0x07),
-                block_number: Some(11942470),
-                from_bid: false,
+                block_number: 11942470,
             }),
             ..gloas_block(block_commitments.clone())
         })))

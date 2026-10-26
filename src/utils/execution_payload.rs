@@ -17,11 +17,10 @@ pub async fn resolve_execution_block_number(
     attempts: u32,
     delay: Duration,
 ) -> Result<Option<u32>> {
-    if let Some(number) = payload.block_number {
-        return Ok(Some(number));
-    }
-
-    let block_hash = payload.block_hash;
+    let block_hash = match payload {
+        BlockExecutionPayload::InBody { block_number, .. } => return Ok(Some(*block_number)),
+        BlockExecutionPayload::Bid { block_hash } => *block_hash,
+    };
     let block = retry_on_none(
         || async move {
             provider
@@ -56,10 +55,14 @@ mod tests {
     const DELAY: Duration = Duration::from_millis(1);
 
     fn payload(block_number: Option<u32>) -> BlockExecutionPayload {
-        BlockExecutionPayload {
-            block_hash: B256::repeat_byte(0x07),
-            block_number,
-            from_bid: block_number.is_none(),
+        let block_hash = B256::repeat_byte(0x07);
+
+        match block_number {
+            Some(block_number) => BlockExecutionPayload::InBody {
+                block_hash,
+                block_number,
+            },
+            None => BlockExecutionPayload::Bid { block_hash },
         }
     }
 

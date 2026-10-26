@@ -1,6 +1,7 @@
 use std::{fmt, str::FromStr};
 
 use alloy::{consensus::Bytes48, eips::eip4844::HeapBlob, primitives::B256};
+use anyhow::anyhow;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
@@ -55,17 +56,24 @@ pub struct Block {
 }
 
 /// What the indexer needs to know about the execution payload of a beacon block.
-///
-/// Before Gloas (EIP-7732, ePBS) the payload sits inside the beacon block body, so both the
-/// hash and the block number are known. From Gloas on the body only carries a signed bid that
-/// commits to the payload by hash: the number is not there (ask the execution client) and the
-/// payload itself reaches the execution client later, or never if the builder withholds it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BlockExecutionPayload {
-    pub block_hash: B256,
-    pub block_number: Option<u32>,
-    /// True when the hash comes from a Gloas execution payload bid.
-    pub from_bid: bool,
+pub enum BlockExecutionPayload {
+    /// Before Gloas (EIP-7732, ePBS): the payload is in the beacon block body, so the hash and
+    /// the block number are known.
+    InBody { block_hash: B256, block_number: u32 },
+    /// Gloas and later: the body has a signed bid that commits to the payload by hash. The bid
+    /// does not have the block number (ask the execution client). The payload gets to the
+    /// execution client later, or never if the builder withholds it.
+    Bid { block_hash: B256 },
+}
+
+impl BlockExecutionPayload {
+    pub fn block_hash(&self) -> B256 {
+        match self {
+            BlockExecutionPayload::InBody { block_hash, .. }
+            | BlockExecutionPayload::Bid { block_hash } => *block_hash,
+        }
+    }
 }
 
 #[derive(Deserialize, Debug)]
@@ -108,6 +116,9 @@ pub struct BlockData {
 
 #[derive(Deserialize, Debug)]
 pub struct BlockResponse {
+    /// Name of the fork of the block (`deneb`, `fulu`, `gloas`, ...). It tells how to read the
+    /// body.
+    pub version: String,
     pub data: BlockData,
 }
 
@@ -269,38 +280,61 @@ impl From<BlockHeaderResponse> for BlockHeader {
     }
 }
 
-impl From<BlockResponse> for Block {
-    fn from(response: BlockResponse) -> Self {
+/// Forks before Gloas. In these forks the execution payload is in the block body. All other
+/// forks, also forks that are not known yet, must have an execution payload bid.
+const PRE_GLOAS_FORKS: [&str; 7] = [
+    "phase0",
+    "altair",
+    "bellatrix",
+    "capella",
+    "deneb",
+    "electra",
+    "fulu",
+];
+
+impl TryFrom<BlockResponse> for Block {
+    type Error = anyhow::Error;
+
+    fn try_from(response: BlockResponse) -> Result<Self, Self::Error> {
+        let version = response.version;
         let message = response.data.message;
         let body = message.body;
 
         let (execution_payload, blob_kzg_commitments) =
-            match (body.execution_payload, body.signed_execution_payload_bid) {
-                (Some(payload), _) => (
-                    Some(BlockExecutionPayload {
-                        block_hash: payload.block_hash,
-                        block_number: Some(payload.block_number),
-                        from_bid: false,
-                    }),
+            if PRE_GLOAS_FORKS.contains(&version.as_str()) {
+                (
+                    body.execution_payload
+                        .map(|payload| BlockExecutionPayload::InBody {
+                            block_hash: payload.block_hash,
+                            block_number: payload.block_number,
+                        }),
                     body.blob_kzg_commitments,
-                ),
-                (None, Some(bid)) => (
-                    Some(BlockExecutionPayload {
-                        block_hash: bid.message.block_hash,
-                        block_number: None,
-                        from_bid: true,
+                )
+            } else {
+                let bid = body
+                    .signed_execution_payload_bid
+                    .ok_or_else(|| {
+                        anyhow!(
+                            "Block at slot {} of fork '{version}' has no execution payload bid",
+                            message.slot
+                        )
+                    })?
+                    .message;
+
+                (
+                    Some(BlockExecutionPayload::Bid {
+                        block_hash: bid.block_hash,
                     }),
-                    Some(bid.message.blob_kzg_commitments),
-                ),
-                (None, None) => (None, body.blob_kzg_commitments),
+                    Some(bid.blob_kzg_commitments),
+                )
             };
 
-        Block {
+        Ok(Block {
             blob_kzg_commitments,
             execution_payload,
             parent_root: message.parent_root,
             slot: message.slot,
-        }
+        })
     }
 }
 
@@ -355,29 +389,44 @@ mod block_tests {
     const COMMITMENT_1: &str = "0x85f6e8b0e18cc996fefdc260e28d7ed1860c2af5cad02c15721cfb1aea02a6173797e2e7cc8e04c171babf87a561825e";
     const PARENT_ROOT: &str = "0xef1481e62dd5c92d881e9a18ec3adf644d42a4ef6cef201daf0718ef02266d14";
 
-    fn block_from(body: &str) -> Block {
+    fn try_block_from(version: &str, body: &str) -> anyhow::Result<Block> {
         let json = format!(
-            r#"{{"data":{{"message":{{"slot":"11384159","parent_root":"{PARENT_ROOT}","body":{body}}}}}}}"#
+            r#"{{"version":"{version}","data":{{"message":{{"slot":"11384159","parent_root":"{PARENT_ROOT}","body":{body}}}}}}}"#
         );
 
-        serde_json::from_str::<BlockResponse>(&json).unwrap().into()
+        serde_json::from_str::<BlockResponse>(&json)
+            .unwrap()
+            .try_into()
+    }
+
+    fn block_from(version: &str, body: &str) -> Block {
+        try_block_from(version, body).unwrap()
+    }
+
+    fn bid_body() -> String {
+        format!(
+            r#"{{"signed_execution_payload_bid":{{"message":{{"block_hash":"{BLOCK_HASH}","builder_index":"18446744073709551615","blob_kzg_commitments":["{COMMITMENT_0}","{COMMITMENT_1}"]}},"signature":"0x00"}}}}"#
+        )
+    }
+
+    fn payload_body() -> String {
+        format!(
+            r#"{{"execution_payload":{{"block_hash":"{BLOCK_HASH}","block_number":"11942470"}},"blob_kzg_commitments":["{COMMITMENT_0}"]}}"#
+        )
     }
 
     /// Shape of a Gloas block on sepolia (slot 11384159, `version: gloas`): no `execution_payload`
-    /// and no `blob_kzg_commitments` in the body, both live in the signed bid.
+    /// and no `blob_kzg_commitments` in the body. Both are in the signed bid.
     #[test]
     fn gloas_block_takes_the_hash_and_commitments_from_the_bid() {
-        let block = block_from(&format!(
-            r#"{{"signed_execution_payload_bid":{{"message":{{"block_hash":"{BLOCK_HASH}","builder_index":"18446744073709551615","blob_kzg_commitments":["{COMMITMENT_0}","{COMMITMENT_1}"]}},"signature":"0x00"}}}}"#
-        ));
+        let block = block_from("gloas", &bid_body());
 
-        let payload = block
-            .execution_payload
-            .expect("the bid must yield a payload");
-
-        assert_eq!(payload.block_hash, BLOCK_HASH.parse::<B256>().unwrap());
-        assert_eq!(payload.block_number, None);
-        assert!(payload.from_bid);
+        assert_eq!(
+            block.execution_payload,
+            Some(BlockExecutionPayload::Bid {
+                block_hash: BLOCK_HASH.parse().unwrap()
+            })
+        );
         assert_eq!(
             block.blob_kzg_commitments.unwrap(),
             vec![
@@ -390,34 +439,63 @@ mod block_tests {
 
     #[test]
     fn pre_gloas_block_keeps_its_payload_number_and_commitments() {
-        let block = block_from(&format!(
-            r#"{{"execution_payload":{{"block_hash":"{BLOCK_HASH}","block_number":"11942470"}},"blob_kzg_commitments":["{COMMITMENT_0}"]}}"#
-        ));
+        let block = block_from("fulu", &payload_body());
 
-        let payload = block.execution_payload.unwrap();
-
-        assert_eq!(payload.block_number, Some(11942470));
-        assert!(!payload.from_bid);
+        assert_eq!(
+            block.execution_payload,
+            Some(BlockExecutionPayload::InBody {
+                block_hash: BLOCK_HASH.parse().unwrap(),
+                block_number: 11942470
+            })
+        );
         assert_eq!(block.blob_kzg_commitments.unwrap().len(), 1);
     }
 
+    /// The version decides how to read the body, not the fields that are in it.
     #[test]
-    fn a_body_with_the_payload_wins_over_a_bid() {
-        let block = block_from(&format!(
-            r#"{{"execution_payload":{{"block_hash":"{BLOCK_HASH}","block_number":"1"}},"blob_kzg_commitments":["{COMMITMENT_0}"],"signed_execution_payload_bid":{{"message":{{"block_hash":"{PARENT_ROOT}","blob_kzg_commitments":[]}}}}}}"#
-        ));
+    fn a_pre_gloas_block_ignores_a_bid_field() {
+        let body = format!(
+            r#"{{"execution_payload":{{"block_hash":"{BLOCK_HASH}","block_number":"1"}},"signed_execution_payload_bid":{{"message":{{"block_hash":"{PARENT_ROOT}","blob_kzg_commitments":[]}}}}}}"#
+        );
 
-        let payload = block.execution_payload.unwrap();
+        let block = block_from("electra", &body);
 
-        assert_eq!(payload.block_hash, BLOCK_HASH.parse::<B256>().unwrap());
-        assert!(!payload.from_bid);
+        assert_eq!(
+            block.execution_payload,
+            Some(BlockExecutionPayload::InBody {
+                block_hash: BLOCK_HASH.parse().unwrap(),
+                block_number: 1
+            })
+        );
     }
 
-    /// Pre-Bellatrix blocks, or a fork this indexer does not parse yet: no payload information at
-    /// all. The callers decide what to do; the parser must not invent a payload.
     #[test]
-    fn a_body_without_payload_information_has_no_execution_payload() {
-        let block = block_from(r#"{"attestations":[]}"#);
+    fn a_gloas_block_without_a_bid_is_an_error() {
+        let err = try_block_from("gloas", &payload_body()).unwrap_err();
+
+        assert!(
+            err.to_string().contains("has no execution payload bid"),
+            "{err}"
+        );
+    }
+
+    /// A fork after Gloas that this indexer does not know yet is read as a Gloas block.
+    #[test]
+    fn an_unknown_fork_is_read_like_gloas() {
+        let block = block_from("heze", &bid_body());
+
+        assert_eq!(
+            block.execution_payload,
+            Some(BlockExecutionPayload::Bid {
+                block_hash: BLOCK_HASH.parse().unwrap()
+            })
+        );
+    }
+
+    /// Blocks before Bellatrix have no execution payload. The parser must not make one.
+    #[test]
+    fn a_pre_bellatrix_block_has_no_execution_payload() {
+        let block = block_from("altair", r#"{"attestations":[]}"#);
 
         assert!(block.execution_payload.is_none());
         assert!(block.blob_kzg_commitments.is_none());

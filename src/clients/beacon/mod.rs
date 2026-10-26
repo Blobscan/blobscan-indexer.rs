@@ -15,7 +15,7 @@ use types::BlockHeader;
 use crate::{
     clients::{
         beacon::types::{BlockHeaderResponse, Spec, SpecResponse},
-        common::ClientResult,
+        common::{ClientError, ClientResult},
     },
     json_get,
 };
@@ -76,8 +76,10 @@ impl CommonBeaconClient for BeaconClient {
         let path = format!("v2/beacon/blocks/{}", { block_id.to_detailed_string() });
         let url = self.base_url.join(path.as_str())?;
 
-        json_get!(&self.client, url, BlockResponse, self.exp_backoff.clone())
-            .map(|res| res.map(|r| r.into()))
+        json_get!(&self.client, url, BlockResponse, self.exp_backoff.clone())?
+            .map(Block::try_from)
+            .transpose()
+            .map_err(ClientError::from)
     }
 
     async fn get_block_header(&self, block_id: BlockId) -> ClientResult<Option<BlockHeader>> {
