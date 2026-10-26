@@ -130,14 +130,14 @@ pub struct Blob {
 }
 
 #[derive(Deserialize, Debug)]
-pub struct BlobsResponse {
+pub struct BlobSidecarsResponse {
     pub data: Vec<Blob>,
 }
 
 /// Response of `GET /eth/v1/beacon/blobs/{block_id}`: the raw blobs of the block, in the order of
 /// its KZG commitments, without commitments or proofs.
 #[derive(Deserialize, Debug)]
-pub struct BlobDataResponse {
+pub struct BlobsResponse {
     pub data: Vec<HeapBlob>,
 }
 

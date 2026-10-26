@@ -215,10 +215,10 @@ async fn gloas_block_is_indexed_with_computed_proofs() {
         .expect_get_block()
         .returning(move |_| ready(Ok(Some(gloas_block(block_commitments.clone())))));
     beacon
-        .expect_get_blob_data()
+        .expect_get_blobs()
         .times(1)
         .returning(move |_| ready(Ok(Some(raw.clone()))));
-    beacon.expect_get_blobs().never();
+    beacon.expect_get_blob_sidecars().never();
 
     let h = harness(beacon, vec![execution_block_json(&commitments)]);
 
@@ -252,7 +252,7 @@ async fn gloas_payload_that_arrives_late_is_still_indexed() {
         .expect_get_block()
         .returning(move |_| ready(Ok(Some(gloas_block(block_commitments.clone())))));
     beacon
-        .expect_get_blob_data()
+        .expect_get_blobs()
         .returning(move |_| ready(Ok(Some(raw.clone()))));
 
     // The execution client answers `null` (unknown hash) a few times before the builder reveals.
@@ -276,7 +276,7 @@ async fn gloas_payload_that_is_never_revealed_is_skipped_not_fatal() {
     beacon
         .expect_get_block()
         .returning(move |_| ready(Ok(Some(gloas_block(commitments.clone())))));
-    beacon.expect_get_blob_data().never();
+    beacon.expect_get_blobs().never();
 
     let h = harness(
         beacon,
@@ -340,7 +340,7 @@ async fn gloas_blob_that_does_not_match_its_commitment_is_rejected() {
         .expect_get_block()
         .returning(move |_| ready(Ok(Some(gloas_block(block_commitments.clone())))));
     beacon
-        .expect_get_blob_data()
+        .expect_get_blobs()
         .returning(move |_| ready(Ok(Some(other_block_blobs.clone()))));
 
     let h = harness(beacon, vec![execution_block_json(&commitments)]);
@@ -379,7 +379,7 @@ async fn index_pre_gloas_block(
             ..gloas_block(block_commitments.clone())
         })))
     });
-    beacon.expect_get_blobs().returning(move |_| {
+    beacon.expect_get_blob_sidecars().returning(move |_| {
         ready(Ok(Some(
             sidecars
                 .iter()
@@ -391,7 +391,7 @@ async fn index_pre_gloas_block(
                 .collect(),
         )))
     });
-    beacon.expect_get_blob_data().never();
+    beacon.expect_get_blobs().never();
 
     let h = harness(beacon, vec![execution_block_json(&commitments)]);
 

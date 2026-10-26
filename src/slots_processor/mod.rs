@@ -266,7 +266,7 @@ impl SlotsProcessor {
                         let beacon_client = self.context.beacon_client();
 
                         async move {
-                            let blobs = beacon_client.get_blobs(slot.into()).await?;
+                            let blobs = beacon_client.get_blob_sidecars(slot.into()).await?;
 
                             match blobs {
                                 Some(blobs) if blobs.is_empty() => Ok::<_, ClientError>(None),
@@ -382,7 +382,7 @@ impl SlotsProcessor {
                 let beacon_client = self.context.beacon_client();
 
                 async move {
-                    let blobs = beacon_client.get_blob_data(slot.into()).await?;
+                    let blobs = beacon_client.get_blobs(slot.into()).await?;
 
                     match blobs {
                         Some(blobs) if blobs.is_empty() => Ok::<_, ClientError>(None),
