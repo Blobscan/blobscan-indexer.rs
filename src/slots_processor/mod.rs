@@ -2,15 +2,17 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use alloy::{
     consensus::Transaction,
-    eips::{eip4844::kzg_to_versioned_hash, BlockId as ExecutionBlockId},
+    eips::{
+        eip4844::{kzg_to_versioned_hash, HeapBlob},
+        BlockId as ExecutionBlockId,
+    },
     primitives::B256,
 };
 use anyhow::{anyhow, Context as AnyhowContext, Result};
 
 use crate::{
     clients::beacon::types::{
-        Blob as BeaconBlob, Block as BeaconBlock, BlockExecutionPayload, BlockHeader, BlockId,
-        KzgCommitment,
+        Block as BeaconBlock, BlockExecutionPayload, BlockHeader, BlockId, KzgCommitment,
     },
     utils::{alloy::BlobTransactionExt, futures::retry_on_none, kzg::compute_blob_proofs},
 };
@@ -252,7 +254,7 @@ impl SlotsProcessor {
             return Err(anyhow!("Blocks mismatch: Consensus block \"{block_root}\" contains blob KZG commitments, but the corresponding execution block \"{execution_block_hash:#?}\" does not contain any blob transactions").into());
         }
 
-        let blobs = self.fetch_blobs(slot, &blob_kzg_commitments).await?;
+        let raw_blobs = self.fetch_raw_blobs(slot, &blob_kzg_commitments).await?;
 
         // Create entities to be indexed
         let block_entity = Block::try_from((&execution_block, slot))?;
@@ -260,6 +262,14 @@ impl SlotsProcessor {
             .iter()
             .map(|tx| BlobscanTransaction::try_from((*tx, &execution_block)))
             .collect::<Result<Vec<BlobscanTransaction>>>()?;
+
+        // Blobscan stores and serves the KZG proof of each blob, and `/eth/v1/beacon/blobs` does
+        // not give it. Compute it here, after the block and transaction conversions, because
+        // those cost less and can also fail. The proof is also verified: if a blob does not
+        // match its commitment, the slot fails, and the indexer does not store the blob.
+        let blobs = compute_blob_proofs(raw_blobs, blob_kzg_commitments)
+            .await
+            .with_context(|| format!("Blobs of slot {slot}"))?;
 
         let blob_entities = blob_txs
             .into_iter()
@@ -320,20 +330,20 @@ impl SlotsProcessor {
         .map_err(Into::into)
     }
 
-    /// Fetches the blobs of a block, with their KZG commitments and KZG proofs.
+    /// Fetches the raw blobs of a block, in the order of its KZG commitments.
     ///
-    /// `/eth/v1/beacon/blobs` gives the raw blobs only, in the order of the block's commitments.
-    /// The commitments come from the block. The indexer computes each proof and verifies it. If a
-    /// blob is not the blob of its commitment, the verification fails. This occurs when the block
-    /// at the slot changed after a reorg.
+    /// `/eth/v1/beacon/blobs` gives the raw blobs only, without commitments and proofs. The
+    /// commitments come from the block, and `compute_blob_proofs` computes the proofs.
     ///
     /// The blobs are fetched by slot and not by block root, because some beacon nodes (for
-    /// example, nodes that are not supernodes) cannot rebuild old blobs by block root.
-    async fn fetch_blobs(
+    /// example, nodes that are not supernodes) cannot rebuild old blobs by block root. Thus the
+    /// blobs can be the blobs of a different block at the slot, after a reorg. The count check
+    /// here and the KZG verification find this.
+    async fn fetch_raw_blobs(
         &self,
         slot: u32,
         blob_kzg_commitments: &[KzgCommitment],
-    ) -> Result<Vec<BeaconBlob>> {
+    ) -> Result<Vec<HeapBlob>> {
         let raw_blobs = retry_on_none(
             || {
                 let beacon_client = self.context.beacon_client();
@@ -361,26 +371,7 @@ impl SlotsProcessor {
             ));
         }
 
-        let proofs = compute_blob_proofs(
-            raw_blobs
-                .iter()
-                .cloned()
-                .zip(blob_kzg_commitments.iter().copied())
-                .collect(),
-        )
-        .await
-        .with_context(|| format!("Blobs of slot {slot}"))?;
-
-        Ok(raw_blobs
-            .into_iter()
-            .zip(blob_kzg_commitments)
-            .zip(proofs)
-            .map(|((blob, kzg_commitment), kzg_proof)| BeaconBlob {
-                kzg_commitment: *kzg_commitment,
-                kzg_proof,
-                blob,
-            })
-            .collect())
+        Ok(raw_blobs)
     }
 
     /// Returns true if the current block's parent root doesn't match the last processed block root,

@@ -1,9 +1,8 @@
 use alloy::eips::eip4844::HeapBlob;
 use anyhow::{anyhow, Context, Result};
 use c_kzg::{ethereum_kzg_settings, Blob as KzgBlob, Bytes48 as KzgBytes48};
-use tokio::task::JoinSet;
 
-use crate::clients::beacon::types::{KzgCommitment, Proof};
+use crate::clients::beacon::types::{Blob as BeaconBlob, KzgCommitment, Proof};
 
 /// The compressed point at infinity: `0xc0` followed by 47 zero bytes.
 ///
@@ -48,30 +47,42 @@ pub fn compute_blob_proof(blob: &HeapBlob, commitment: &KzgCommitment) -> Result
     Ok(Proof::from_slice(proof_bytes.as_ref()))
 }
 
-/// Computes (and verifies) the proofs of many blobs in parallel, in the same order as `items`.
+/// Computes and verifies the KZG proofs of `blobs`, and returns each blob with its commitment
+/// and its proof, in the same order.
 ///
-/// One proof takes about 45 ms of CPU in a release build and a block can carry 21 blobs, so doing
-/// them one after the other would hold the indexer for about a second per block.
-pub async fn compute_blob_proofs(items: Vec<(HeapBlob, KzgCommitment)>) -> Result<Vec<Proof>> {
-    let mut tasks = JoinSet::new();
-
-    for (i, (blob, commitment)) in items.into_iter().enumerate() {
-        tasks.spawn_blocking(move || {
-            compute_blob_proof(&blob, &commitment)
-                .map(|proof| (i, proof))
-                .with_context(|| format!("Blob {i}"))
-        });
+/// All the blobs are processed one after the other in one blocking task. The slots processors
+/// run in parallel, so this keeps the number of CPU-bound tasks at the same time equal to the
+/// slots concurrency. The function stops at the first error.
+pub async fn compute_blob_proofs(
+    blobs: Vec<HeapBlob>,
+    commitments: Vec<KzgCommitment>,
+) -> Result<Vec<BeaconBlob>> {
+    if blobs.len() != commitments.len() {
+        return Err(anyhow!(
+            "{} blobs but {} KZG commitments",
+            blobs.len(),
+            commitments.len()
+        ));
     }
 
-    let mut proofs = Vec::with_capacity(tasks.len());
+    tokio::task::spawn_blocking(move || {
+        blobs
+            .into_iter()
+            .zip(commitments)
+            .enumerate()
+            .map(|(i, (blob, kzg_commitment))| {
+                let kzg_proof = compute_blob_proof(&blob, &kzg_commitment)
+                    .with_context(|| format!("Blob {i}"))?;
 
-    while let Some(result) = tasks.join_next().await {
-        proofs.push(result??);
-    }
-
-    proofs.sort_by_key(|(i, _)| *i);
-
-    Ok(proofs.into_iter().map(|(_, proof)| proof).collect())
+                Ok(BeaconBlob {
+                    kzg_commitment,
+                    kzg_proof,
+                    blob,
+                })
+            })
+            .collect()
+    })
+    .await?
 }
 
 #[cfg(test)]
@@ -180,15 +191,21 @@ mod tests {
     #[tokio::test]
     async fn proofs_come_back_in_input_order() {
         let blobs: Vec<_> = (1..=5).map(test_blob).collect();
-        let items: Vec<_> = blobs
-            .iter()
-            .map(|b| (b.clone(), commitment_of(b)))
-            .collect();
+        let commitments: Vec<_> = blobs.iter().map(commitment_of).collect();
 
-        let proofs = compute_blob_proofs(items.clone()).await.unwrap();
+        let sidecars = compute_blob_proofs(blobs.clone(), commitments.clone())
+            .await
+            .unwrap();
 
-        for ((blob, commitment), proof) in items.iter().zip(&proofs) {
-            assert_eq!(*proof, compute_blob_proof(blob, commitment).unwrap());
+        assert_eq!(sidecars.len(), blobs.len());
+
+        for ((sidecar, blob), commitment) in sidecars.iter().zip(&blobs).zip(&commitments) {
+            assert_eq!(sidecar.blob, *blob);
+            assert_eq!(sidecar.kzg_commitment, *commitment);
+            assert_eq!(
+                sidecar.kzg_proof,
+                compute_blob_proof(blob, commitment).unwrap()
+            );
         }
     }
 
@@ -196,13 +213,23 @@ mod tests {
     async fn a_failing_blob_fails_the_batch_and_names_the_blob() {
         let good = test_blob(1);
         let other = test_blob(2);
-        let items = vec![
-            (good.clone(), commitment_of(&good)),
-            (good.clone(), commitment_of(&other)),
-        ];
 
-        let err = compute_blob_proofs(items).await.unwrap_err();
+        let err = compute_blob_proofs(
+            vec![good.clone(), good.clone()],
+            vec![commitment_of(&good), commitment_of(&other)],
+        )
+        .await
+        .unwrap_err();
 
         assert!(format!("{err:#}").contains("Blob 1"), "{err:#}");
+    }
+
+    #[tokio::test]
+    async fn a_different_number_of_blobs_and_commitments_is_an_error() {
+        let blob = test_blob(1);
+
+        let result = compute_blob_proofs(vec![blob.clone()], vec![]).await;
+
+        assert!(result.is_err());
     }
 }
