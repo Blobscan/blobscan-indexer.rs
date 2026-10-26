@@ -192,12 +192,24 @@ impl SlotsProcessor {
 
                 let Some(parent_payload_hash) = beacon_block.full_parent_payload_hash(&parent)
                 else {
-                    debug!(
-                        block_root = ?block_root,
-                        slot = beacon_block.slot,
-                        parent_slot = parent.slot,
-                        "Skipping - the parent block is empty or is not a Gloas block"
-                    );
+                    match &parent.execution_payload {
+                        // The builder withheld the payload, or it came too late. Log it at INFO
+                        // so that withheld payloads show in the normal logs.
+                        Some(BlockExecutionPayload::Bid { block_hash, .. }) => info!(
+                            parent_block_root = ?parent_root,
+                            parent_slot = parent.slot,
+                            parent_bid_block_hash = ?block_hash,
+                            slot = beacon_block.slot,
+                            "Skipping - the parent block is empty: its payload is not part of the chain"
+                        ),
+                        // The last block before Gloas: its payload was indexed with it.
+                        _ => debug!(
+                            block_root = ?block_root,
+                            slot = beacon_block.slot,
+                            parent_slot = parent.slot,
+                            "Skipping - the parent block is not a Gloas block"
+                        ),
+                    }
 
                     return Ok(());
                 };
