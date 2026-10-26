@@ -3,13 +3,14 @@ use anyhow::{anyhow, Context, Result};
 use c_kzg::{ethereum_kzg_settings, Blob as KzgBlob, Bytes48 as KzgBytes48};
 use tokio::task::JoinSet;
 
-use crate::clients::beacon::types::{Blob as BeaconBlob, KzgCommitment, Proof};
+use crate::clients::beacon::types::{KzgCommitment, Proof};
 
 /// The compressed point at infinity: `0xc0` followed by 47 zero bytes.
 ///
-/// Since Fulu, beacon nodes rebuild blob sidecars from PeerDAS data and cannot recover the
-/// single-blob KZG proof, so `kzg_proof` comes back as this value instead of a proof. It is
-/// stored as-is by Blobscan unless the indexer replaces it.
+/// Since Fulu, beacon nodes rebuild blob sidecars from PeerDAS data. They cannot recover the KZG
+/// proof of a single blob, so the sidecars give this value and not a proof. The tests use it to
+/// make sure that the indexer never stores it.
+#[cfg(test)]
 pub const PLACEHOLDER_PROOF: Proof = {
     let mut bytes = [0u8; 48];
     bytes[0] = 0xc0;
@@ -17,20 +18,14 @@ pub const PLACEHOLDER_PROOF: Proof = {
     Proof::new(bytes)
 };
 
-pub fn is_placeholder_proof(proof: &Proof) -> bool {
-    *proof == PLACEHOLDER_PROOF
-}
-
 /// Computes the KZG blob proof of `blob` for `commitment`, and checks that it verifies.
 ///
-/// The check doubles as a match test: a blob that does not belong to `commitment` (a reorged
-/// block at the same slot, say) yields a proof that does not verify, and this returns an error
-/// instead of attaching the blob to the wrong commitment.
+/// The check also makes sure that the blob is the blob of `commitment`. If it is not (for example,
+/// a blob of a reorged block at the same slot), the proof does not verify and this returns an
+/// error.
 ///
-/// The beacon `blob_sidecars` endpoint used to return this proof next to every blob. It stopped
-/// working for Gloas blocks, and its replacement (`/eth/v1/beacon/blobs`) returns the raw blobs
-/// only. Blobscan stores and serves the proof, and it is a pure function of the blob and its
-/// commitment, so it is recomputed here instead of being dropped.
+/// `/eth/v1/beacon/blobs` gives the raw blobs only. Blobscan stores and serves the proof, and the
+/// proof is a function of the blob and its commitment only, so the indexer computes it.
 pub fn compute_blob_proof(blob: &HeapBlob, commitment: &KzgCommitment) -> Result<Proof> {
     let kzg_blob = KzgBlob::from_bytes(blob.inner().as_ref())
         .map_err(|err| anyhow!("Invalid blob for KZG proof computation: {err}"))?;
@@ -77,67 +72,6 @@ pub async fn compute_blob_proofs(items: Vec<(HeapBlob, KzgCommitment)>) -> Resul
     proofs.sort_by_key(|(i, _)| *i);
 
     Ok(proofs.into_iter().map(|(_, proof)| proof).collect())
-}
-
-/// Whether `proof` is a valid KZG proof of `blob` for `commitment`. A proof that cannot even be
-/// decoded or checked (wrong point encoding, out-of-range blob) is simply not valid.
-pub fn verify_blob_proof(blob: &HeapBlob, commitment: &KzgCommitment, proof: &Proof) -> bool {
-    let (Ok(kzg_blob), Ok(kzg_commitment), Ok(kzg_proof)) = (
-        KzgBlob::from_bytes(blob.inner().as_ref()),
-        KzgBytes48::from_bytes(commitment.as_ref()),
-        KzgBytes48::from_bytes(proof.as_ref()),
-    ) else {
-        return false;
-    };
-
-    ethereum_kzg_settings(0)
-        .verify_blob_kzg_proof(&kzg_blob, &kzg_commitment, &kzg_proof)
-        .unwrap_or(false)
-}
-
-/// Makes sure every sidecar carries a valid KZG proof, replacing the ones that do not. Returns
-/// how many were replaced.
-///
-/// A proof is kept only if it verifies against its blob and commitment, which costs about 1.5 ms
-/// per blob, against about 40 ms to compute one. Everything else is recomputed: the infinity
-/// point that beacon nodes return since Fulu, any other dummy a node or proxy may use, or plain
-/// garbage. The check is deliberately "does it verify" and not "does it equal the infinity
-/// point", so it does not depend on knowing every placeholder there is.
-pub async fn replace_invalid_proofs(blobs: &mut [BeaconBlob]) -> Result<usize> {
-    let mut tasks = JoinSet::new();
-
-    for (i, sidecar) in blobs.iter().enumerate() {
-        let (blob, commitment, proof) = (
-            sidecar.blob.clone(),
-            sidecar.kzg_commitment,
-            sidecar.kzg_proof,
-        );
-
-        tasks.spawn_blocking(move || -> Result<(usize, Option<Proof>)> {
-            // The infinity point is by far the common case: skip the verification for it.
-            if !is_placeholder_proof(&proof) && verify_blob_proof(&blob, &commitment, &proof) {
-                return Ok((i, None));
-            }
-
-            let proof =
-                compute_blob_proof(&blob, &commitment).with_context(|| format!("Blob {i}"))?;
-
-            Ok((i, Some(proof)))
-        });
-    }
-
-    let mut replaced = 0;
-
-    while let Some(result) = tasks.join_next().await {
-        let (i, proof) = result??;
-
-        if let Some(proof) = proof {
-            blobs[i].kzg_proof = proof;
-            replaced += 1;
-        }
-    }
-
-    Ok(replaced)
 }
 
 #[cfg(test)]
@@ -236,23 +170,11 @@ mod tests {
         )
     }
 
-    fn sidecar(seed: u8, proof: Proof) -> BeaconBlob {
-        let blob = test_blob(seed);
-
-        BeaconBlob {
-            kzg_commitment: commitment_of(&blob),
-            kzg_proof: proof,
-            blob,
-        }
-    }
-
     #[test]
     fn the_placeholder_is_the_compressed_point_at_infinity() {
         let hex = format!("0xc0{}", "00".repeat(47));
 
         assert_eq!(PLACEHOLDER_PROOF, hex.parse::<Proof>().unwrap());
-        assert!(is_placeholder_proof(&PLACEHOLDER_PROOF));
-        assert!(!is_placeholder_proof(&Proof::ZERO));
     }
 
     #[tokio::test]
@@ -282,71 +204,5 @@ mod tests {
         let err = compute_blob_proofs(items).await.unwrap_err();
 
         assert!(format!("{err:#}").contains("Blob 1"), "{err:#}");
-    }
-
-    #[tokio::test]
-    async fn only_the_invalid_proofs_are_replaced() {
-        let real = compute_blob_proof(&test_blob(3), &commitment_of(&test_blob(3))).unwrap();
-        let mut blobs = vec![
-            sidecar(1, PLACEHOLDER_PROOF),
-            sidecar(3, real),
-            sidecar(2, PLACEHOLDER_PROOF),
-        ];
-
-        let replaced = replace_invalid_proofs(&mut blobs).await.unwrap();
-
-        assert_eq!(replaced, 2);
-        assert_eq!(blobs[1].kzg_proof, real, "a real proof must not be touched");
-
-        for blob in &blobs {
-            assert!(!is_placeholder_proof(&blob.kzg_proof));
-            assert_eq!(
-                blob.kzg_proof,
-                compute_blob_proof(&blob.blob, &blob.kzg_commitment).unwrap()
-            );
-        }
-    }
-
-    #[tokio::test]
-    async fn nothing_to_do_when_every_proof_is_valid() {
-        let real = compute_blob_proof(&test_blob(4), &commitment_of(&test_blob(4))).unwrap();
-        let mut blobs = vec![sidecar(4, real)];
-
-        assert_eq!(replace_invalid_proofs(&mut blobs).await.unwrap(), 0);
-        assert_eq!(blobs[0].kzg_proof, real);
-    }
-
-    #[tokio::test]
-    async fn a_dummy_that_is_not_the_infinity_point_is_replaced_too() {
-        let zeros = Proof::ZERO;
-        let garbage = Proof::repeat_byte(0x11);
-        // A valid proof of ANOTHER blob: well-formed, but not the proof of this one.
-        let other = compute_blob_proof(&test_blob(9), &commitment_of(&test_blob(9))).unwrap();
-        let mut blobs = vec![sidecar(1, zeros), sidecar(2, garbage), sidecar(3, other)];
-
-        let replaced = replace_invalid_proofs(&mut blobs).await.unwrap();
-
-        assert_eq!(replaced, 3);
-
-        for blob in &blobs {
-            assert!(verify_blob_proof(
-                &blob.blob,
-                &blob.kzg_commitment,
-                &blob.kzg_proof
-            ));
-        }
-    }
-
-    #[test]
-    fn verification_accepts_only_the_right_proof() {
-        let (blob, other) = (test_blob(1), test_blob(2));
-        let (commitment, other_commitment) = (commitment_of(&blob), commitment_of(&other));
-        let proof = compute_blob_proof(&blob, &commitment).unwrap();
-
-        assert!(verify_blob_proof(&blob, &commitment, &proof));
-        assert!(!verify_blob_proof(&blob, &other_commitment, &proof));
-        assert!(!verify_blob_proof(&other, &commitment, &proof));
-        assert!(!verify_blob_proof(&blob, &commitment, &PLACEHOLDER_PROOF));
-        assert!(!verify_blob_proof(&blob, &commitment, &Proof::ZERO));
     }
 }

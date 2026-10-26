@@ -122,16 +122,12 @@ pub struct BlockResponse {
     pub data: BlockData,
 }
 
-#[derive(Deserialize, Debug)]
+/// A blob with its KZG commitment and KZG proof.
+#[derive(Debug)]
 pub struct Blob {
     pub kzg_commitment: KzgCommitment,
     pub kzg_proof: Proof,
     pub blob: HeapBlob,
-}
-
-#[derive(Deserialize, Debug)]
-pub struct BlobSidecarsResponse {
-    pub data: Vec<Blob>,
 }
 
 /// Response of `GET /eth/v1/beacon/blobs/{block_id}`: the raw blobs of the block, in the order of

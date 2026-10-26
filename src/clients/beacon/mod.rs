@@ -20,9 +20,7 @@ use crate::{
     json_get,
 };
 
-use self::types::{
-    Blob, BlobSidecarsResponse, BlobsResponse, Block, BlockId, BlockResponse, Topic,
-};
+use self::types::{BlobsResponse, Block, BlockId, BlockResponse, Topic};
 
 pub mod types;
 
@@ -44,11 +42,8 @@ pub struct Config {
 pub trait CommonBeaconClient: Send + Sync + Debug {
     async fn get_block(&self, block_id: BlockId) -> ClientResult<Option<Block>>;
     async fn get_block_header(&self, block_id: BlockId) -> ClientResult<Option<BlockHeader>>;
-    /// Blob sidecars of a block (`/eth/v1/beacon/blob_sidecars`): blob, KZG commitment and KZG
-    /// proof. This endpoint does not work for Gloas blocks.
-    async fn get_blob_sidecars(&self, block_id: BlockId) -> ClientResult<Option<Vec<Blob>>>;
-    /// Raw blobs of a block (`/eth/v1/beacon/blobs`), in the order of its KZG commitments. Unlike
-    /// `get_blob_sidecars`, this works for Gloas blocks, but it gives no commitments and no proofs.
+    /// Raw blobs of a block (`/eth/v1/beacon/blobs`), in the order of its KZG commitments. The
+    /// response has no commitments and no proofs.
     async fn get_blobs(&self, block_id: BlockId) -> ClientResult<Option<Vec<HeapBlob>>>;
     async fn get_spec(&self) -> ClientResult<Option<Spec>>;
     fn subscribe_to_events(&self, topics: &[Topic]) -> ClientResult<EventSource>;
@@ -97,24 +92,6 @@ impl CommonBeaconClient for BeaconClient {
             self.exp_backoff.clone()
         )
         .map(|res| res.map(|r| r.into()))
-    }
-
-    async fn get_blob_sidecars(&self, block_id: BlockId) -> ClientResult<Option<Vec<Blob>>> {
-        let path = format!("v1/beacon/blob_sidecars/{}", {
-            block_id.to_detailed_string()
-        });
-        let url = self.base_url.join(path.as_str())?;
-
-        json_get!(
-            &self.client,
-            url,
-            BlobSidecarsResponse,
-            self.exp_backoff.clone()
-        )
-        .map(|res| match res {
-            Some(r) => Some(r.data),
-            None => None,
-        })
     }
 
     async fn get_blobs(&self, block_id: BlockId) -> ClientResult<Option<Vec<HeapBlob>>> {

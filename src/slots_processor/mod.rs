@@ -11,11 +11,7 @@ use crate::{
     clients::beacon::types::{
         Blob as BeaconBlob, BlockExecutionPayload, BlockHeader, BlockId, KzgCommitment,
     },
-    utils::{
-        alloy::BlobTransactionExt,
-        futures::retry_on_none,
-        kzg::{compute_blob_proofs, replace_invalid_proofs},
-    },
+    utils::{alloy::BlobTransactionExt, futures::retry_on_none, kzg::compute_blob_proofs},
 };
 use tracing::{debug, info, warn, Instrument};
 
@@ -253,65 +249,7 @@ impl SlotsProcessor {
             return Err(anyhow!("Blocks mismatch: Consensus block \"{block_root}\" contains blob KZG commitments, but the corresponding execution block \"{execution_block_hash:#?}\" does not contain any blob transactions").into());
         }
 
-        let blobs = match execution_payload {
-            BlockExecutionPayload::Bid { .. } => {
-                self.fetch_blobs_with_computed_proofs(slot, &blob_kzg_commitments)
-                    .await?
-            }
-            BlockExecutionPayload::InBody { .. } => {
-                // Fetch the blobs by slot and not by block root, as some beacon nodes (for example, nodes
-                // that are not supernodes) cannot reconstruct old blobs by block root.
-                let mut blobs = retry_on_none(
-                    || {
-                        let beacon_client = self.context.beacon_client();
-
-                        async move {
-                            let blobs = beacon_client.get_blob_sidecars(slot.into()).await?;
-
-                            match blobs {
-                                Some(blobs) if blobs.is_empty() => Ok::<_, ClientError>(None),
-                                other => Ok(other),
-                            }
-                        }
-                    },
-                    RETRY_MAX_ATTEMPTS,
-                    RETRY_DELAY,
-                )
-                .await?
-                .with_context(|| "Blobs sidecar not found".to_string())?;
-
-                if blobs.is_empty() {
-                    return Err(anyhow!("Blobs sidecar is empty").into());
-                }
-
-                // The block at the slot can change if a reorg occurs. Thus, make sure that the sidecar
-                // commitments are equal to the commitments of the block that we got by block root.
-                let is_commitments_match = blobs
-                    .iter()
-                    .map(|blob| &blob.kzg_commitment)
-                    .eq(blob_kzg_commitments.iter());
-
-                if !is_commitments_match {
-                    return Err(anyhow!(
-                    "Blob sidecars at slot {slot} do not match the KZG commitments of block '{block_root}'. The block was possibly reorged"
-                )
-                .into());
-                }
-
-                // Since Fulu the beacon nodes rebuild sidecars from PeerDAS data and return a dummy
-                // (the infinity point) instead of the blob's KZG proof. Blobscan stores and serves
-                // the proof, so keep a sidecar's proof only if it verifies and compute it otherwise.
-                let replaced = replace_invalid_proofs(&mut blobs)
-                    .await
-                    .with_context(|| format!("Blobs of slot {slot}"))?;
-
-                if replaced > 0 {
-                    debug!(slot, replaced, "Replaced invalid KZG proofs");
-                }
-
-                blobs
-            }
-        };
+        let blobs = self.fetch_blobs(slot, &blob_kzg_commitments).await?;
 
         // Create entities to be indexed
         let block_entity = Block::try_from((&execution_block, slot))?;
@@ -337,7 +275,7 @@ impl SlotsProcessor {
                                 vh.eq(versioned_hash)
                             })
                             .with_context(|| format!(
-                                "Sidecar not found for blob {i:?} with versioned hash {versioned_hash:?} from tx {tx_hash:?}"
+                                "Blob not found for blob {i:?} with versioned hash {versioned_hash:?} from tx {tx_hash:?}"
                             ))?;
 
                         Ok(Blob::from((blob, (i as u32), tx_hash)))
@@ -365,14 +303,16 @@ impl SlotsProcessor {
         Ok(())
     }
 
-    /// Fetches the blobs of a Gloas block and rebuilds the sidecar data the rest of the indexer
-    /// expects.
+    /// Fetches the blobs of a block, with their KZG commitments and KZG proofs.
     ///
-    /// `blob_sidecars` does not work for Gloas blocks, so this reads `/eth/v1/beacon/blobs`, which
-    /// returns the raw blobs in the order of the block's commitments. The commitments come from
-    /// the block's bid. The proof is computed (and verified, which also catches a blob that
-    /// belongs to a different block at the same slot).
-    async fn fetch_blobs_with_computed_proofs(
+    /// `/eth/v1/beacon/blobs` gives the raw blobs only, in the order of the block's commitments.
+    /// The commitments come from the block. The indexer computes each proof and verifies it. If a
+    /// blob is not the blob of its commitment, the verification fails. This occurs when the block
+    /// at the slot changed after a reorg.
+    ///
+    /// The blobs are fetched by slot and not by block root, because some beacon nodes (for
+    /// example, nodes that are not supernodes) cannot rebuild old blobs by block root.
+    async fn fetch_blobs(
         &self,
         slot: u32,
         blob_kzg_commitments: &[KzgCommitment],
