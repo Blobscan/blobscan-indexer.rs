@@ -47,7 +47,7 @@ pub struct Spec {
     #[serde(rename = "DEPOSIT_NETWORK_ID", deserialize_with = "deserialize_u64")]
     pub deposit_network_id: u64,
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Block {
     pub blob_kzg_commitments: Option<Vec<KzgCommitment>>,
     pub execution_payload: Option<BlockExecutionPayload>,
@@ -62,16 +62,32 @@ pub enum BlockExecutionPayload {
     /// the block number are known.
     InBody { block_hash: B256, block_number: u32 },
     /// Gloas and later: the body has a signed bid that commits to the payload by hash. The bid
-    /// does not have the block number (ask the execution client). The payload gets to the
-    /// execution client later, or never if the builder withholds it.
-    Bid { block_hash: B256 },
+    /// does not have the block number (ask the execution client). The builder can withhold the
+    /// payload, so only the child block tells if the payload became part of the chain.
+    Bid {
+        block_hash: B256,
+        /// Hash of the last execution payload that is part of the chain before this block. It
+        /// is the payload of the parent block if the parent is full, and an older payload if the
+        /// parent is empty.
+        parent_block_hash: B256,
+    },
 }
 
-impl BlockExecutionPayload {
-    pub fn block_hash(&self) -> B256 {
-        match self {
-            BlockExecutionPayload::InBody { block_hash, .. }
-            | BlockExecutionPayload::Bid { block_hash } => *block_hash,
+impl Block {
+    /// Gloas: returns the hash of the execution payload of `parent` if this block builds on it.
+    /// That is, the parent is full and its payload is part of the chain.
+    ///
+    /// Returns `None` if the parent is empty (its builder withheld the payload, or the payload
+    /// came too late), or if one of the two blocks is not a Gloas block.
+    pub fn full_parent_payload_hash(&self, parent: &Block) -> Option<B256> {
+        match (&self.execution_payload, &parent.execution_payload) {
+            (
+                Some(BlockExecutionPayload::Bid {
+                    parent_block_hash, ..
+                }),
+                Some(BlockExecutionPayload::Bid { block_hash, .. }),
+            ) if parent_block_hash == block_hash => Some(*block_hash),
+            _ => None,
         }
     }
 }
@@ -85,6 +101,7 @@ pub struct ExecutionPayload {
 
 #[derive(Deserialize, Debug)]
 pub struct ExecutionPayloadBid {
+    pub parent_block_hash: B256,
     pub block_hash: B256,
     pub blob_kzg_commitments: Vec<KzgCommitment>,
 }
@@ -320,6 +337,7 @@ impl TryFrom<BlockResponse> for Block {
                 (
                     Some(BlockExecutionPayload::Bid {
                         block_hash: bid.block_hash,
+                        parent_block_hash: bid.parent_block_hash,
                     }),
                     Some(bid.blob_kzg_commitments),
                 )
@@ -384,6 +402,8 @@ mod block_tests {
     const COMMITMENT_0: &str = "0xa0938f80d83f02fae778eb3347ed524dcff94ad1f01dd0f617226054180c5aacb62356b0bf9bcabd8c668189643be18b";
     const COMMITMENT_1: &str = "0x85f6e8b0e18cc996fefdc260e28d7ed1860c2af5cad02c15721cfb1aea02a6173797e2e7cc8e04c171babf87a561825e";
     const PARENT_ROOT: &str = "0xef1481e62dd5c92d881e9a18ec3adf644d42a4ef6cef201daf0718ef02266d14";
+    const PARENT_BLOCK_HASH: &str =
+        "0x5b1a0c0e2c3f4a6b7d8e9f00112233445566778899aabbccddeeff0011223344";
 
     fn try_block_from(version: &str, body: &str) -> anyhow::Result<Block> {
         let json = format!(
@@ -401,7 +421,7 @@ mod block_tests {
 
     fn bid_body() -> String {
         format!(
-            r#"{{"signed_execution_payload_bid":{{"message":{{"block_hash":"{BLOCK_HASH}","builder_index":"18446744073709551615","blob_kzg_commitments":["{COMMITMENT_0}","{COMMITMENT_1}"]}},"signature":"0x00"}}}}"#
+            r#"{{"signed_execution_payload_bid":{{"message":{{"parent_block_hash":"{PARENT_BLOCK_HASH}","block_hash":"{BLOCK_HASH}","builder_index":"18446744073709551615","blob_kzg_commitments":["{COMMITMENT_0}","{COMMITMENT_1}"]}},"signature":"0x00"}}}}"#
         )
     }
 
@@ -420,7 +440,8 @@ mod block_tests {
         assert_eq!(
             block.execution_payload,
             Some(BlockExecutionPayload::Bid {
-                block_hash: BLOCK_HASH.parse().unwrap()
+                block_hash: BLOCK_HASH.parse().unwrap(),
+                parent_block_hash: PARENT_BLOCK_HASH.parse().unwrap(),
             })
         );
         assert_eq!(
@@ -451,7 +472,7 @@ mod block_tests {
     #[test]
     fn a_pre_gloas_block_ignores_a_bid_field() {
         let body = format!(
-            r#"{{"execution_payload":{{"block_hash":"{BLOCK_HASH}","block_number":"1"}},"signed_execution_payload_bid":{{"message":{{"block_hash":"{PARENT_ROOT}","blob_kzg_commitments":[]}}}}}}"#
+            r#"{{"execution_payload":{{"block_hash":"{BLOCK_HASH}","block_number":"1"}},"signed_execution_payload_bid":{{"message":{{"parent_block_hash":"{PARENT_ROOT}","block_hash":"{PARENT_ROOT}","blob_kzg_commitments":[]}}}}}}"#
         );
 
         let block = block_from("electra", &body);
@@ -483,7 +504,8 @@ mod block_tests {
         assert_eq!(
             block.execution_payload,
             Some(BlockExecutionPayload::Bid {
-                block_hash: BLOCK_HASH.parse().unwrap()
+                block_hash: BLOCK_HASH.parse().unwrap(),
+                parent_block_hash: PARENT_BLOCK_HASH.parse().unwrap(),
             })
         );
     }
@@ -495,5 +517,52 @@ mod block_tests {
 
         assert!(block.execution_payload.is_none());
         assert!(block.blob_kzg_commitments.is_none());
+    }
+
+    fn bid_block(block_hash: u8, parent_block_hash: u8) -> Block {
+        Block {
+            blob_kzg_commitments: None,
+            execution_payload: Some(BlockExecutionPayload::Bid {
+                block_hash: B256::repeat_byte(block_hash),
+                parent_block_hash: B256::repeat_byte(parent_block_hash),
+            }),
+            parent_root: B256::ZERO,
+            slot: 0,
+        }
+    }
+
+    #[test]
+    fn a_child_that_builds_on_the_parent_payload_makes_the_parent_full() {
+        let parent = bid_block(0x02, 0x01);
+        let child = bid_block(0x03, 0x02);
+
+        assert_eq!(
+            child.full_parent_payload_hash(&parent),
+            Some(B256::repeat_byte(0x02))
+        );
+    }
+
+    /// The parent payload was withheld: the child builds on the payload before it.
+    #[test]
+    fn a_child_that_skips_the_parent_payload_makes_the_parent_empty() {
+        let parent = bid_block(0x02, 0x01);
+        let child = bid_block(0x03, 0x01);
+
+        assert_eq!(child.full_parent_payload_hash(&parent), None);
+    }
+
+    /// The first Gloas block: the old code path already indexed the payload of its parent.
+    #[test]
+    fn a_pre_gloas_parent_is_never_full() {
+        let parent = Block {
+            execution_payload: Some(BlockExecutionPayload::InBody {
+                block_hash: B256::repeat_byte(0x02),
+                block_number: 1,
+            }),
+            ..bid_block(0, 0)
+        };
+        let child = bid_block(0x03, 0x02);
+
+        assert_eq!(child.full_parent_payload_hash(&parent), None);
     }
 }

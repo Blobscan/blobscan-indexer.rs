@@ -9,11 +9,12 @@ use anyhow::{anyhow, Context as AnyhowContext, Result};
 
 use crate::{
     clients::beacon::types::{
-        Blob as BeaconBlob, BlockExecutionPayload, BlockHeader, BlockId, KzgCommitment,
+        Blob as BeaconBlob, Block as BeaconBlock, BlockExecutionPayload, BlockHeader, BlockId,
+        KzgCommitment,
     },
     utils::{alloy::BlobTransactionExt, futures::retry_on_none, kzg::compute_blob_proofs},
 };
-use tracing::{debug, info, warn, Instrument};
+use tracing::{debug, info, Instrument};
 
 use crate::{
     clients::{
@@ -34,13 +35,6 @@ const MAX_ALLOWED_REORG_DEPTH: u32 = 100;
 
 const RETRY_MAX_ATTEMPTS: u32 = 5;
 const RETRY_DELAY: Duration = Duration::from_millis(500);
-
-/// Attempts that cover `wait` at one every `RETRY_DELAY`, and at least one.
-fn retry_attempts_for(wait: Duration) -> u32 {
-    u32::try_from(wait.as_millis() / RETRY_DELAY.as_millis())
-        .unwrap_or(u32::MAX)
-        .max(1)
-}
 
 pub struct BlockData {
     pub root: B256,
@@ -159,36 +153,60 @@ impl SlotsProcessor {
         Ok(())
     }
 
+    /// Indexes the execution payload that the block at `block_root` makes part of the chain.
+    ///
+    /// Before Gloas this is the payload in the block body. From Gloas on (EIP-7732, ePBS) the
+    /// block only has a bid, and the builder can withhold the payload. The next block tells if
+    /// the payload became part of the chain: its bid builds on that payload (the block is full)
+    /// or on an older one (the block is empty). Thus a Gloas block indexes the payload of its
+    /// parent, if the parent is full. Its own payload is indexed with its child.
     async fn index_block(&self, block_root: B256) -> Result<(), SlotProcessingError> {
         let blobscan_client = self.context.blobscan_client();
         let provider = self.context.provider();
 
-        let beacon_block = retry_on_none(
-            || {
-                let beacon_client = self.context.beacon_client();
+        let beacon_block = self
+            .fetch_beacon_block(block_root)
+            .await?
+            .with_context(|| "Block not found".to_string())?;
 
-                async move { beacon_client.get_block(block_root.into()).await }
-            },
-            RETRY_MAX_ATTEMPTS,
-            RETRY_DELAY,
-        )
-        .await?
-        .with_context(|| "Block not found".to_string())?;
-
-        let slot = beacon_block.slot;
-
-        let execution_payload = match beacon_block.execution_payload {
-            Some(payload) => payload,
+        let (block_root, beacon_block, execution_block_hash) = match beacon_block.execution_payload
+        {
             None => {
                 debug!(
                     block_root = ?block_root,
-                    slot, "Skipping - block doesn't contain execution payload"
+                    slot = beacon_block.slot,
+                    "Skipping - block doesn't contain execution payload"
                 );
 
                 return Ok(());
             }
+            Some(BlockExecutionPayload::InBody { block_hash, .. }) => {
+                (block_root, beacon_block, block_hash)
+            }
+            Some(BlockExecutionPayload::Bid { .. }) => {
+                let parent_root = beacon_block.parent_root;
+                let parent = self
+                    .fetch_beacon_block(parent_root)
+                    .await?
+                    .with_context(|| format!("Parent block '{parent_root}' not found"))?;
+
+                let Some(parent_payload_hash) = beacon_block.full_parent_payload_hash(&parent)
+                else {
+                    debug!(
+                        block_root = ?block_root,
+                        slot = beacon_block.slot,
+                        parent_slot = parent.slot,
+                        "Skipping - the parent block is empty or is not a Gloas block"
+                    );
+
+                    return Ok(());
+                };
+
+                (parent_root, parent, parent_payload_hash)
+            }
         };
 
+        let slot = beacon_block.slot;
         let blob_kzg_commitments = beacon_block.blob_kzg_commitments.unwrap_or_default();
 
         if blob_kzg_commitments.is_empty() {
@@ -200,48 +218,21 @@ impl SlotsProcessor {
             return Ok(());
         }
 
-        let execution_block_hash = execution_payload.block_hash();
-
-        // Fetch execution block and perform some checks
-
-        let execution_block = match execution_payload {
-            BlockExecutionPayload::Bid { .. } => {
-                // Gloas (ePBS): the beacon block only commits to the payload. The builder reveals it
-                // afterwards, so the execution client may not know the hash yet, and never will if
-                // the builder withholds it. Wait for it (by default one slot), then skip: there is nothing
-                // to index for a payload that never became part of the chain.
-                let block = retry_on_none(
-                    || async move {
-                        provider
-                            .get_block(ExecutionBlockId::Hash(execution_block_hash.into()))
-                            .full()
-                            .await
-                    },
-                    retry_attempts_for(self.context.gloas_payload_wait()),
-                    RETRY_DELAY,
-                )
-                .await?;
-
-                match block {
-                    Some(block) => block,
-                    None => {
-                        warn!(
-                            block_root = ?block_root,
-                            slot,
-                            execution_block_hash = ?execution_block_hash,
-                            "Skipping - the execution client does not know the payload committed by the bid. It was withheld, or has not been revealed yet"
-                        );
-
-                        return Ok(());
-                    }
-                }
-            }
-            BlockExecutionPayload::InBody { .. } => provider
-                .get_block(ExecutionBlockId::Hash(execution_block_hash.into()))
-                .full()
-                .await?
-                .with_context(|| format!("Execution block '{execution_block_hash}' not found"))?,
-        };
+        // Fetch execution block and perform some checks. The payload is part of the chain, so the
+        // execution client must know it. It can be a little behind the beacon node, so try again
+        // before the error.
+        let execution_block = retry_on_none(
+            || async move {
+                provider
+                    .get_block(ExecutionBlockId::Hash(execution_block_hash.into()))
+                    .full()
+                    .await
+            },
+            RETRY_MAX_ATTEMPTS,
+            RETRY_DELAY,
+        )
+        .await?
+        .with_context(|| format!("Execution block '{execution_block_hash}' not found"))?;
 
         let blob_txs = execution_block.transactions.filter_blob_transactions();
 
@@ -301,6 +292,20 @@ impl SlotsProcessor {
         );
 
         Ok(())
+    }
+
+    async fn fetch_beacon_block(&self, block_root: B256) -> Result<Option<BeaconBlock>> {
+        retry_on_none(
+            || {
+                let beacon_client = self.context.beacon_client();
+
+                async move { beacon_client.get_block(block_root.into()).await }
+            },
+            RETRY_MAX_ATTEMPTS,
+            RETRY_DELAY,
+        )
+        .await
+        .map_err(Into::into)
     }
 
     /// Fetches the blobs of a block, with their KZG commitments and KZG proofs.
@@ -410,7 +415,7 @@ impl SlotsProcessor {
                         .await?;
 
                     // If a path exists, we've found the common ancient block
-                    if !canonical_block_path.is_empty() {
+                    if let Some(canonical_block_path) = canonical_block_path {
                         let canonical_block_path =
                             canonical_block_path.into_iter().rev().collect::<Vec<_>>();
 
@@ -418,6 +423,14 @@ impl SlotsProcessor {
                             .iter()
                             .map(|block| block.execution_block_hash)
                             .collect::<Vec<_>>();
+
+                        if rewinded_blocks.is_empty() && forwarded_blocks.is_empty() {
+                            info!(
+                                "Skipping reorg handling: no Blobscan blocks to rewind or forward"
+                            );
+
+                            return Ok(());
+                        }
 
                         self.context
                             .blobscan_client()
@@ -471,27 +484,28 @@ impl SlotsProcessor {
         Ok(())
     }
 
-    /// Returns the path of blocks with execution payload from the head block to the provided block.
+    /// Returns the canonical blocks from the head block down to the block that makes the payload
+    /// of `blobscan_block` part of the chain (that block is not included). Returns `None` if
+    /// `blobscan_block` is not on the chain of the head block.
+    ///
+    /// Each block in the path makes a new execution payload part of the chain, and
+    /// `execution_block_hash` is the hash of that payload. Before Gloas this is the payload of
+    /// the block itself. From Gloas on it is the payload of its parent, if the parent is full (see
+    /// `index_block`). A block that makes no new payload part of the chain is not in the path.
     async fn get_canonical_block_path(
         &mut self,
         blobscan_block: &BlobscanBlock,
         head_block_root: B256,
-    ) -> Result<Vec<BlockData>, ClientError> {
+    ) -> Result<Option<Vec<BlockData>>, ClientError> {
         let beacon_client = self.context.beacon_client();
         let mut canonical_execution_blocks: Vec<BlockData> = vec![];
 
         let mut canonical_block = match beacon_client.get_block(head_block_root.into()).await? {
             Some(block) => block,
             None => {
-                return Ok(vec![]);
+                return Ok(None);
             }
         };
-
-        if let Some(execution_payload) = &canonical_block.execution_payload {
-            if execution_payload.block_hash() == blobscan_block.hash {
-                return Ok(vec![]);
-            }
-        }
 
         let mut current_canonical_block_root = head_block_root;
 
@@ -499,35 +513,44 @@ impl SlotsProcessor {
             let canonical_block_parent_root = canonical_block.parent_root;
 
             if canonical_block.slot < blobscan_block.slot {
-                return Ok(vec![]);
+                return Ok(None);
             }
 
-            if let Some(execution_payload) = &canonical_block.execution_payload {
-                if execution_payload.block_hash() == blobscan_block.hash {
-                    return Ok(canonical_execution_blocks);
+            let parent_block = match beacon_client
+                .get_block(canonical_block_parent_root.into())
+                .await?
+            {
+                Some(block) => block,
+                None => {
+                    return Ok(None);
+                }
+            };
+
+            let execution_block_hash = match &canonical_block.execution_payload {
+                Some(BlockExecutionPayload::InBody { block_hash, .. }) => Some(*block_hash),
+                Some(BlockExecutionPayload::Bid { .. }) => {
+                    canonical_block.full_parent_payload_hash(&parent_block)
+                }
+                None => None,
+            };
+
+            if let Some(execution_block_hash) = execution_block_hash {
+                if execution_block_hash == blobscan_block.hash {
+                    return Ok(Some(canonical_execution_blocks));
                 }
 
                 canonical_execution_blocks.push(BlockData {
                     root: current_canonical_block_root,
                     parent_root: canonical_block_parent_root,
                     slot: canonical_block.slot,
-                    execution_block_hash: execution_payload.block_hash(),
+                    execution_block_hash,
                 });
             }
 
-            canonical_block = match beacon_client
-                .get_block(canonical_block_parent_root.into())
-                .await?
-            {
-                Some(block) => block,
-                None => {
-                    return Ok(vec![]);
-                }
-            };
-
+            canonical_block = parent_block;
             current_canonical_block_root = canonical_block_parent_root;
         }
 
-        Ok(vec![])
+        Ok(None)
     }
 }
