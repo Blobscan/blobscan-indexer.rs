@@ -60,7 +60,9 @@ pub struct ContextConfig {
 
 impl Context {
     pub async fn try_new(config: ContextConfig) -> AnyhowResult<Self> {
-        let exp_backoff = Some(ExponentialBuilder::default());
+        // 1s, 2s, 4s… up to 6 retries (~1 minute): long enough to ride out a rate limit
+        // or a proxy restart, which the default 3 retries (7s) did not.
+        let exp_backoff = Some(ExponentialBuilder::default().with_max_times(6));
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(16))
             .build()?;
