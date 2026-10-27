@@ -37,6 +37,15 @@ const SSE_MAX_CONSECUTIVE_FAILURES: u32 = 10;
 const SSE_RECONNECT_BASE_DELAY: Duration = Duration::from_secs(2);
 const SSE_RECONNECT_MAX_DELAY: Duration = Duration::from_secs(60);
 
+/// Limits for the read of an error response body. The SSE client has no read timeout,
+/// and a proxy can keep the body open. Without these limits, the read can stop the task.
+const SSE_ERROR_BODY_READ_TIMEOUT: Duration = if cfg!(test) {
+    Duration::from_millis(100)
+} else {
+    Duration::from_secs(5)
+};
+const SSE_ERROR_BODY_MAX_BYTES: usize = 1024;
+
 #[derive(Debug, thiserror::Error)]
 pub enum SSEIndexingError {
     #[error("an error ocurred while receiving events from the SSE stream: {0}")]
@@ -64,16 +73,39 @@ fn sse_reconnect_delay(failures: u32, base: Duration, max: Duration) -> Duration
 /// A connection-level failure the beacon node or a proxy in front of it can cause
 /// (restart, 429, 502, an error page with a JSON body): worth resubscribing.
 /// Malformed streams are not: they point at a bug, not at the network.
+/// Other 4xx statuses are not: they point at a bad URL, topic or auth. A retry does not
+/// correct these, and it only makes the error report late.
 fn is_recoverable_sse_error(error: &reqwest_eventsource::Error) -> bool {
+    use reqwest::StatusCode;
     use reqwest_eventsource::Error;
 
-    matches!(
-        error,
-        Error::StreamEnded
-            | Error::Transport(_)
-            | Error::InvalidContentType(..)
-            | Error::InvalidStatusCode(..)
-    )
+    match error {
+        Error::StreamEnded | Error::Transport(_) | Error::InvalidContentType(..) => true,
+        Error::InvalidStatusCode(status, _) => {
+            status.is_server_error()
+                || *status == StatusCode::TOO_MANY_REQUESTS
+                || *status == StatusCode::REQUEST_TIMEOUT
+        }
+        _ => false,
+    }
+}
+
+/// Reads the start of an error response body. The read stops after
+/// `SSE_ERROR_BODY_MAX_BYTES` or `SSE_ERROR_BODY_READ_TIMEOUT`, whichever comes first.
+async fn read_error_body(mut response: reqwest::Response) -> String {
+    let mut bytes = Vec::new();
+    let read = async {
+        while bytes.len() < SSE_ERROR_BODY_MAX_BYTES {
+            match response.chunk().await {
+                Ok(Some(chunk)) => bytes.extend_from_slice(&chunk),
+                _ => break,
+            }
+        }
+    };
+
+    let _ = timeout(SSE_ERROR_BODY_READ_TIMEOUT, read).await;
+
+    String::from_utf8_lossy(&bytes).chars().take(300).collect()
 }
 
 /// The error message alone ("Invalid header value: \"application/json\"") hides what the
@@ -90,8 +122,7 @@ async fn describe_sse_error(error: reqwest_eventsource::Error) -> String {
 
     match response {
         Some(response) => {
-            let body = response.text().await.unwrap_or_default();
-            let body: String = body.chars().take(300).collect();
+            let body = read_error_body(response).await;
 
             format!("{summary}, body: {body}")
         }
@@ -534,6 +565,10 @@ mod tests {
     const BAD_CONTENT_TYPE: Reply = (200, "application/json", "{\"message\":\"oops\"}", false);
     const UNAVAILABLE: Reply = (503, "application/json", "{\"message\":\"down\"}", false);
     const HEALTHY: Reply = (200, "text/event-stream", ": hello\n\n", true);
+    const NOT_FOUND: Reply = (404, "application/json", "{\"message\":\"no route\"}", false);
+    /// A 503 whose body never ends: the server keeps the connection open.
+    const UNAVAILABLE_STALLED_BODY: Reply =
+        (503, "application/json", "{\"message\":\"down\"", true);
 
     /// Serves `replies` to successive connections (the last one repeats).
     async fn fake_beacon_node(replies: Vec<Reply>) -> String {
@@ -658,5 +693,37 @@ mod tests {
         }
 
         assert_eq!(attempts, SSE_MAX_CONSECUTIVE_FAILURES as usize + 1);
+    }
+
+    #[tokio::test]
+    async fn does_not_resubscribe_after_a_client_error() {
+        let (mut subscribed, mut errors, _handle) = run_task(vec![NOT_FOUND]).await;
+
+        let report = errors.recv().await.expect("an error report");
+        let message = report.error.to_string();
+
+        assert!(message.contains("404"), "{message}");
+
+        let mut attempts = 0;
+
+        while subscribed.try_recv().is_ok() {
+            attempts += 1;
+        }
+
+        assert_eq!(attempts, 1);
+    }
+
+    #[tokio::test]
+    async fn a_stalled_error_body_does_not_block_the_task() {
+        let (_subscribed, mut errors, _handle) = run_task(vec![UNAVAILABLE_STALLED_BODY]).await;
+
+        let report = tokio::time::timeout(Duration::from_secs(10), errors.recv())
+            .await
+            .expect("the task is blocked on the error body")
+            .expect("an error report");
+        let message = report.error.to_string();
+
+        assert!(message.contains("consecutive failures"), "{message}");
+        assert!(message.contains("down"), "{message}");
     }
 }
