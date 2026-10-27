@@ -5,23 +5,29 @@ use anyhow::{anyhow, Result};
 
 use crate::{clients::beacon::types::BlockExecutionPayload, utils::futures::retry_on_none};
 
-/// Returns the execution block number of a beacon block's payload.
+/// Returns the number of the last execution block that is part of the chain at a beacon block.
 ///
-/// Pre-Gloas beacon blocks carry the number. A Gloas bid only commits to the payload by hash, so
-/// the number comes from the execution client. `Ok(None)` means the execution client does not
-/// know the hash after `attempts` tries: under ePBS the payload is revealed after the beacon
-/// block, and a builder can withhold it, so this is not an error by itself.
+/// Before Gloas, this is the payload of the beacon block, and the block has its number.
+///
+/// A Gloas block has a bid. The builder can keep the payload of the bid and not send it. For this
+/// reason, this function uses the payload that the bid builds on (`parent_block_hash`). That
+/// payload is part of the chain, but it can be one payload older than the beacon block. The
+/// number comes from the execution client.
+///
+/// `Ok(None)` means that the execution client does not know the hash after `attempts` tries. The
+/// payload is part of the chain, so the execution client is behind the beacon node.
 pub async fn resolve_execution_block_number(
     provider: &dyn Provider<Ethereum>,
     payload: &BlockExecutionPayload,
     attempts: u32,
     delay: Duration,
 ) -> Result<Option<u32>> {
-    if let Some(number) = payload.block_number {
-        return Ok(Some(number));
-    }
-
-    let block_hash = payload.block_hash;
+    let block_hash = match payload {
+        BlockExecutionPayload::InBody { block_number, .. } => return Ok(Some(*block_number)),
+        BlockExecutionPayload::Bid {
+            parent_block_hash, ..
+        } => *parent_block_hash,
+    };
     let block = retry_on_none(
         || async move {
             provider
@@ -56,10 +62,15 @@ mod tests {
     const DELAY: Duration = Duration::from_millis(1);
 
     fn payload(block_number: Option<u32>) -> BlockExecutionPayload {
-        BlockExecutionPayload {
-            block_hash: B256::repeat_byte(0x07),
-            block_number,
-            from_bid: block_number.is_none(),
+        match block_number {
+            Some(block_number) => BlockExecutionPayload::InBody {
+                block_hash: B256::repeat_byte(0x07),
+                block_number,
+            },
+            None => BlockExecutionPayload::Bid {
+                block_hash: B256::repeat_byte(0x07),
+                parent_block_hash: B256::repeat_byte(0x06),
+            },
         }
     }
 
@@ -89,7 +100,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn resolves_a_bid_hash_through_the_execution_client() {
+    async fn resolves_the_payload_the_bid_builds_on_through_the_execution_client() {
         let asserter = Asserter::new();
         let provider = ProviderBuilder::new().connect_mocked_client(asserter.clone());
 
@@ -103,7 +114,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn waits_for_a_payload_that_is_revealed_late() {
+    async fn waits_for_an_execution_client_that_is_a_little_behind() {
         let asserter = Asserter::new();
         let provider = ProviderBuilder::new().connect_mocked_client(asserter.clone());
 
@@ -119,7 +130,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_payload_that_never_shows_up_is_none_not_an_error() {
+    async fn an_execution_client_that_stays_behind_gives_none_not_an_error() {
         let asserter = Asserter::new();
         let provider = ProviderBuilder::new().connect_mocked_client(asserter.clone());
 

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.4](https://github.com/Blobscan/blobscan-indexer.rs/compare/v0.6.3...v0.6.4) - 2026-10-21
+
+### Fixed
+
+- replace placeholder KZG proofs in sidecars with real ones ([#150](https://github.com/Blobscan/blobscan-indexer.rs/pull/150))
+
 ## [0.6.3](https://github.com/Blobscan/blobscan-indexer.rs/compare/v0.6.2...v0.6.3) - 2026-10-15
 
 ### Fixed

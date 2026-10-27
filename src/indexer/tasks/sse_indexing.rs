@@ -249,16 +249,15 @@ impl SSEIndexingTask {
                                                 error: anyhow!("Finalized block {full_block_hash} not found"),
                                             })?;
 
-                                        // From Gloas on the block carries a payload bid instead of
-                                        // the payload, so this is neither "block not found" nor a
-                                        // reason to exit. Only a block with no payload information
-                                        // at all is an error: it means a fork we do not parse yet.
+                                        // From Gloas on, the block has a payload bid and not the
+                                        // payload. The parser gives both as an execution payload.
+                                        // Only a block before Bellatrix has no execution payload.
                                         let execution_payload = finalized_block
                                             .execution_payload
                                             .ok_or_else(|| SSEIndexingError::EventHandlingError {
                                                 event: event.event.clone(),
                                                 error: anyhow!(
-                                                    "Finalized block {full_block_hash} has neither an execution payload nor an execution payload bid"
+                                                    "Finalized block {full_block_hash} has no execution payload"
                                                 ),
                                             })?;
 
@@ -275,13 +274,13 @@ impl SSEIndexingTask {
                                         })? {
                                             Some(number) => number,
                                             None => {
-                                                // Gloas: the execution client never got the
-                                                // payload for this block (withheld, or not yet
-                                                // revealed). The next checkpoint moves the marker.
+                                                // The payload is part of the chain, so the
+                                                // execution client is behind the beacon node.
+                                                // Do not stop the indexer: the next checkpoint
+                                                // moves the marker.
                                                 warn!(
                                                     block_root = %full_block_hash,
-                                                    execution_block_hash = %execution_payload.block_hash,
-                                                    "Skipping finalized checkpoint: the execution client does not know the payload of the finalized block"
+                                                    "Skipping finalized checkpoint: the execution client does not know the last execution block of the finalized block. It is possibly behind the beacon node"
                                                 );
 
                                                 return Ok::<_, SSEIndexingError>(());

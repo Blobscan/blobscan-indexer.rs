@@ -31,8 +31,6 @@ pub trait CommonContext: Send + Sync + DynClone {
     fn network(&self) -> &Network;
     fn provider(&self) -> &dyn Provider<Ethereum>;
     fn syncing_settings(&self) -> &SyncingSettings;
-    /// How long to wait for a Gloas execution payload to reach the execution client.
-    fn gloas_payload_wait(&self) -> Duration;
 }
 
 dyn_clone::clone_trait_object!(CommonContext);
@@ -44,7 +42,6 @@ struct ContextRef {
     pub blobscan_client: Box<dyn CommonBlobscanClient>,
     pub provider: Box<dyn Provider<Ethereum>>,
     pub syncing_settings: SyncingSettings,
-    pub gloas_payload_wait: Duration,
 }
 
 #[derive(Clone)]
@@ -59,7 +56,6 @@ pub struct ContextConfig {
     pub blobscan_secret_key: String,
     pub execution_node_base_url: String,
     pub syncing_settings: SyncingSettings,
-    pub gloas_payload_wait: Duration,
 }
 
 impl Context {
@@ -76,7 +72,6 @@ impl Context {
             inner: Arc::new(ContextRef {
                 network: config.network,
                 syncing_settings: config.syncing_settings,
-                gloas_payload_wait: config.gloas_payload_wait,
                 blobscan_client: Box::new(BlobscanClient::try_with_client(
                     client.clone(),
                     BlobscanClientConfig {
@@ -146,10 +141,6 @@ impl CommonContext for Context {
 
     fn syncing_settings(&self) -> &SyncingSettings {
         &self.inner.syncing_settings
-    }
-
-    fn gloas_payload_wait(&self) -> Duration {
-        self.inner.gloas_payload_wait
     }
 
     fn network(&self) -> &Network {
