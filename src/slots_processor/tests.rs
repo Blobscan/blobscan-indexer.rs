@@ -537,3 +537,50 @@ async fn the_payload_confirmed_by_the_head_is_a_common_ancestor() {
 
     assert_eq!(path, Some(vec![]));
 }
+
+/// Indexes the blocks of `gloas_chain` at `roots`, in that order, and returns how many blocks
+/// the processor got from the beacon node.
+async fn beacon_requests_to_index(roots: &[u8]) -> usize {
+    let requests = Arc::new(Mutex::new(0));
+    let counter = requests.clone();
+    let blocks = gloas_chain();
+    let mut beacon = MockCommonBeaconClient::new();
+
+    beacon.expect_get_block().returning(move |block_id| {
+        *counter.lock().unwrap() += 1;
+
+        let block = blocks
+            .iter()
+            .find(|(root, _)| BlockId::Hash(*root) == block_id)
+            .map(|(_, block)| block.clone());
+
+        ready(Ok(block))
+    });
+
+    let h = harness(beacon, vec![]);
+
+    for root in roots {
+        h.processor
+            .index_block(B256::repeat_byte(*root))
+            .await
+            .unwrap();
+    }
+
+    let count = *requests.lock().unwrap();
+
+    count
+}
+
+/// Forward: the parent of each block is the block before it, so the processor gets it only one
+/// time.
+#[tokio::test]
+async fn going_forward_gets_each_block_one_time() {
+    assert_eq!(beacon_requests_to_index(&[0xb0, 0xc0, 0xd0]).await, 4);
+}
+
+/// Back: the next block is the parent of the block before it, so the processor gets it only one
+/// time.
+#[tokio::test]
+async fn going_back_gets_each_block_one_time() {
+    assert_eq!(beacon_requests_to_index(&[0xd0, 0xc0, 0xb0]).await, 4);
+}

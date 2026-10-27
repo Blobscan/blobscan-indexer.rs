@@ -1,4 +1,8 @@
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::{
+    collections::VecDeque,
+    sync::Mutex,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 use alloy::{
     consensus::Transaction,
@@ -38,6 +42,12 @@ const MAX_ALLOWED_REORG_DEPTH: u32 = 100;
 const RETRY_MAX_ATTEMPTS: u32 = 5;
 const RETRY_DELAY: Duration = Duration::from_millis(500);
 
+/// Number of beacon blocks that the processor keeps after it gets them. A Gloas block needs its
+/// parent, and the processor goes through the slots in order. When it goes forward, the parent
+/// of a block is the block before it. When it goes back, the next block is the parent of the
+/// block before it. Thus the last blocks and their parents are enough.
+const RECENT_BLOCKS_CAPACITY: usize = 4;
+
 pub struct BlockData {
     pub root: B256,
     pub parent_root: B256,
@@ -58,6 +68,10 @@ impl From<&BlockData> for BlockHeader {
 pub struct SlotsProcessor {
     context: Box<dyn CommonContext>,
     pub last_processed_block: Option<BlockHeader>,
+    /// The beacon blocks that the processor got last, by block root, the most recently used
+    /// last. A block root identifies the content of a block, so an entry stays correct after a
+    /// reorg. After a reorg the entries are only not used.
+    recent_blocks: Mutex<VecDeque<(B256, BeaconBlock)>>,
 }
 
 impl SlotsProcessor {
@@ -68,6 +82,7 @@ impl SlotsProcessor {
         Self {
             context,
             last_processed_block,
+            recent_blocks: Mutex::new(VecDeque::with_capacity(RECENT_BLOCKS_CAPACITY)),
         }
     }
 
@@ -167,7 +182,7 @@ impl SlotsProcessor {
         let provider = self.context.provider();
 
         let beacon_block = self
-            .fetch_beacon_block(block_root)
+            .get_beacon_block(block_root)
             .await?
             .with_context(|| "Block not found".to_string())?;
 
@@ -188,7 +203,7 @@ impl SlotsProcessor {
             Some(BlockExecutionPayload::Bid { .. }) => {
                 let parent_root = beacon_block.parent_root;
                 let parent = self
-                    .fetch_beacon_block(parent_root)
+                    .get_beacon_block(parent_root)
                     .await?
                     .with_context(|| format!("Parent block '{parent_root}' not found"))?;
 
@@ -314,6 +329,40 @@ impl SlotsProcessor {
         );
 
         Ok(())
+    }
+
+    /// Returns the beacon block at `block_root`. It comes from `recent_blocks` if the processor
+    /// got it a short time before, and from the beacon node if not.
+    async fn get_beacon_block(&self, block_root: B256) -> Result<Option<BeaconBlock>> {
+        {
+            let mut recent_blocks = self.recent_blocks.lock().unwrap();
+
+            if let Some(i) = recent_blocks
+                .iter()
+                .position(|(root, _)| *root == block_root)
+            {
+                let entry = recent_blocks.remove(i).unwrap();
+                let block = entry.1.clone();
+
+                recent_blocks.push_back(entry);
+
+                return Ok(Some(block));
+            }
+        }
+
+        let block = self.fetch_beacon_block(block_root).await?;
+
+        if let Some(block) = &block {
+            let mut recent_blocks = self.recent_blocks.lock().unwrap();
+
+            if recent_blocks.len() == RECENT_BLOCKS_CAPACITY {
+                recent_blocks.pop_front();
+            }
+
+            recent_blocks.push_back((block_root, block.clone()));
+        }
+
+        Ok(block)
     }
 
     async fn fetch_beacon_block(&self, block_root: B256) -> Result<Option<BeaconBlock>> {
