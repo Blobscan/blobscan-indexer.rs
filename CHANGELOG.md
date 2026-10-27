@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0](https://github.com/Blobscan/blobscan-indexer.rs/compare/v0.6.4...v0.7.0) - 2026-10-27
+
+### Added
+
+- support Gloas (EIP-7732) blocks ([#148](https://github.com/Blobscan/blobscan-indexer.rs/pull/148))
+
+### Fixed
+
+- survive SSE connection failures and retry 429/5xx on GET ([#149](https://github.com/Blobscan/blobscan-indexer.rs/pull/149))
+
 ## [0.6.4](https://github.com/Blobscan/blobscan-indexer.rs/compare/v0.6.3...v0.6.4) - 2026-10-21
 
 ### Fixed
