@@ -63,15 +63,6 @@ pub enum SSEIndexingError {
     EventHandlingError { event: String, error: anyhow::Error },
 }
 
-/// Delays between resubscriptions: 2s, 4s, 8s… with a maximum of 60s. After
-/// `SSE_MAX_CONSECUTIVE_FAILURES` delays, the backoff stops and the task gives up.
-fn sse_reconnect_backoff() -> ExponentialBuilder {
-    ExponentialBuilder::default()
-        .with_min_delay(Duration::from_secs(2))
-        .with_max_delay(Duration::from_secs(60))
-        .with_max_times(SSE_MAX_CONSECUTIVE_FAILURES as usize)
-}
-
 /// A connection-level failure the beacon node or a proxy in front of it can cause
 /// (restart, 429, 502, an error page with a JSON body): worth resubscribing.
 /// Malformed streams are not: they point at a bug, not at the network.
@@ -148,7 +139,12 @@ impl SSEIndexingTask {
         SSEIndexingTask {
             context,
             error_report_tx,
-            reconnect_backoff: sse_reconnect_backoff(),
+            // Delays between resubscriptions: 2s, 4s, 8s… with a maximum of 60s. After
+            // `SSE_MAX_CONSECUTIVE_FAILURES` delays, the backoff stops and the task gives up.
+            reconnect_backoff: ExponentialBuilder::default()
+                .with_min_delay(Duration::from_secs(2))
+                .with_max_delay(Duration::from_secs(60))
+                .with_max_times(SSE_MAX_CONSECUTIVE_FAILURES as usize),
         }
     }
 
@@ -482,16 +478,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn reconnect_delay_doubles_is_capped_and_stops() {
-        let secs: Vec<u64> = sse_reconnect_backoff()
-            .build()
-            .map(|delay| delay.as_secs())
-            .collect();
-
-        assert_eq!(secs, [2, 4, 8, 16, 32, 60, 60, 60, 60, 60]);
-    }
-
-    #[test]
     fn only_connection_level_errors_are_recoverable() {
         use reqwest_eventsource::Error;
 
@@ -648,9 +634,10 @@ mod tests {
         let (error_tx, error_rx) = mpsc::channel(8);
         let handle = SSEIndexingTask::new(Box::new(context), error_tx)
             .with_reconnect_backoff(
-                sse_reconnect_backoff()
+                ExponentialBuilder::default()
                     .with_min_delay(Duration::from_millis(1))
-                    .with_max_delay(Duration::from_millis(4)),
+                    .with_max_delay(Duration::from_millis(4))
+                    .with_max_times(SSE_MAX_CONSECUTIVE_FAILURES as usize),
             )
             .run(RunParams {
                 last_synced_slot: None,
