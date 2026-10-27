@@ -58,27 +58,54 @@ pub struct Block {
 /// What the indexer needs to know about the execution payload of a beacon block.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BlockExecutionPayload {
-    /// Before Gloas (EIP-7732, ePBS): the payload is in the beacon block body, so the hash and
-    /// the block number are known.
+    /// Before Gloas (EIP-7732, ePBS): the payload is in the beacon block body. The block has the
+    /// hash and the number of the payload.
     InBody { block_hash: B256, block_number: u32 },
-    /// Gloas and later: the body has a signed bid that commits to the payload by hash. The bid
-    /// does not have the block number (ask the execution client). The builder can withhold the
-    /// payload, so only the child block tells if the payload became part of the chain.
+    /// Gloas and after: the body has a signed bid. The bid gives the hash of the payload, but not
+    /// its number (ask the execution client for the number). The builder can keep the payload
+    /// and not send it. Only the child block shows if the payload became part of the chain.
     Bid {
         block_hash: B256,
-        /// Hash of the last execution payload that is part of the chain before this block. It
-        /// is the payload of the parent block if the parent is full, and an older payload if the
-        /// parent is empty.
+        /// Hash of the last execution payload in the chain before this block. If the parent
+        /// block is full, it is the payload of the parent. If the parent is empty, it is an
+        /// older payload.
         parent_block_hash: B256,
     },
 }
 
 impl Block {
-    /// Gloas: returns the hash of the execution payload of `parent` if this block builds on it.
-    /// That is, the parent is full and its payload is part of the chain.
+    /// Returns the hash of the execution payload that this block makes part of the chain.
     ///
-    /// Returns `None` if the parent is empty (its builder withheld the payload, or the payload
-    /// came too late), or if one of the two blocks is not a Gloas block.
+    /// - Before Gloas, this is the payload of the block. `parent` is not used.
+    /// - From Gloas on, this is the payload of `parent`, but only if the parent is full. Give the
+    ///   parent block. Without it, the result is `None`.
+    ///
+    /// Returns `None` if the block makes no payload part of the chain: the block has no payload
+    /// (before Bellatrix), the parent is empty, or the parent is not a Gloas block.
+    pub fn canonical_payload_hash(&self, parent: Option<&Block>) -> Option<B256> {
+        match &self.execution_payload {
+            Some(BlockExecutionPayload::InBody { block_hash, .. }) => Some(*block_hash),
+            Some(BlockExecutionPayload::Bid { .. }) => {
+                parent.and_then(|parent| self.full_parent_payload_hash(parent))
+            }
+            None => None,
+        }
+    }
+
+    /// Returns true if this is a Gloas block. The payload that a Gloas block makes part of the
+    /// chain is the payload of its parent, so `canonical_payload_hash` needs the parent.
+    pub fn has_bid(&self) -> bool {
+        matches!(
+            self.execution_payload,
+            Some(BlockExecutionPayload::Bid { .. })
+        )
+    }
+
+    /// Gloas: returns the hash of the payload of `parent` if this block builds on it. In that
+    /// case the parent is full, and its payload is part of the chain.
+    ///
+    /// Returns `None` if the parent is empty, or if one of the two blocks is not a Gloas block.
+    /// A parent is empty when its builder did not send the payload, or sent it too late.
     pub fn full_parent_payload_hash(&self, parent: &Block) -> Option<B256> {
         match (&self.execution_payload, &parent.execution_payload) {
             (
@@ -542,7 +569,8 @@ mod block_tests {
         );
     }
 
-    /// The parent payload was withheld: the child builds on the payload before it.
+    /// The builder of the parent did not send the payload: the child builds on the payload before
+    /// it.
     #[test]
     fn a_child_that_skips_the_parent_payload_makes_the_parent_empty() {
         let parent = bid_block(0x02, 0x01);

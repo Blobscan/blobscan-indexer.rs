@@ -17,7 +17,7 @@ use super::*;
 use crate::{
     clients::{
         beacon::{
-            types::{Block as BeaconBlock, BlockExecutionPayload},
+            types::{Block as BeaconBlock, BlockExecutionPayload, KzgCommitment},
             MockCommonBeaconClient,
         },
         blobscan::{types::BlobscanBlock, MockCommonBlobscanClient},
@@ -276,7 +276,7 @@ async fn gloas_block_indexes_the_payload_of_its_full_parent() {
     }
 }
 
-/// The child builds on an older payload, so the builder of the parent withheld its payload (or
+/// The child builds on an older payload, so the builder of the parent did not send its payload (or
 /// it came too late). There is nothing to index, and the execution client is not asked.
 #[tokio::test(start_paused = true)]
 async fn gloas_block_with_an_empty_parent_indexes_nothing() {
@@ -346,7 +346,7 @@ async fn an_execution_client_that_is_a_little_behind_is_tried_again() {
 
 /// The child shows that the payload is part of the chain. If the execution client does not know
 /// it, the execution client is behind: this is an error, so that the block is tried again. It
-/// must not be skipped as a withheld payload.
+/// must not be skipped as a payload that the builder did not send.
 #[tokio::test(start_paused = true)]
 async fn a_full_payload_that_the_execution_client_does_not_know_is_an_error() {
     let commitments = vec![commitment_of(&blob(7))];
@@ -373,7 +373,7 @@ async fn a_full_payload_that_the_execution_client_does_not_know_is_an_error() {
 
 #[tokio::test(start_paused = true)]
 async fn gloas_blob_that_does_not_match_its_commitment_is_rejected() {
-    let blobs = vec![blob(8), blob(9)];
+    let blobs = [blob(8), blob(9)];
     let commitments: Vec<_> = blobs.iter().map(commitment_of).collect();
     // Same count, but the node returned the blobs of another block at this slot (a reorg).
     let other_block_blobs = vec![blob(10), blob(11)];
@@ -482,7 +482,7 @@ async fn canonical_path_to(blobscan_block: BlobscanBlock) -> Option<Vec<(B256, B
 
     expect_blocks(&mut beacon, gloas_chain());
 
-    let mut h = harness(beacon, vec![]);
+    let h = harness(beacon, vec![]);
 
     h.processor
         .get_canonical_block_path(&blobscan_block, B256::repeat_byte(0xd0))
@@ -511,9 +511,9 @@ async fn the_reorg_path_has_only_the_payloads_of_full_blocks() {
     );
 }
 
-/// The withheld payload of B is not on the chain, so it is not a common ancestor.
+/// B is empty, so its payload is not on the chain and is not a common ancestor.
 #[tokio::test]
-async fn a_withheld_payload_is_not_a_common_ancestor() {
+async fn the_payload_of_an_empty_block_is_not_a_common_ancestor() {
     let path = canonical_path_to(BlobscanBlock {
         hash: B256::repeat_byte(0x0b),
         number: 2,
@@ -536,6 +536,34 @@ async fn the_payload_confirmed_by_the_head_is_a_common_ancestor() {
     .await;
 
     assert_eq!(path, Some(vec![]));
+}
+
+/// A block before Gloas does not need its parent to find its payload. Thus the match is found
+/// also when the beacon node does not have the parent (for example, a checkpoint-synced node).
+#[tokio::test]
+async fn a_pre_gloas_match_does_not_need_the_parent() {
+    let head_root = B256::repeat_byte(0xe0);
+    let mut beacon = MockCommonBeaconClient::new();
+
+    // The parent of the head is not in the list, so the beacon node does not find it.
+    expect_blocks(&mut beacon, vec![(head_root, pre_gloas_block(vec![]))]);
+
+    let h = harness(beacon, vec![]);
+
+    let path = h
+        .processor
+        .get_canonical_block_path(
+            &BlobscanBlock {
+                hash: PAYLOAD_HASH,
+                number: 11942470,
+                slot: SLOT,
+            },
+            head_root,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(path.map(|path| path.len()), Some(0));
 }
 
 /// Indexes the blocks of `gloas_chain` at `roots`, in that order, and returns how many blocks
@@ -583,4 +611,152 @@ async fn going_forward_gets_each_block_one_time() {
 #[tokio::test]
 async fn going_back_gets_each_block_one_time() {
     assert_eq!(beacon_requests_to_index(&[0xd0, 0xc0, 0xb0]).await, 4);
+}
+
+/// A Gloas block for the reorg tests, with no blobs: `root`, `slot` and `parent` root, and the
+/// `hash` and `parent_hash` of its bid. Each byte stands for a 32-byte value.
+fn bid_block(root: u8, slot: u32, parent: u8, hash: u8, parent_hash: u8) -> (B256, BeaconBlock) {
+    (
+        B256::repeat_byte(root),
+        BeaconBlock {
+            blob_kzg_commitments: None,
+            execution_payload: Some(BlockExecutionPayload::Bid {
+                block_hash: B256::repeat_byte(hash),
+                parent_block_hash: B256::repeat_byte(parent_hash),
+            }),
+            parent_root: B256::repeat_byte(parent),
+            slot,
+        },
+    )
+}
+
+fn header(root: u8, parent: u8, slot: u32) -> BlockHeader {
+    BlockHeader {
+        root: B256::repeat_byte(root),
+        parent_root: B256::repeat_byte(parent),
+        slot,
+    }
+}
+
+/// Runs `process_block_header` for `new_head`, after the processor processed `old_head`.
+/// Blobscan has the payloads in `blobscan_blocks`, as (slot, hash). Returns the calls to
+/// `handle_reorg`, as (rewound, forwarded).
+async fn handle_reorg_calls(
+    chain: Vec<(B256, BeaconBlock)>,
+    blobscan_blocks: Vec<(u32, u8)>,
+    old_head: BlockHeader,
+    new_head: BlockHeader,
+) -> Vec<(Vec<B256>, Vec<B256>)> {
+    let mut beacon = MockCommonBeaconClient::new();
+    let mut blobscan = MockCommonBlobscanClient::new();
+    let calls = Arc::new(Mutex::new(vec![]));
+    let sink = calls.clone();
+
+    expect_blocks(&mut beacon, chain);
+    blobscan.expect_get_block().returning(move |slot| {
+        let block = blobscan_blocks
+            .iter()
+            .find(|(s, _)| *s == slot)
+            .map(|(slot, hash)| BlobscanBlock {
+                hash: B256::repeat_byte(*hash),
+                number: *slot,
+                slot: *slot,
+            });
+
+        ready(Ok(block))
+    });
+    blobscan
+        .expect_handle_reorg()
+        .returning(move |rewound, forwarded| {
+            sink.lock().unwrap().push((rewound, forwarded));
+
+            ready(Ok(()))
+        });
+    // The blocks in these tests have no blobs, so nothing is indexed.
+    blobscan.expect_index().never();
+
+    let context = TestContext {
+        beacon: Arc::new(beacon),
+        blobscan: Arc::new(blobscan),
+        provider: Arc::new(ProviderBuilder::new().connect_mocked_client(Asserter::new())),
+        network: Network {
+            name: NetworkName::Devnet,
+            chain_id: 11155111,
+            dencun_fork_slot: 0,
+            epoch: 0,
+        },
+        settings: Arc::new(SyncingSettings {
+            concurrency: 1,
+            checkpoint_size: 1,
+            disable_checkpoints: true,
+        }),
+    };
+    let mut processor = SlotsProcessor::new(Box::new(context), Some(old_head));
+
+    processor
+        .process_block_header(new_head, true)
+        .await
+        .unwrap();
+
+    let calls = calls.lock().unwrap().clone();
+
+    calls
+}
+
+/// The old chain is A <- B <- C (old head), and B builds on the payload of A. Blobscan has the
+/// payloads of A (slot 10) and B (slot 11).
+///
+/// The new chain is A <- B <- C1 <- D1 <- E1 (new head). C1 builds on the payload of A, so B is
+/// empty on the new chain. D1 and E1 make C1 and D1 full.
+///
+/// The payload of B must be rewound, and the payloads of C1 and D1 must be forwarded, the
+/// oldest first.
+#[tokio::test(start_paused = true)]
+async fn a_reorg_that_empties_a_block_rewinds_its_payload() {
+    let chain = vec![
+        bid_block(0xa0, 10, 0x90, 0x0a, 0x09),
+        bid_block(0xb0, 11, 0xa0, 0x0b, 0x0a),
+        bid_block(0xc0, 12, 0xb0, 0x0c, 0x0b),
+        bid_block(0xc1, 12, 0xb0, 0x1c, 0x0a),
+        bid_block(0xd1, 13, 0xc1, 0x1d, 0x1c),
+        bid_block(0xe1, 14, 0xd1, 0x1e, 0x1d),
+    ];
+
+    let calls = handle_reorg_calls(
+        chain,
+        vec![(10, 0x0a), (11, 0x0b)],
+        header(0xc0, 0xb0, 12),
+        header(0xe1, 0xd1, 14),
+    )
+    .await;
+
+    assert_eq!(
+        calls,
+        vec![(
+            vec![B256::repeat_byte(0x0b)],
+            vec![B256::repeat_byte(0x1c), B256::repeat_byte(0x1d)]
+        )]
+    );
+}
+
+/// The old head C and the new head C2 are children of B, and both build on the payload of B.
+/// Blobscan already has that payload, so there is nothing to rewind or forward.
+#[tokio::test(start_paused = true)]
+async fn a_reorg_to_a_sibling_that_keeps_the_parent_full_does_nothing() {
+    let chain = vec![
+        bid_block(0xa0, 10, 0x90, 0x0a, 0x09),
+        bid_block(0xb0, 11, 0xa0, 0x0b, 0x0a),
+        bid_block(0xc0, 12, 0xb0, 0x0c, 0x0b),
+        bid_block(0xc2, 12, 0xb0, 0x2c, 0x0b),
+    ];
+
+    let calls = handle_reorg_calls(
+        chain,
+        vec![(10, 0x0a), (11, 0x0b)],
+        header(0xc0, 0xb0, 12),
+        header(0xc2, 0xb0, 12),
+    )
+    .await;
+
+    assert!(calls.is_empty(), "{calls:?}");
 }

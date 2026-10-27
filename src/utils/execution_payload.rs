@@ -7,10 +7,12 @@ use crate::{clients::beacon::types::BlockExecutionPayload, utils::futures::retry
 
 /// Returns the number of the last execution block that is part of the chain at a beacon block.
 ///
-/// Before Gloas this is the payload of the beacon block, and the block has its number. A Gloas
-/// block has a bid, and the builder can withhold the payload of the bid. Thus this uses the
-/// payload that the bid builds on (`parent_block_hash`). That payload is part of the chain, but
-/// it can be one payload older than the beacon block. The number comes from the execution client.
+/// Before Gloas, this is the payload of the beacon block, and the block has its number.
+///
+/// A Gloas block has a bid. The builder can keep the payload of the bid and not send it. For this
+/// reason, this function uses the payload that the bid builds on (`parent_block_hash`). That
+/// payload is part of the chain, but it can be one payload older than the beacon block. The
+/// number comes from the execution client.
 ///
 /// `Ok(None)` means that the execution client does not know the hash after `attempts` tries. The
 /// payload is part of the chain, so the execution client is behind the beacon node.
