@@ -1,5 +1,6 @@
 use std::{fmt::Debug, time::Duration};
 
+use alloy::eips::eip4844::HeapBlob;
 use anyhow::{anyhow, Context as AnyhowContext};
 use async_trait::async_trait;
 use backon::ExponentialBuilder;
@@ -14,12 +15,12 @@ use types::BlockHeader;
 use crate::{
     clients::{
         beacon::types::{BlockHeaderResponse, Spec, SpecResponse},
-        common::ClientResult,
+        common::{ClientError, ClientResult},
     },
     json_get,
 };
 
-use self::types::{Blob, BlobsResponse, Block, BlockId, BlockResponse, Topic};
+use self::types::{BlobsResponse, Block, BlockId, BlockResponse, Topic};
 
 pub mod types;
 
@@ -41,7 +42,9 @@ pub struct Config {
 pub trait CommonBeaconClient: Send + Sync + Debug {
     async fn get_block(&self, block_id: BlockId) -> ClientResult<Option<Block>>;
     async fn get_block_header(&self, block_id: BlockId) -> ClientResult<Option<BlockHeader>>;
-    async fn get_blobs(&self, block_id: BlockId) -> ClientResult<Option<Vec<Blob>>>;
+    /// Raw blobs of a block (`/eth/v1/beacon/blobs`), in the order of its KZG commitments. The
+    /// response has no commitments and no proofs.
+    async fn get_blobs(&self, block_id: BlockId) -> ClientResult<Option<Vec<HeapBlob>>>;
     async fn get_spec(&self) -> ClientResult<Option<Spec>>;
     fn subscribe_to_events(&self, topics: &[Topic]) -> ClientResult<EventSource>;
 }
@@ -72,8 +75,10 @@ impl CommonBeaconClient for BeaconClient {
         let path = format!("v2/beacon/blocks/{}", { block_id.to_detailed_string() });
         let url = self.base_url.join(path.as_str())?;
 
-        json_get!(&self.client, url, BlockResponse, self.exp_backoff.clone())
-            .map(|res| res.map(|r| r.into()))
+        json_get!(&self.client, url, BlockResponse, self.exp_backoff.clone())?
+            .map(Block::try_from)
+            .transpose()
+            .map_err(ClientError::from)
     }
 
     async fn get_block_header(&self, block_id: BlockId) -> ClientResult<Option<BlockHeader>> {
@@ -89,16 +94,12 @@ impl CommonBeaconClient for BeaconClient {
         .map(|res| res.map(|r| r.into()))
     }
 
-    async fn get_blobs(&self, block_id: BlockId) -> ClientResult<Option<Vec<Blob>>> {
-        let path = format!("v1/beacon/blob_sidecars/{}", {
-            block_id.to_detailed_string()
-        });
+    async fn get_blobs(&self, block_id: BlockId) -> ClientResult<Option<Vec<HeapBlob>>> {
+        let path = format!("v1/beacon/blobs/{}", { block_id.to_detailed_string() });
         let url = self.base_url.join(path.as_str())?;
 
-        json_get!(&self.client, url, BlobsResponse, self.exp_backoff.clone()).map(|res| match res {
-            Some(r) => Some(r.data),
-            None => None,
-        })
+        json_get!(&self.client, url, BlobsResponse, self.exp_backoff.clone())
+            .map(|res| res.map(|r| r.data))
     }
 
     async fn get_spec(&self) -> ClientResult<Option<Spec>> {
