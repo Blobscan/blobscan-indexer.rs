@@ -9,7 +9,7 @@ use anyhow::{anyhow, Context as AnyhowContext, Result};
 
 use crate::{
     clients::beacon::types::{BlockHeader, BlockId},
-    utils::{alloy::BlobTransactionExt, futures::retry_on_none},
+    utils::{alloy::BlobTransactionExt, futures::retry_on_none, kzg::replace_invalid_proofs},
 };
 use tracing::{debug, info, Instrument};
 
@@ -24,6 +24,9 @@ use crate::{
 use self::error::{SlotProcessingError, SlotsProcessorError};
 
 pub mod error;
+
+#[cfg(test)]
+mod tests;
 
 const MAX_ALLOWED_REORG_DEPTH: u32 = 100;
 
@@ -249,6 +252,24 @@ impl SlotsProcessor {
             .iter()
             .map(|tx| BlobscanTransaction::try_from((*tx, &execution_block)))
             .collect::<Result<Vec<BlobscanTransaction>>>()?;
+
+        // Since Fulu the beacon nodes rebuild sidecars from PeerDAS data and return a dummy
+        // (the infinity point) instead of the blob's KZG proof. Blobscan stores and serves the
+        // proof, so keep a sidecar's proof only if it verifies and compute it otherwise.
+        //
+        // This step comes after the block and transaction conversions, because those cost less
+        // and can also fail. It must come before the blob entities are created, because they
+        // copy the proof.
+        //
+        // If a blob is not valid or does not match its commitment, the slot fails. This is
+        // intentional: the indexer must not store a blob that does not match its commitment.
+        let (blobs, replaced) = replace_invalid_proofs(blobs)
+            .await
+            .with_context(|| format!("Blobs of slot {slot}"))?;
+
+        if replaced > 0 {
+            debug!(slot, replaced, "Replaced invalid KZG proofs");
+        }
 
         let blob_entities = blob_txs
             .into_iter()
