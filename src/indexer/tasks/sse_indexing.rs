@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use alloy::primitives::B256;
 use anyhow::anyhow;
+use backon::{BackoffBuilder, ExponentialBuilder};
 use futures::{FutureExt, StreamExt};
 use reqwest_eventsource::Event;
 use tokio::{sync::oneshot, task::JoinHandle, time::timeout};
@@ -34,8 +35,6 @@ const HEAD_BLOCK_PROCESSING_DELAY: Duration = Duration::from_millis(500);
 /// Consecutive failed (re)subscriptions tolerated before giving up and letting the
 /// process restart. Any received message resets the count.
 const SSE_MAX_CONSECUTIVE_FAILURES: u32 = 10;
-const SSE_RECONNECT_BASE_DELAY: Duration = Duration::from_secs(2);
-const SSE_RECONNECT_MAX_DELAY: Duration = Duration::from_secs(60);
 
 /// Limits for the read of an error response body. The SSE client has no read timeout,
 /// and a proxy can keep the body open. Without these limits, the read can stop the task.
@@ -64,10 +63,13 @@ pub enum SSEIndexingError {
     EventHandlingError { event: String, error: anyhow::Error },
 }
 
-/// Delay before the `failures`-th consecutive reconnect attempt: 2s, 4s, 8s… capped at 60s.
-fn sse_reconnect_delay(failures: u32, base: Duration, max: Duration) -> Duration {
-    base.saturating_mul(2u32.saturating_pow(failures.saturating_sub(1)))
-        .min(max)
+/// Delays between resubscriptions: 2s, 4s, 8s… with a maximum of 60s. After
+/// `SSE_MAX_CONSECUTIVE_FAILURES` delays, the backoff stops and the task gives up.
+fn sse_reconnect_backoff() -> ExponentialBuilder {
+    ExponentialBuilder::default()
+        .with_min_delay(Duration::from_secs(2))
+        .with_max_delay(Duration::from_secs(60))
+        .with_max_times(SSE_MAX_CONSECUTIVE_FAILURES as usize)
 }
 
 /// A connection-level failure the beacon node or a proxy in front of it can cause
@@ -138,8 +140,7 @@ pub struct RunParams {
 pub struct SSEIndexingTask {
     context: Box<dyn CommonContext>,
     error_report_tx: TaskErrorChannelSender,
-    /// (base, max) of the exponential delay between resubscriptions.
-    reconnect_delays: (Duration, Duration),
+    reconnect_backoff: ExponentialBuilder,
 }
 
 impl SSEIndexingTask {
@@ -147,20 +148,20 @@ impl SSEIndexingTask {
         SSEIndexingTask {
             context,
             error_report_tx,
-            reconnect_delays: (SSE_RECONNECT_BASE_DELAY, SSE_RECONNECT_MAX_DELAY),
+            reconnect_backoff: sse_reconnect_backoff(),
         }
     }
 
     #[cfg(test)]
-    fn with_reconnect_delays(mut self, base: Duration, max: Duration) -> Self {
-        self.reconnect_delays = (base, max);
+    fn with_reconnect_backoff(mut self, reconnect_backoff: ExponentialBuilder) -> Self {
+        self.reconnect_backoff = reconnect_backoff;
         self
     }
 
     pub fn run(&self, params: RunParams) -> IndexingTaskJoinHandle {
         let context = self.context.clone();
         let error_report_tx = self.error_report_tx.clone();
-        let reconnect_delays = self.reconnect_delays;
+        let reconnect_backoff = self.reconnect_backoff;
         let last_synced_block = params.last_synced_block;
         let last_synced_slot = params.last_synced_slot;
 
@@ -175,6 +176,7 @@ impl SSEIndexingTask {
             let mut last_sse_synced_block = last_synced_block;
             let mut last_sse_synced_slot = last_synced_slot;
             let mut consecutive_failures: u32 = 0;
+            let mut reconnect_delays = reconnect_backoff.build();
 
             loop {
                 let result: Result<(), SSEIndexingError> = async {
@@ -241,6 +243,7 @@ impl SSEIndexingTask {
                             }
                             Ok(Event::Message(event)) => {
                                 consecutive_failures = 0;
+                                reconnect_delays = reconnect_backoff.build();
                                 received_message = true;
                                 let event_name = event.event.as_str();
 
@@ -412,14 +415,12 @@ impl SSEIndexingTask {
 
                                     let detail = describe_sse_error(error).await;
 
-                                    if consecutive_failures > SSE_MAX_CONSECUTIVE_FAILURES {
+                                    let Some(delay) = reconnect_delays.next() else {
                                         return Err(SSEIndexingError::Unavailable {
                                             attempts: consecutive_failures,
                                             detail,
                                         });
-                                    }
-
-                                    let delay = sse_reconnect_delay(consecutive_failures, reconnect_delays.0, reconnect_delays.1);
+                                    };
 
                                     warn!(
                                         attempt = consecutive_failures,
@@ -481,16 +482,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn reconnect_delay_doubles_and_is_capped() {
-        let secs =
-            |n| sse_reconnect_delay(n, SSE_RECONNECT_BASE_DELAY, SSE_RECONNECT_MAX_DELAY).as_secs();
+    fn reconnect_delay_doubles_is_capped_and_stops() {
+        let secs: Vec<u64> = sse_reconnect_backoff()
+            .build()
+            .map(|delay| delay.as_secs())
+            .collect();
 
-        assert_eq!(secs(1), 2);
-        assert_eq!(secs(2), 4);
-        assert_eq!(secs(3), 8);
-        assert_eq!(secs(5), 32);
-        assert_eq!(secs(6), 60);
-        assert_eq!(secs(u32::MAX), 60);
+        assert_eq!(secs, [2, 4, 8, 16, 32, 60, 60, 60, 60, 60]);
     }
 
     #[test]
@@ -649,7 +647,11 @@ mod tests {
         };
         let (error_tx, error_rx) = mpsc::channel(8);
         let handle = SSEIndexingTask::new(Box::new(context), error_tx)
-            .with_reconnect_delays(Duration::from_millis(1), Duration::from_millis(4))
+            .with_reconnect_backoff(
+                sse_reconnect_backoff()
+                    .with_min_delay(Duration::from_millis(1))
+                    .with_max_delay(Duration::from_millis(4)),
+            )
             .run(RunParams {
                 last_synced_slot: None,
                 last_synced_block: None,
