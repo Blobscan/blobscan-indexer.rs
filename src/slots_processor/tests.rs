@@ -2,7 +2,7 @@
 //! blobs from `/eth/v1/beacon/blobs`, and the indexer computes the KZG proofs. A Gloas block
 //! indexes the payload of its parent, if the parent is full.
 
-use std::sync::{Arc, Mutex};
+use std::sync::{atomic::AtomicBool, Arc, Mutex};
 
 use alloy::{
     eips::eip4844::{kzg_to_versioned_hash, HeapBlob},
@@ -759,4 +759,150 @@ async fn a_reorg_to_a_sibling_that_keeps_the_parent_full_does_nothing() {
     .await;
 
     assert!(calls.is_empty(), "{calls:?}");
+}
+
+/// A route memory of its own, so tests do not share the process wide one.
+fn route_memory(raw_first: bool) -> &'static AtomicBool {
+    Box::leak(Box::new(AtomicBool::new(raw_first)))
+}
+
+/// Mocks for one pre-Gloas block with two blobs, and a harness that uses `memory`.
+fn route_harness(
+    memory: &'static AtomicBool,
+    mock_routes: impl FnOnce(&mut MockCommonBeaconClient),
+) -> (Harness, Vec<HeapBlob>, Vec<KzgCommitment>) {
+    let blobs = vec![blob(21), blob(22)];
+    let commitments: Vec<_> = blobs.iter().map(commitment_of).collect();
+    let mut beacon = MockCommonBeaconClient::new();
+
+    expect_blocks(
+        &mut beacon,
+        vec![(CHILD_ROOT, pre_gloas_block(commitments.clone()))],
+    );
+    mock_routes(&mut beacon);
+
+    let mut h = harness(beacon, vec![execution_block_json(&commitments)]);
+
+    h.processor = h.processor.with_route_memory(memory);
+
+    (h, blobs, commitments)
+}
+
+fn assert_indexed_with_real_proofs(h: &Harness, blobs: &[HeapBlob], commitments: &[KzgCommitment]) {
+    let indexed = h.indexed.lock().unwrap();
+
+    assert_eq!(indexed.len(), 1, "the block must be indexed exactly once");
+    assert_eq!(indexed[0].len(), 2);
+
+    for (i, indexed_blob) in indexed[0].iter().enumerate() {
+        assert_eq!(indexed_blob.proof, proof_for(&blobs[i], &commitments[i]));
+    }
+}
+
+/// The node answers 404 on `/blobs` (a gnosis node): the sidecars route gives the blobs, and the
+/// indexer asks that route first from then on.
+#[tokio::test(start_paused = true)]
+async fn blobs_route_404_falls_back_to_sidecars_and_remembers_it() {
+    let memory = route_memory(true);
+    let raw = vec![blob(21), blob(22)];
+    let (h, blobs, commitments) = route_harness(memory, |beacon| {
+        beacon
+            .expect_get_blobs()
+            .times(1)
+            .returning(|_| ready(Ok(None)));
+        beacon
+            .expect_get_blob_sidecar_blobs()
+            .times(1)
+            .returning(move |_| ready(Ok(Some(raw.clone()))));
+    });
+
+    h.processor.index_block(CHILD_ROOT).await.unwrap();
+
+    assert_indexed_with_real_proofs(&h, &blobs, &commitments);
+    assert!(!memory.load(std::sync::atomic::Ordering::Relaxed));
+}
+
+/// With the memory on sidecars, the `/blobs` route is not asked at all while sidecars work.
+#[tokio::test(start_paused = true)]
+async fn remembered_sidecars_route_is_asked_first() {
+    let memory = route_memory(false);
+    let raw = vec![blob(21), blob(22)];
+    let (h, blobs, commitments) = route_harness(memory, |beacon| {
+        beacon.expect_get_blobs().never();
+        beacon
+            .expect_get_blob_sidecar_blobs()
+            .times(1)
+            .returning(move |_| ready(Ok(Some(raw.clone()))));
+    });
+
+    h.processor.index_block(CHILD_ROOT).await.unwrap();
+
+    assert_indexed_with_real_proofs(&h, &blobs, &commitments);
+    assert!(!memory.load(std::sync::atomic::Ordering::Relaxed));
+}
+
+/// A node that serves `/blobs` never gets a sidecars request (a sepolia node answers 404 there).
+#[tokio::test(start_paused = true)]
+async fn working_blobs_route_does_not_touch_sidecars() {
+    let memory = route_memory(true);
+    let raw = vec![blob(21), blob(22)];
+    let (h, blobs, commitments) = route_harness(memory, |beacon| {
+        beacon
+            .expect_get_blobs()
+            .times(1)
+            .returning(move |_| ready(Ok(Some(raw.clone()))));
+        beacon.expect_get_blob_sidecar_blobs().never();
+    });
+
+    h.processor.index_block(CHILD_ROOT).await.unwrap();
+
+    assert_indexed_with_real_proofs(&h, &blobs, &commitments);
+    assert!(memory.load(std::sync::atomic::Ordering::Relaxed));
+}
+
+/// The remembered route stops working (the node changed): the other one takes over.
+#[tokio::test(start_paused = true)]
+async fn remembered_route_that_stops_working_switches_back() {
+    let memory = route_memory(false);
+    let raw = vec![blob(21), blob(22)];
+    let (h, blobs, commitments) = route_harness(memory, |beacon| {
+        beacon
+            .expect_get_blob_sidecar_blobs()
+            .times(1)
+            .returning(|_| ready(Ok(None)));
+        beacon
+            .expect_get_blobs()
+            .times(1)
+            .returning(move |_| ready(Ok(Some(raw.clone()))));
+    });
+
+    h.processor.index_block(CHILD_ROOT).await.unwrap();
+
+    assert_indexed_with_real_proofs(&h, &blobs, &commitments);
+    assert!(memory.load(std::sync::atomic::Ordering::Relaxed));
+}
+
+/// Neither route has the blobs: the fetch retries both, then fails and indexes nothing.
+#[tokio::test(start_paused = true)]
+async fn both_routes_without_blobs_fail_after_retrying_both() {
+    let memory = route_memory(true);
+    let (h, _, _) = route_harness(memory, |beacon| {
+        beacon
+            .expect_get_blobs()
+            .times(RETRY_MAX_ATTEMPTS as usize)
+            .returning(|_| ready(Ok(None)));
+        beacon
+            .expect_get_blob_sidecar_blobs()
+            .times(RETRY_MAX_ATTEMPTS as usize)
+            .returning(|_| ready(Ok(None)));
+    });
+
+    let err = h
+        .processor
+        .index_block(CHILD_ROOT)
+        .await
+        .expect_err("no blobs anywhere");
+
+    assert!(format!("{err:?}").contains("Blobs not found"), "{err:?}");
+    assert!(h.indexed.lock().unwrap().is_empty());
 }

@@ -1,6 +1,9 @@
 use std::{
     collections::VecDeque,
-    sync::Mutex,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Mutex,
+    },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -40,6 +43,15 @@ const MAX_ALLOWED_REORG_DEPTH: u32 = 100;
 const RETRY_MAX_ATTEMPTS: u32 = 5;
 const RETRY_DELAY: Duration = Duration::from_millis(500);
 
+/// Whether the beacon node serves `/eth/v1/beacon/blobs` (the default) or only
+/// `/eth/v1/beacon/blob_sidecars`. It depends on the node, not on the network. Measured on the
+/// RPC endpoints (2026-10-24): gnosis, Lighthouse v8.2.1, only sidecars; sepolia,
+/// Lighthouse v8.3.0-rc.0, only blobs; mainnet (v8.2.3) and hoodi (v8.3.2) both. The indexer
+/// finds it out by itself:
+/// the first route that answers 404 makes it try the other one, and it remembers the one that
+/// worked. The value is process wide, so every processor starts with the right route.
+static RAW_BLOBS_FIRST: AtomicBool = AtomicBool::new(true);
+
 /// Number of beacon blocks that the processor keeps after it gets them.
 ///
 /// A Gloas block needs its parent, and the processor goes through the slots in order. When it
@@ -72,6 +84,9 @@ pub struct SlotsProcessor {
     /// an entry stays correct after a reorg. After a reorg, the processor does not ask for the old
     /// entries again, and new entries replace them.
     recent_blocks: Mutex<VecDeque<(B256, BeaconBlock)>>,
+    /// The route to try first. `RAW_BLOBS_FIRST` in production; tests pass their own so they do
+    /// not share it.
+    raw_blobs_first: &'static AtomicBool,
 }
 
 impl SlotsProcessor {
@@ -83,7 +98,14 @@ impl SlotsProcessor {
             context,
             last_processed_block,
             recent_blocks: Mutex::new(VecDeque::with_capacity(RECENT_BLOCKS_CAPACITY)),
+            raw_blobs_first: &RAW_BLOBS_FIRST,
         }
+    }
+
+    #[cfg(test)]
+    fn with_route_memory(mut self, memory: &'static AtomicBool) -> Self {
+        self.raw_blobs_first = memory;
+        self
     }
 
     pub async fn process_slots(
@@ -398,19 +420,35 @@ impl SlotsProcessor {
     /// nodes that are not supernodes) cannot rebuild old blobs by block root. After a reorg, the
     /// blobs can be the blobs of a different block at the slot. `compute_blob_proofs` finds this,
     /// because it compares the number of blobs and verifies each blob.
+    ///
+    /// The route is `/eth/v1/beacon/blobs`, or `/eth/v1/beacon/blob_sidecars` for a node that
+    /// does not serve the first one (see `RAW_BLOBS_FIRST`). A 404 on one route is tried on the
+    /// other at once; only when both answer nothing does the fetch wait and try again, because
+    /// a node can take a moment to have the blobs of a new head.
     async fn fetch_raw_blobs(&self, slot: u32) -> Result<Vec<HeapBlob>> {
         let raw_blobs = retry_on_none(
-            || {
+            || async move {
                 let beacon_client = self.context.beacon_client();
+                let raw_first = self.raw_blobs_first.load(Ordering::Relaxed);
 
-                async move {
-                    let blobs = beacon_client.get_blobs(slot.into()).await?;
+                for raw in [raw_first, !raw_first] {
+                    let blobs = if raw {
+                        beacon_client.get_blobs(slot.into()).await?
+                    } else {
+                        beacon_client.get_blob_sidecar_blobs(slot.into()).await?
+                    };
 
-                    match blobs {
-                        Some(blobs) if blobs.is_empty() => Ok::<_, ClientError>(None),
-                        other => Ok(other),
+                    if let Some(blobs) = blobs.filter(|blobs| !blobs.is_empty()) {
+                        if raw != raw_first {
+                            info!(slot, raw, "The beacon node serves the blobs on the other route; using it from now on");
+                            self.raw_blobs_first.store(raw, Ordering::Relaxed);
+                        }
+
+                        return Ok::<_, ClientError>(Some(blobs));
                     }
                 }
+
+                Ok(None)
             },
             RETRY_MAX_ATTEMPTS,
             RETRY_DELAY,

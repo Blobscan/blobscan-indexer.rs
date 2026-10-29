@@ -181,6 +181,21 @@ pub struct BlobsResponse {
     pub data: Vec<HeapBlob>,
 }
 
+/// Response of `GET /eth/v1/beacon/blob_sidecars/{block_id}`. Only the blob and its index are
+/// read: the commitments come from the block, and the indexer computes the proofs (some nodes
+/// answer with placeholder proofs).
+#[derive(Deserialize, Debug)]
+pub struct BlobSidecarsResponse {
+    pub data: Vec<BlobSidecarItem>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct BlobSidecarItem {
+    #[serde(deserialize_with = "deserialize_u32")]
+    pub index: u32,
+    pub blob: HeapBlob,
+}
+
 #[derive(Deserialize, Debug)]
 pub struct BlockHeaderResponse {
     pub data: BlockHeaderData,
