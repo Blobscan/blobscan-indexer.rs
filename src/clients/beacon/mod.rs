@@ -20,7 +20,7 @@ use crate::{
     json_get,
 };
 
-use self::types::{BlobsResponse, Block, BlockId, BlockResponse, Topic};
+use self::types::{BlobSidecarsResponse, BlobsResponse, Block, BlockId, BlockResponse, Topic};
 
 pub mod types;
 
@@ -45,6 +45,13 @@ pub trait CommonBeaconClient: Send + Sync + Debug {
     /// Raw blobs of a block (`/eth/v1/beacon/blobs`), in the order of its KZG commitments. The
     /// response has no commitments and no proofs.
     async fn get_blobs(&self, block_id: BlockId) -> ClientResult<Option<Vec<HeapBlob>>>;
+    /// Raw blobs of a block from `/eth/v1/beacon/blob_sidecars`, sorted by sidecar index (the
+    /// order of the KZG commitments). For nodes that do not serve `/eth/v1/beacon/blobs`. The
+    /// route does not exist for Gloas blocks.
+    async fn get_blob_sidecar_blobs(
+        &self,
+        block_id: BlockId,
+    ) -> ClientResult<Option<Vec<HeapBlob>>>;
     async fn get_spec(&self) -> ClientResult<Option<Spec>>;
     fn subscribe_to_events(&self, topics: &[Topic]) -> ClientResult<EventSource>;
 }
@@ -100,6 +107,31 @@ impl CommonBeaconClient for BeaconClient {
 
         json_get!(&self.client, url, BlobsResponse, self.exp_backoff.clone())
             .map(|res| res.map(|r| r.data))
+    }
+
+    async fn get_blob_sidecar_blobs(
+        &self,
+        block_id: BlockId,
+    ) -> ClientResult<Option<Vec<HeapBlob>>> {
+        let path = format!("v1/beacon/blob_sidecars/{}", {
+            block_id.to_detailed_string()
+        });
+        let url = self.base_url.join(path.as_str())?;
+
+        json_get!(
+            &self.client,
+            url,
+            BlobSidecarsResponse,
+            self.exp_backoff.clone()
+        )
+        .map(|res| {
+            res.map(|r| {
+                let mut items = r.data;
+
+                items.sort_by_key(|item| item.index);
+                items.into_iter().map(|item| item.blob).collect()
+            })
+        })
     }
 
     async fn get_spec(&self) -> ClientResult<Option<Spec>> {
@@ -227,6 +259,43 @@ mod retry_tests {
             .unwrap();
 
         assert!(header.is_none());
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn sidecar_blobs_come_back_sorted_by_index() {
+        let blob_hex = |byte: u8| format!("0x{}", format!("{byte:02x}").repeat(131_072));
+        let body: &'static str = Box::leak(
+            format!(
+                r#"{{"data":[{{"index":"1","blob":"{}"}},{{"index":"0","blob":"{}"}}]}}"#,
+                blob_hex(0x11),
+                blob_hex(0x10)
+            )
+            .into_boxed_str(),
+        );
+        let (url, _) = serve(vec![(200, body)]).await;
+
+        let blobs = client(url, 0)
+            .get_blob_sidecar_blobs(BlockId::Slot(7))
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(blobs.len(), 2);
+        assert_eq!(blobs[0].inner()[0], 0x10);
+        assert_eq!(blobs[1].inner()[0], 0x11);
+    }
+
+    #[tokio::test]
+    async fn sidecar_route_404_is_none() {
+        let (url, hits) = serve(vec![(404, r#"{"code":404,"message":"not found"}"#)]).await;
+
+        let blobs = client(url, 4)
+            .get_blob_sidecar_blobs(BlockId::Slot(7))
+            .await
+            .unwrap();
+
+        assert!(blobs.is_none());
         assert_eq!(hits.load(Ordering::SeqCst), 1);
     }
 }
