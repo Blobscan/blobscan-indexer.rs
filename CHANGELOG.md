@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1](https://github.com/Blobscan/blobscan-indexer.rs/compare/v0.7.0...v0.7.1) - 2026-10-29
+
+### Added
+
+- fall back to blob_sidecars when the node has no /blobs route
+
 ## [0.7.0](https://github.com/Blobscan/blobscan-indexer.rs/compare/v0.6.4...v0.7.0) - 2026-10-27
 
 ### Added
