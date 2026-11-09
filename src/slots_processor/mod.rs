@@ -21,7 +21,7 @@ use crate::{
     clients::beacon::types::{Block as BeaconBlock, BlockExecutionPayload, BlockHeader, BlockId},
     utils::{alloy::BlobTransactionExt, futures::retry_on_none, kzg::compute_blob_proofs},
 };
-use tracing::{debug, info, Instrument};
+use tracing::{debug, info, warn, Instrument};
 
 use crate::{
     clients::{
@@ -299,7 +299,7 @@ impl SlotsProcessor {
             return Err(anyhow!("Blocks mismatch: Consensus block \"{block_root}\" contains blob KZG commitments, but the corresponding execution block \"{execution_block_hash:#?}\" does not contain any blob transactions").into());
         }
 
-        let raw_blobs = self.fetch_raw_blobs(slot).await?;
+        let raw_blobs = self.fetch_raw_blobs(slot, block_root).await?;
 
         // Create entities to be indexed
         let block_entity = Block::try_from((&execution_block, slot))?;
@@ -416,35 +416,58 @@ impl SlotsProcessor {
     /// `/eth/v1/beacon/blobs` gives only the raw blobs, without commitments and proofs. The
     /// commitments come from the block, and `compute_blob_proofs` computes the proofs.
     ///
-    /// The indexer gets the blobs by slot and not by block root. Some beacon nodes (for example,
-    /// nodes that are not supernodes) cannot rebuild old blobs by block root. After a reorg, the
-    /// blobs can be the blobs of a different block at the slot. `compute_blob_proofs` finds this,
-    /// because it compares the number of blobs and verifies each blob.
+    /// The indexer gets the blobs by slot first. Some beacon nodes (for example, nodes that are
+    /// not supernodes) cannot rebuild old blobs by block root. If the slot gives no blobs, the
+    /// indexer tries `block_root`. Some beacon nodes give no blobs for a slot, but give them for
+    /// its block root (on 2026-11-09, Lighthouse v8.3.0-rc.0 on Sepolia did this after the Gloas
+    /// fork). After a reorg, the blobs of a slot can be the blobs of a different block at the
+    /// slot. `compute_blob_proofs` finds this, because it compares the number of blobs and
+    /// verifies each blob.
     ///
     /// The route is `/eth/v1/beacon/blobs`, or `/eth/v1/beacon/blob_sidecars` for a node that
     /// does not serve the first one (see `RAW_BLOBS_FIRST`). A 404 on one route is tried on the
-    /// other at once; only when both answer nothing does the fetch wait and try again, because
-    /// a node can take a moment to have the blobs of a new head.
-    async fn fetch_raw_blobs(&self, slot: u32) -> Result<Vec<HeapBlob>> {
+    /// other at once. An error on a request by block root counts as no blobs. Only when all the
+    /// requests give no blobs does the fetch wait and try again, because a node can take a moment
+    /// to have the blobs of a new head.
+    async fn fetch_raw_blobs(&self, slot: u32, block_root: B256) -> Result<Vec<HeapBlob>> {
         let raw_blobs = retry_on_none(
             || async move {
                 let beacon_client = self.context.beacon_client();
                 let raw_first = self.raw_blobs_first.load(Ordering::Relaxed);
 
-                for raw in [raw_first, !raw_first] {
-                    let blobs = if raw {
-                        beacon_client.get_blobs(slot.into()).await?
-                    } else {
-                        beacon_client.get_blob_sidecar_blobs(slot.into()).await?
-                    };
+                for block_id in [BlockId::Slot(slot), BlockId::Hash(block_root)] {
+                    for raw in [raw_first, !raw_first] {
+                        let result = if raw {
+                            beacon_client.get_blobs(block_id.clone()).await
+                        } else {
+                            beacon_client.get_blob_sidecar_blobs(block_id.clone()).await
+                        };
 
-                    if let Some(blobs) = blobs.filter(|blobs| !blobs.is_empty()) {
-                        if raw != raw_first {
-                            info!(slot, raw, "The beacon node serves the blobs on the other route; using it from now on");
-                            self.raw_blobs_first.store(raw, Ordering::Relaxed);
+                        let blobs = match (result, &block_id) {
+                            (Ok(blobs), _) => blobs,
+                            // A node that is not a supernode can give an error when it cannot
+                            // rebuild the blobs by block root. Use this result as "no blobs",
+                            // so that the fetch waits and tries the slot again.
+                            (Err(error), BlockId::Hash(_)) => {
+                                warn!(slot, block_root = ?block_root, raw, %error, "The beacon node failed to give the blobs by block root");
+
+                                None
+                            }
+                            (Err(error), _) => return Err(error),
+                        };
+
+                        if let Some(blobs) = blobs.filter(|blobs| !blobs.is_empty()) {
+                            if raw != raw_first {
+                                info!(slot, ?block_id, raw, "The beacon node serves the blobs on the other route; using it from now on");
+                                self.raw_blobs_first.store(raw, Ordering::Relaxed);
+                            }
+
+                            if let BlockId::Hash(_) = block_id {
+                                debug!(slot, block_root = ?block_root, "The beacon node gave no blobs by slot; got them by block root");
+                            }
+
+                            return Ok::<_, ClientError>(Some(blobs));
                         }
-
-                        return Ok::<_, ClientError>(Some(blobs));
                     }
                 }
 
