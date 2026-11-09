@@ -107,3 +107,43 @@ impl Display for ErrorResponse {
         ))
     }
 }
+
+/// Tells if a GET request can succeed when the client sends it again: a rate limit (429), or a
+/// proxy or a node that cannot answer now (502, 503, 504). Other errors, for example a 500,
+/// usually come from a node that got the request and cannot serve it. The same request gets the
+/// same error again, so a retry only makes the error late.
+pub fn is_transient_status(status: reqwest::StatusCode) -> bool {
+    use reqwest::StatusCode;
+
+    matches!(
+        status,
+        StatusCode::TOO_MANY_REQUESTS
+            | StatusCode::BAD_GATEWAY
+            | StatusCode::SERVICE_UNAVAILABLE
+            | StatusCode::GATEWAY_TIMEOUT
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use reqwest::StatusCode;
+
+    use super::is_transient_status;
+
+    #[test]
+    fn only_rate_limits_and_unavailable_proxies_or_nodes_are_transient() {
+        for code in [429, 502, 503, 504] {
+            assert!(
+                is_transient_status(StatusCode::from_u16(code).unwrap()),
+                "{code}"
+            );
+        }
+
+        for code in [200, 400, 404, 500, 501, 505] {
+            assert!(
+                !is_transient_status(StatusCode::from_u16(code).unwrap()),
+                "{code}"
+            );
+        }
+    }
+}
