@@ -882,19 +882,93 @@ async fn remembered_route_that_stops_working_switches_back() {
     assert!(memory.load(std::sync::atomic::Ordering::Relaxed));
 }
 
-/// Neither route has the blobs: the fetch retries both, then fails and indexes nothing.
+/// The node gives an empty list by slot, but gives the blobs by block root (Lighthouse
+/// v8.3.0-rc.0 on Sepolia, in the first 8192 slots after the Gloas fork). The indexer gets them
+/// by the root of the full parent, the block that has the payload, and does not wait to retry.
 #[tokio::test(start_paused = true)]
-async fn both_routes_without_blobs_fail_after_retrying_both() {
+async fn gloas_blobs_missing_by_slot_are_fetched_by_the_parent_block_root() {
+    let blobs = vec![blob(31), blob(32)];
+    let commitments: Vec<_> = blobs.iter().map(commitment_of).collect();
+    let raw = blobs.clone();
+    let mut beacon = MockCommonBeaconClient::new();
+
+    expect_full_parent(&mut beacon, commitments.clone());
+    beacon
+        .expect_get_blobs()
+        .withf(|block_id| *block_id == BlockId::Slot(SLOT))
+        .times(1)
+        .returning(|_| ready(Ok(Some(vec![]))));
+    beacon
+        .expect_get_blobs()
+        .withf(|block_id| *block_id == BlockId::Hash(PARENT_ROOT))
+        .times(1)
+        .returning(move |_| ready(Ok(Some(raw.clone()))));
+    beacon
+        .expect_get_blob_sidecar_blobs()
+        .withf(|block_id| *block_id == BlockId::Slot(SLOT))
+        .times(1)
+        .returning(|_| ready(Ok(None)));
+
+    let memory = route_memory(true);
+    let mut h = harness(beacon, vec![execution_block_json(&commitments)]);
+
+    h.processor = h.processor.with_route_memory(memory);
+
+    let started = tokio::time::Instant::now();
+
+    h.processor.index_block(CHILD_ROOT).await.unwrap();
+
+    assert_eq!(started.elapsed(), Duration::ZERO, "no retry delay");
+    assert_indexed_with_real_proofs(&h, &blobs, &commitments);
+    assert!(memory.load(std::sync::atomic::Ordering::Relaxed));
+}
+
+/// Blobs by block root are not the correct blobs: the block is not indexed.
+#[tokio::test(start_paused = true)]
+async fn blobs_by_block_root_are_verified_against_the_commitments() {
     let memory = route_memory(true);
     let (h, _, _) = route_harness(memory, |beacon| {
         beacon
             .expect_get_blobs()
-            .times(RETRY_MAX_ATTEMPTS as usize)
-            .returning(|_| ready(Ok(None)));
+            .withf(|block_id| *block_id == BlockId::Slot(SLOT))
+            .returning(|_| ready(Ok(Some(vec![]))));
+        beacon
+            .expect_get_blobs()
+            .withf(|block_id| *block_id == BlockId::Hash(CHILD_ROOT))
+            .returning(|_| ready(Ok(Some(vec![blob(41), blob(42)]))));
         beacon
             .expect_get_blob_sidecar_blobs()
-            .times(RETRY_MAX_ATTEMPTS as usize)
             .returning(|_| ready(Ok(None)));
+    });
+
+    h.processor
+        .index_block(CHILD_ROOT)
+        .await
+        .expect_err("blobs that do not match the commitments must not be indexed");
+
+    assert!(h.indexed.lock().unwrap().is_empty());
+}
+
+/// No route has the blobs, by slot or by block root: the fetch retries all of them, then fails
+/// and indexes nothing.
+#[tokio::test(start_paused = true)]
+async fn both_routes_without_blobs_fail_after_retrying_both() {
+    let memory = route_memory(true);
+    let (h, _, _) = route_harness(memory, |beacon| {
+        for block_id in [BlockId::Slot(SLOT), BlockId::Hash(CHILD_ROOT)] {
+            let get_blobs_id = block_id.clone();
+
+            beacon
+                .expect_get_blobs()
+                .withf(move |id| *id == get_blobs_id)
+                .times(RETRY_MAX_ATTEMPTS as usize)
+                .returning(|_| ready(Ok(None)));
+            beacon
+                .expect_get_blob_sidecar_blobs()
+                .withf(move |id| *id == block_id)
+                .times(RETRY_MAX_ATTEMPTS as usize)
+                .returning(|_| ready(Ok(None)));
+        }
     });
 
     let err = h
