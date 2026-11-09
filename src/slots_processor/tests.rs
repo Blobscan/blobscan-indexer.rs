@@ -935,18 +935,79 @@ async fn blobs_by_block_root_are_verified_against_the_commitments() {
         beacon
             .expect_get_blobs()
             .withf(|block_id| *block_id == BlockId::Hash(CHILD_ROOT))
+            .times(1)
             .returning(|_| ready(Ok(Some(vec![blob(41), blob(42)]))));
         beacon
             .expect_get_blob_sidecar_blobs()
             .returning(|_| ready(Ok(None)));
     });
 
-    h.processor
+    let err = h
+        .processor
         .index_block(CHILD_ROOT)
         .await
         .expect_err("blobs that do not match the commitments must not be indexed");
 
+    assert!(format!("{err:?}").contains("does not match"), "{err:?}");
     assert!(h.indexed.lock().unwrap().is_empty());
+}
+
+/// A node that is not a supernode gives an error for blobs by block root (#146). The error
+/// counts as no blobs: the fetch waits and tries again, and gets the blobs by slot.
+#[tokio::test(start_paused = true)]
+async fn block_root_error_waits_and_retries_the_slot() {
+    let memory = route_memory(true);
+    let raw = vec![blob(21), blob(22)];
+    let slot_attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let (h, blobs, commitments) = route_harness(memory, |beacon| {
+        let attempts = slot_attempts.clone();
+
+        beacon
+            .expect_get_blobs()
+            .withf(|block_id| *block_id == BlockId::Slot(SLOT))
+            .times(2)
+            .returning(move |_| {
+                let attempt = attempts.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+                ready(Ok(Some(if attempt == 0 { vec![] } else { raw.clone() })))
+            });
+        beacon
+            .expect_get_blob_sidecar_blobs()
+            .withf(|block_id| *block_id == BlockId::Slot(SLOT))
+            .times(1)
+            .returning(|_| ready(Ok(None)));
+        beacon
+            .expect_get_blobs()
+            .withf(|block_id| *block_id == BlockId::Hash(CHILD_ROOT))
+            .times(1)
+            .returning(|_| {
+                ready(Err(anyhow!(
+                    "Insufficient data columns to reconstruct blobs"
+                )
+                .into()))
+            });
+        beacon
+            .expect_get_blob_sidecar_blobs()
+            .withf(|block_id| *block_id == BlockId::Hash(CHILD_ROOT))
+            .times(1)
+            .returning(|_| {
+                ready(Err(anyhow!(
+                    "Insufficient data columns to reconstruct blobs"
+                )
+                .into()))
+            });
+    });
+
+    let started = tokio::time::Instant::now();
+
+    h.processor.index_block(CHILD_ROOT).await.unwrap();
+
+    assert!(
+        started.elapsed() >= RETRY_DELAY,
+        "the fetch must wait before it tries again"
+    );
+    assert_indexed_with_real_proofs(&h, &blobs, &commitments);
+    assert!(memory.load(std::sync::atomic::Ordering::Relaxed));
 }
 
 /// No route has the blobs, by slot or by block root: the fetch retries all of them, then fails

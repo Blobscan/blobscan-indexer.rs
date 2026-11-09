@@ -21,7 +21,7 @@ use crate::{
     clients::beacon::types::{Block as BeaconBlock, BlockExecutionPayload, BlockHeader, BlockId},
     utils::{alloy::BlobTransactionExt, futures::retry_on_none, kzg::compute_blob_proofs},
 };
-use tracing::{debug, info, Instrument};
+use tracing::{debug, info, warn, Instrument};
 
 use crate::{
     clients::{
@@ -426,8 +426,9 @@ impl SlotsProcessor {
     ///
     /// The route is `/eth/v1/beacon/blobs`, or `/eth/v1/beacon/blob_sidecars` for a node that
     /// does not serve the first one (see `RAW_BLOBS_FIRST`). A 404 on one route is tried on the
-    /// other at once. Only when all the requests give no blobs does the fetch wait and try again,
-    /// because a node can take a moment to have the blobs of a new head.
+    /// other at once. An error on a request by block root counts as no blobs. Only when all the
+    /// requests give no blobs does the fetch wait and try again, because a node can take a moment
+    /// to have the blobs of a new head.
     async fn fetch_raw_blobs(&self, slot: u32, block_root: B256) -> Result<Vec<HeapBlob>> {
         let raw_blobs = retry_on_none(
             || async move {
@@ -436,10 +437,23 @@ impl SlotsProcessor {
 
                 for block_id in [BlockId::Slot(slot), BlockId::Hash(block_root)] {
                     for raw in [raw_first, !raw_first] {
-                        let blobs = if raw {
-                            beacon_client.get_blobs(block_id.clone()).await?
+                        let result = if raw {
+                            beacon_client.get_blobs(block_id.clone()).await
                         } else {
-                            beacon_client.get_blob_sidecar_blobs(block_id.clone()).await?
+                            beacon_client.get_blob_sidecar_blobs(block_id.clone()).await
+                        };
+
+                        let blobs = match (result, &block_id) {
+                            (Ok(blobs), _) => blobs,
+                            // A node that is not a supernode can give an error when it cannot
+                            // rebuild the blobs by block root. Use this result as "no blobs",
+                            // so that the fetch waits and tries the slot again.
+                            (Err(error), BlockId::Hash(_)) => {
+                                warn!(slot, block_root = ?block_root, raw, %error, "The beacon node failed to give the blobs by block root");
+
+                                None
+                            }
+                            (Err(error), _) => return Err(error),
                         };
 
                         if let Some(blobs) = blobs.filter(|blobs| !blobs.is_empty()) {
