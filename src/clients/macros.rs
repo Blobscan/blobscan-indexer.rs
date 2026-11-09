@@ -26,8 +26,9 @@ macro_rules! json_get {
                     let status = resp.status();
 
                     // A rate limit or a proxy/upstream failure is transient: retry it
-                    // like a transport error instead of failing the slot.
-                    if status.is_server_error() || status.as_u16() == 429 {
+                    // like a transport error instead of failing the slot. Other errors (for
+                    // example, a 500) go back to the caller at once.
+                    if $crate::clients::common::is_transient_status(status) {
                         let body = resp.text().await.unwrap_or_default();
                         let body: String = body.chars().take(200).collect();
 
