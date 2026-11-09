@@ -419,10 +419,10 @@ impl SlotsProcessor {
     /// The indexer gets the blobs by slot first. Some beacon nodes (for example, nodes that are
     /// not supernodes) cannot rebuild old blobs by block root. If the slot gives no blobs, the
     /// indexer tries `block_root`. Some beacon nodes give no blobs for a slot, but give them for
-    /// its block root. For example, Lighthouse v8.3.0-rc.0 on Sepolia gives an empty list by slot
-    /// for the first 8192 slots after the Gloas fork. After a reorg, the blobs of a slot can be
-    /// the blobs of a different block at the slot. `compute_blob_proofs` finds this, because it
-    /// compares the number of blobs and verifies each blob.
+    /// its block root (on 2026-11-09, Lighthouse v8.3.0-rc.0 on Sepolia did this after the Gloas
+    /// fork). After a reorg, the blobs of a slot can be the blobs of a different block at the
+    /// slot. `compute_blob_proofs` finds this, because it compares the number of blobs and
+    /// verifies each blob.
     ///
     /// The route is `/eth/v1/beacon/blobs`, or `/eth/v1/beacon/blob_sidecars` for a node that
     /// does not serve the first one (see `RAW_BLOBS_FIRST`). A 404 on one route is tried on the
@@ -458,7 +458,7 @@ impl SlotsProcessor {
 
                         if let Some(blobs) = blobs.filter(|blobs| !blobs.is_empty()) {
                             if raw != raw_first {
-                                info!(slot, raw, "The beacon node serves the blobs on the other route; using it from now on");
+                                info!(slot, ?block_id, raw, "The beacon node serves the blobs on the other route; using it from now on");
                                 self.raw_blobs_first.store(raw, Ordering::Relaxed);
                             }
 
