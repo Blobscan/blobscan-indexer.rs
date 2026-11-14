@@ -42,13 +42,22 @@ pub struct Transaction {
     pub gas_used: U256,
     pub effective_gas_price: U256,
     pub input: Bytes,
+    pub execution_status: ExecutionStatus,
     pub max_fee_per_blob_gas: U256,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ExecutionStatus {
+    Success,
+    Failed,
 }
 
 // Require receipt prices explicitly. Alloy's standard receipt can default a missing price to zero.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExecutionReceipt {
+    pub status: U64,
     pub transaction_hash: B256,
     pub block_hash: B256,
     pub block_number: U64,
@@ -202,6 +211,11 @@ impl<'a>
                 && receipt.block_number == U64::from(block_number),
             "Receipt does not match transaction {hash} in block {block_number}"
         );
+        let execution_status = match receipt.status.to::<u64>() {
+            0 => ExecutionStatus::Failed,
+            1 => ExecutionStatus::Success,
+            status => anyhow::bail!("Invalid receipt status {status} for transaction {hash}"),
+        };
         let base_fee = execution_block
             .header
             .base_fee_per_gas
@@ -240,6 +254,7 @@ impl<'a>
             gas_used: receipt.gas_used,
             effective_gas_price: receipt.effective_gas_price,
             input: execution_tx.input().clone(),
+            execution_status,
             max_fee_per_blob_gas,
         })
     }

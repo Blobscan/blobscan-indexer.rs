@@ -307,6 +307,7 @@ async fn gloas_block_indexes_the_payload_of_its_full_parent() {
     for tx in payloads[0]["transactions"].as_array().unwrap() {
         assert_eq!(tx["input"], "0x");
         assert_eq!(tx["gasUsed"], "0x5208");
+        assert_eq!(tx["executionStatus"], "success");
         assert!(tx["effectiveGasPrice"].is_string());
     }
 
@@ -1109,6 +1110,7 @@ async fn indexes_receipt_fees_and_calldata_even_when_execution_fails() {
     assert_eq!(tx["gasUsed"], "0x5208");
     assert_eq!(tx["effectiveGasPrice"], "0x20");
     assert_eq!(tx["input"], "0x001234");
+    assert_eq!(tx["executionStatus"], "failed");
     assert_ne!(tx["effectiveGasPrice"], tx["gasPrice"]);
 }
 
@@ -1160,4 +1162,22 @@ async fn missing_receipt_price_is_not_treated_as_zero() {
     );
     assert!(h.processor.index_block(CHILD_ROOT).await.is_err());
     assert!(h.payloads.lock().unwrap().is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn missing_or_invalid_receipt_status_prevents_indexing() {
+    for status in [None, Some(json!("0x2")), Some(Value::Null)] {
+        let h = fee_harness(
+            |r| {
+                if let Some(status) = status {
+                    r["status"] = status;
+                } else {
+                    r.as_object_mut().unwrap().remove("status");
+                }
+            },
+            0,
+        );
+        assert!(h.processor.index_block(CHILD_ROOT).await.is_err());
+        assert!(h.payloads.lock().unwrap().is_empty());
+    }
 }

@@ -74,7 +74,9 @@ We extend our gratitude to each one of them. Thank you 🙏
 ### Transaction execution fees
 
 The indexer requests execution receipts for blob transactions and sends
-`gasUsed`, `effectiveGasPrice`, and transaction `input` to Blobscan. It also
+`gasUsed`, `effectiveGasPrice`, transaction `input`, and `executionStatus` to Blobscan.
+Execution status is `success` for receipt status `0x1` and `failed` for `0x0`.
+A missing or invalid status fails the block attempt. It also
 sends the block's `baseFeePerGas`. Gas quantities use hexadecimal strings.
 The existing `gasPrice` field keeps its current meaning.
 
