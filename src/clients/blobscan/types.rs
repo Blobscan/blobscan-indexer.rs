@@ -2,7 +2,7 @@ use core::fmt;
 
 use alloy::consensus::Transaction as Consensus;
 use alloy::eips::eip4844::{kzg_to_versioned_hash, HeapBlob};
-use alloy::primitives::{Address, BlockNumber, BlockTimestamp, TxIndex, B256, U256};
+use alloy::primitives::{Address, BlockNumber, BlockTimestamp, Bytes, TxIndex, B256, U256, U64};
 use alloy::rpc::types::{Block as ExecutionBlock, Transaction as ExecutionTransaction};
 use anyhow::{Context, Result};
 
@@ -26,6 +26,7 @@ pub struct Block {
     pub slot: u32,
     pub blob_gas_used: U256,
     pub excess_blob_gas: U256,
+    pub base_fee_per_gas: U256,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -38,7 +39,21 @@ pub struct Transaction {
     pub block_number: BlockNumber,
     pub index: TxIndex,
     pub gas_price: U256,
+    pub gas_used: U256,
+    pub effective_gas_price: U256,
+    pub input: Bytes,
     pub max_fee_per_blob_gas: U256,
+}
+
+// Require receipt prices explicitly. Alloy's standard receipt can default a missing price to zero.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecutionReceipt {
+    pub transaction_hash: B256,
+    pub block_hash: B256,
+    pub block_number: U64,
+    pub gas_used: U256,
+    pub effective_gas_price: U256,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -150,6 +165,12 @@ impl<'a> TryFrom<(&'a ExecutionBlock<ExecutionTransaction>, u32)> for Block {
             slot,
             blob_gas_used,
             excess_blob_gas,
+            base_fee_per_gas: U256::from(
+                execution_block
+                    .header
+                    .base_fee_per_gas
+                    .context("Missing execution base fee")?,
+            ),
         })
     }
 }
@@ -158,14 +179,16 @@ impl<'a>
     TryFrom<(
         &'a ExecutionTransaction,
         &'a ExecutionBlock<ExecutionTransaction>,
+        &'a ExecutionReceipt,
     )> for Transaction
 {
     type Error = anyhow::Error;
 
     fn try_from(
-        (execution_tx, execution_block): (
+        (execution_tx, execution_block, receipt): (
             &'a ExecutionTransaction,
             &'a ExecutionBlock<ExecutionTransaction>,
+            &'a ExecutionReceipt,
         ),
     ) -> Result<Self, Self::Error> {
         let block_number = execution_block.header.number;
@@ -173,6 +196,20 @@ impl<'a>
             .info()
             .hash
             .with_context(|| format!("Missing `hash` field in tx within block {block_number}"))?;
+        anyhow::ensure!(
+            receipt.transaction_hash == hash
+                && receipt.block_hash == execution_block.header.hash
+                && receipt.block_number == U64::from(block_number),
+            "Receipt does not match transaction {hash} in block {block_number}"
+        );
+        let base_fee = execution_block
+            .header
+            .base_fee_per_gas
+            .context("Missing execution base fee")?;
+        anyhow::ensure!(
+            receipt.effective_gas_price >= U256::from(base_fee),
+            "Receipt gas price is below the base fee"
+        );
         let index = execution_tx.transaction_index.with_context(|| {
             format!("Missing `transaction_index` field in tx {hash} within block {block_number}")
         })?;
@@ -200,6 +237,9 @@ impl<'a>
             from,
             to,
             gas_price,
+            gas_used: receipt.gas_used,
+            effective_gas_price: receipt.effective_gas_price,
+            input: execution_tx.input().clone(),
             max_fee_per_blob_gas,
         })
     }

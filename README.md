@@ -69,3 +69,20 @@ We extend our gratitude to each one of them. Thank you 🙏
 #
 
 [Join us on Discord!](https://discordapp.com/invite/fmqrqhkjHY/)
+
+
+### Transaction execution fees
+
+The indexer requests execution receipts for blob transactions and sends
+`gasUsed`, `effectiveGasPrice`, and transaction `input` to Blobscan. It also
+sends the block's `baseFeePerGas`. Gas quantities use hexadecimal strings.
+The existing `gasPrice` field keeps its current meaning.
+
+Receipt requests have a 16-second timeout and a limit of four concurrent
+requests per block. A missing receipt is tried up to five times, with a
+500-millisecond delay. A missing required field or an inconsistent receipt
+fails the block attempt. Failed transaction execution does not remove its fees.
+
+Deploy the Blobscan database migration and compatible ingestion API before
+this indexer version. Historical records can be updated with the monorepo's
+RPC backfill command without downloading blobs again.
