@@ -185,27 +185,61 @@ struct Harness {
     processor: SlotsProcessor,
     indexed: Arc<Mutex<Vec<Vec<IndexedBlob>>>>,
     provider_asserter: Asserter,
+    payloads: Arc<Mutex<Vec<Value>>>,
+}
+
+fn receipt_json(tx: &Value, block: &Value) -> Value {
+    json!({
+        "transactionHash": tx["hash"],
+        "blockHash": block["hash"],
+        "blockNumber": block["number"],
+        "gasUsed": "0x5208",
+        "effectiveGasPrice": tx["gasPrice"],
+        "status": "0x1",
+    })
 }
 
 fn harness(beacon: MockCommonBeaconClient, execution_responses: Vec<Value>) -> Harness {
+    let mut responses = vec![];
+    for block in execution_responses {
+        responses.push(block.clone());
+        if let Some(txs) = block["transactions"].as_array() {
+            responses.extend(txs.iter().map(|tx| receipt_json(tx, &block)));
+        }
+    }
+    harness_with_receipts(beacon, responses)
+}
+
+fn harness_with_receipts(
+    beacon: MockCommonBeaconClient,
+    execution_responses: Vec<Value>,
+) -> Harness {
     let indexed = Arc::new(Mutex::new(vec![]));
     let sink = indexed.clone();
     let mut blobscan = MockCommonBlobscanClient::new();
 
-    blobscan.expect_index().returning(move |_, _, blobs| {
-        sink.lock().unwrap().push(
-            blobs
-                .iter()
-                .map(|b| IndexedBlob {
-                    commitment: B256::from_slice(&b.commitment.as_slice()[..32]),
-                    proof: b.proof,
-                    index: b.index,
-                })
-                .collect(),
-        );
+    let payloads = Arc::new(Mutex::new(vec![]));
+    let payload_sink = payloads.clone();
+    blobscan
+        .expect_index()
+        .returning(move |block, transactions, blobs| {
+            payload_sink
+                .lock()
+                .unwrap()
+                .push(json!({"block": block, "transactions": transactions}));
+            sink.lock().unwrap().push(
+                blobs
+                    .iter()
+                    .map(|b| IndexedBlob {
+                        commitment: B256::from_slice(&b.commitment.as_slice()[..32]),
+                        proof: b.proof,
+                        index: b.index,
+                    })
+                    .collect(),
+            );
 
-        ready(Ok(()))
-    });
+            ready(Ok(()))
+        });
 
     let provider_asserter = Asserter::new();
 
@@ -235,6 +269,7 @@ fn harness(beacon: MockCommonBeaconClient, execution_responses: Vec<Value>) -> H
         processor: SlotsProcessor::new(Box::new(context), None),
         indexed,
         provider_asserter,
+        payloads,
     }
 }
 
@@ -266,6 +301,15 @@ async fn gloas_block_indexes_the_payload_of_its_full_parent() {
 
     assert_eq!(indexed.len(), 1, "the block must be indexed exactly once");
     assert_eq!(indexed[0].len(), 2);
+    let payloads = h.payloads.lock().unwrap();
+    assert_eq!(payloads[0]["block"]["slot"], SLOT);
+    assert_eq!(payloads[0]["block"]["baseFeePerGas"], "0x10");
+    for tx in payloads[0]["transactions"].as_array().unwrap() {
+        assert_eq!(tx["input"], "0x");
+        assert_eq!(tx["gasUsed"], "0x5208");
+        assert_eq!(tx["executionStatus"], "success");
+        assert!(tx["effectiveGasPrice"].is_string());
+    }
 
     for (i, indexed_blob) in indexed[0].iter().enumerate() {
         assert_eq!(indexed_blob.proof, proof_for(&blobs[i], &commitments[i]));
@@ -1025,4 +1069,115 @@ async fn no_route_or_block_id_has_blobs_fails_after_retrying_all() {
 
     assert!(format!("{err:?}").contains("Blobs not found"), "{err:?}");
     assert!(h.indexed.lock().unwrap().is_empty());
+}
+
+fn fee_harness(receipt_changes: impl FnOnce(&mut Value), null_attempts: usize) -> Harness {
+    let raw = vec![blob(42)];
+    let commitments: Vec<_> = raw.iter().map(commitment_of).collect();
+    let mut beacon = MockCommonBeaconClient::new();
+    expect_blocks(
+        &mut beacon,
+        vec![(CHILD_ROOT, pre_gloas_block(commitments.clone()))],
+    );
+    beacon
+        .expect_get_blobs()
+        .returning(move |_| ready(Ok(Some(raw.clone()))));
+    let mut block = execution_block_json(&commitments);
+    block["transactions"].as_array_mut().unwrap().truncate(1);
+    block["transactions"][0]["input"] = json!("0x001234");
+    let mut receipt = receipt_json(&block["transactions"][0], &block);
+    receipt_changes(&mut receipt);
+    let mut responses = vec![block];
+    responses.extend(vec![Value::Null; null_attempts]);
+    responses.push(receipt);
+    harness_with_receipts(beacon, responses)
+}
+
+#[tokio::test(start_paused = true)]
+async fn indexes_receipt_fees_and_calldata_even_when_execution_fails() {
+    let h = fee_harness(
+        |r| {
+            r["status"] = json!("0x0");
+            r["effectiveGasPrice"] = json!("0x20");
+        },
+        0,
+    );
+    h.processor.index_block(CHILD_ROOT).await.unwrap();
+    let payloads = h.payloads.lock().unwrap();
+    let payload = &payloads[0];
+    assert_eq!(payload["block"]["baseFeePerGas"], "0x10");
+    let tx = &payload["transactions"][0];
+    assert_eq!(tx["gasUsed"], "0x5208");
+    assert_eq!(tx["effectiveGasPrice"], "0x20");
+    assert_eq!(tx["input"], "0x001234");
+    assert_eq!(tx["executionStatus"], "failed");
+    assert_ne!(tx["effectiveGasPrice"], tx["gasPrice"]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn retries_a_receipt_that_is_not_yet_available() {
+    let h = fee_harness(|_| {}, RETRY_MAX_ATTEMPTS as usize - 1);
+    h.processor.index_block(CHILD_ROOT).await.unwrap();
+    assert_eq!(h.payloads.lock().unwrap().len(), 1);
+    assert!(h.provider_asserter.read_q().is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn missing_receipt_prevents_indexing() {
+    let h = fee_harness(|_| {}, RETRY_MAX_ATTEMPTS as usize);
+    let err = h.processor.index_block(CHILD_ROOT).await.unwrap_err();
+    assert!(format!("{err:?}").contains("Receipt for transaction"));
+    assert!(h.payloads.lock().unwrap().is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn rejects_receipts_from_another_transaction_or_block() {
+    for field in ["transactionHash", "blockHash", "blockNumber"] {
+        let h = fee_harness(
+            |r| {
+                r[field] = if field == "blockNumber" {
+                    json!("0x1")
+                } else {
+                    json!(B256::ZERO)
+                };
+            },
+            0,
+        );
+        let err = h.processor.index_block(CHILD_ROOT).await.unwrap_err();
+        assert!(
+            format!("{err:?}").contains("Receipt does not match"),
+            "{err:?}"
+        );
+        assert!(h.payloads.lock().unwrap().is_empty());
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn missing_receipt_price_is_not_treated_as_zero() {
+    let h = fee_harness(
+        |r| {
+            r.as_object_mut().unwrap().remove("effectiveGasPrice");
+        },
+        0,
+    );
+    assert!(h.processor.index_block(CHILD_ROOT).await.is_err());
+    assert!(h.payloads.lock().unwrap().is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn missing_or_invalid_receipt_status_prevents_indexing() {
+    for status in [None, Some(json!("0x2")), Some(Value::Null)] {
+        let h = fee_harness(
+            |r| {
+                if let Some(status) = status {
+                    r["status"] = status;
+                } else {
+                    r.as_object_mut().unwrap().remove("status");
+                }
+            },
+            0,
+        );
+        assert!(h.processor.index_block(CHILD_ROOT).await.is_err());
+        assert!(h.payloads.lock().unwrap().is_empty());
+    }
 }

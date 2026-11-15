@@ -16,6 +16,7 @@ use alloy::{
     primitives::B256,
 };
 use anyhow::{anyhow, Context as AnyhowContext, Result};
+use futures::{stream, StreamExt, TryStreamExt};
 
 use crate::{
     clients::beacon::types::{Block as BeaconBlock, BlockExecutionPayload, BlockHeader, BlockId},
@@ -25,7 +26,9 @@ use tracing::{debug, info, warn, Instrument};
 
 use crate::{
     clients::{
-        blobscan::types::{Blob, BlobscanBlock, Block, Transaction as BlobscanTransaction},
+        blobscan::types::{
+            Blob, BlobscanBlock, Block, ExecutionReceipt, Transaction as BlobscanTransaction,
+        },
         common::ClientError,
     },
     context::CommonContext,
@@ -41,6 +44,8 @@ mod tests;
 const MAX_ALLOWED_REORG_DEPTH: u32 = 100;
 
 const RETRY_MAX_ATTEMPTS: u32 = 5;
+const RECEIPT_CONCURRENCY: usize = 4;
+const RECEIPT_TIMEOUT: Duration = Duration::from_secs(16);
 const RETRY_DELAY: Duration = Duration::from_millis(500);
 
 /// Whether the beacon node serves `/eth/v1/beacon/blobs` (the default) or only
@@ -303,10 +308,38 @@ impl SlotsProcessor {
 
         // Create entities to be indexed
         let block_entity = Block::try_from((&execution_block, slot))?;
-        let tx_entities = blob_txs
+        let receipt_futures = blob_txs
             .iter()
-            .map(|tx| BlobscanTransaction::try_from((*tx, &execution_block)))
-            .collect::<Result<Vec<BlobscanTransaction>>>()?;
+            .map(|tx| {
+                let execution_block = &execution_block;
+                async move {
+                    let hash = *tx.inner.hash();
+                    let receipt = retry_on_none(
+                        || async {
+                            tokio::time::timeout(
+                                RECEIPT_TIMEOUT,
+                                provider.client().request::<_, Option<ExecutionReceipt>>(
+                                    "eth_getTransactionReceipt",
+                                    (hash,),
+                                ),
+                            )
+                            .await
+                            .context("Receipt request timed out")?
+                            .map_err(anyhow::Error::from)
+                        },
+                        RETRY_MAX_ATTEMPTS,
+                        RETRY_DELAY,
+                    )
+                    .await?
+                    .with_context(|| format!("Receipt for transaction {hash} not found"))?;
+                    BlobscanTransaction::try_from((*tx, execution_block, &receipt))
+                }
+            })
+            .collect::<Vec<_>>();
+        let tx_entities = stream::iter(receipt_futures)
+            .buffered(RECEIPT_CONCURRENCY)
+            .try_collect::<Vec<_>>()
+            .await?;
 
         // Blobscan stores and serves the KZG proof of each blob, but `/eth/v1/beacon/blobs` does
         // not give it. Compute it here, after the block and transaction conversions, because
