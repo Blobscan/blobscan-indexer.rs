@@ -218,7 +218,7 @@ mod retry_tests {
     }
 
     #[tokio::test]
-    async fn retries_429_and_5xx_until_success() {
+    async fn retries_transient_statuses_until_success() {
         let (url, hits) = serve(vec![
             (429, r#"{"message":"slow down"}"#),
             (503, "<html>unavailable</html>"),
@@ -247,6 +247,26 @@ mod retry_tests {
 
         assert_eq!(hits.load(Ordering::SeqCst), 3);
         assert!(error.to_string().contains("502"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn does_not_retry_a_500() {
+        let (url, hits) = serve(vec![(
+            500,
+            r#"{"code":500,"message":"Insufficient data columns to reconstruct blobs"}"#,
+        )])
+        .await;
+
+        let error = client(url, 4)
+            .get_blobs(BlockId::Slot(7))
+            .await
+            .unwrap_err();
+
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+        assert!(
+            error.to_string().contains("Insufficient data columns"),
+            "{error}"
+        );
     }
 
     #[tokio::test]
